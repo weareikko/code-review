@@ -18,7 +18,7 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest --run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prepublishOnly": "npm test && npm run build"
+    "prepublishOnly": "npm run typecheck && npm test && npm run build && npm pack --dry-run"
   },
   "bundledDependencies": [
     "pi-reviewer"

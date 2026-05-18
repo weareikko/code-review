@@ -1,45 +1,109 @@
-export interface GitLabClientOptions { gitlabUrl: string; token: string; fetchImpl?: typeof fetch }
-export interface MergeRequest { source_branch: string; target_branch: string; source_project_id?: number; target_project_id?: number }
-export interface Version { base_commit_sha: string; start_commit_sha: string; head_commit_sha: string }
-export interface Discussion { notes: Array<{ body?: string }> }
+import type { GitLabAuthHeader } from './config.js';
+
+export interface GitLabClientOptions {
+  gitlabUrl: string;
+  token: string;
+  authHeader?: GitLabAuthHeader;
+  fetchImpl?: typeof fetch;
+}
+
+export interface MergeRequest {
+  source_branch: string;
+  target_branch: string;
+  source_project_id?: number;
+  target_project_id?: number;
+}
+
+export interface Version {
+  id?: number;
+  base_commit_sha: string;
+  start_commit_sha: string;
+  head_commit_sha: string;
+}
+
+export interface Discussion {
+  notes: Array<{ body?: string | null }>;
+}
 
 export class GitLabClient {
   private readonly base: string;
   private readonly token: string;
+  private readonly authHeader: GitLabAuthHeader;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: GitLabClientOptions) {
     this.base = options.gitlabUrl.replace(/\/$/, '');
     this.token = options.token;
+    this.authHeader = options.authHeader ?? 'PRIVATE-TOKEN';
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
-  url(path: string, query: Record<string, string | number> = {}): string {
+  url(path: string, query: Record<string, string | number | boolean | undefined> = {}): string {
     const url = new URL(`${this.base}/api/v4${path}`);
-    for (const [key, value] of Object.entries(query)) url.searchParams.set(key, String(value));
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined) url.searchParams.set(key, String(value));
+    }
     return url.toString();
   }
 
-  async request<T>(path: string, init: RequestInit = {}, query: Record<string, string | number> = {}): Promise<T> {
-    const response = await this.fetchImpl(this.url(path, query), {
-      ...init,
-      headers: { 'PRIVATE-TOKEN': this.token, 'Content-Type': 'application/json', ...(init.headers ?? {}) },
-    });
-    if (!response.ok) throw new Error(`GitLab API ${init.method ?? 'GET'} ${path} failed: ${response.status} ${await response.text()}`);
-    return response.json() as Promise<T>;
+  private headers(headers?: HeadersInit): HeadersInit {
+    return {
+      [this.authHeader]: this.token,
+      Accept: 'application/json',
+      ...(headers ?? {}),
+    };
   }
 
-  async paginate<T>(path: string, query: Record<string, string | number> = {}): Promise<T[]> {
+  async request<T>(
+    path: string,
+    init: RequestInit = {},
+    query: Record<string, string | number | boolean | undefined> = {},
+  ): Promise<T> {
+    const response = await this.fetchImpl(this.url(path, query), {
+      ...init,
+      headers: this.headers({ 'Content-Type': 'application/json', ...(init.headers ?? {}) }),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `GitLab API ${init.method ?? 'GET'} ${path} failed: ${response.status} ${response.statusText}\n${await response.text()}`,
+      );
+    }
+
+    if (response.status === 204) return undefined as T;
+    const text = await response.text();
+    if (!text) return undefined as T;
+    return JSON.parse(text) as T;
+  }
+
+  async paginate<T>(path: string, query: Record<string, string | number | boolean | undefined> = {}): Promise<T[]> {
     const items: T[] = [];
     let page = 1;
+
     while (true) {
-      const response = await this.fetchImpl(this.url(path, { ...query, per_page: 100, page }), { headers: { 'PRIVATE-TOKEN': this.token } });
-      if (!response.ok) throw new Error(`GitLab API GET ${path} failed: ${response.status} ${await response.text()}`);
-      items.push(...await response.json() as T[]);
-      const next = response.headers.get('x-next-page');
+      const response = await this.fetchImpl(this.url(path, { ...query, per_page: 100, page }), {
+        headers: this.headers(),
+      });
+
+      if (!response.ok) {
+        throw new Error(`GitLab API GET ${path} failed: ${response.status} ${response.statusText}\n${await response.text()}`);
+      }
+
+      const body = (await response.json()) as unknown;
+      if (!Array.isArray(body)) {
+        throw new Error(`GitLab API GET ${path} returned a non-array paginated response`);
+      }
+      items.push(...(body as T[]));
+
+      const next = response.headers.get('x-next-page')?.trim();
       if (!next) break;
-      page = Number(next);
+      const nextPage = Number(next);
+      if (!Number.isInteger(nextPage) || nextPage <= page) {
+        throw new Error(`GitLab API GET ${path} returned invalid x-next-page header: ${next}`);
+      }
+      page = nextPage;
     }
+
     return items;
   }
 
@@ -48,7 +112,9 @@ export class GitLabClient {
   }
 
   async getLatestVersion(project: string, mr: string): Promise<Version> {
-    const versions = await this.paginate<Version>(`/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/versions`);
+    const versions = await this.paginate<Version>(
+      `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/versions`,
+    );
     if (!versions[0]) throw new Error('No GitLab MR version found. Ensure the merge request has a diff version.');
     return versions[0];
   }
@@ -58,6 +124,9 @@ export class GitLabClient {
   }
 
   postDiscussion(project: string, mr: string, payload: unknown): Promise<unknown> {
-    return this.request(`/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/discussions`, { method: 'POST', body: JSON.stringify(payload) });
+    return this.request(
+      `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/discussions`,
+      { method: 'POST', body: JSON.stringify(payload) },
+    );
   }
 }

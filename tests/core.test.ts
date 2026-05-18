@@ -6,7 +6,12 @@ import { appendFingerprintMarkers, buildPayload, extractDiffHunkContext, extract
 describe('config', () => {
   it('uses GitLab CI env defaults', () => {
     const cfg = resolveConfig([], { CI_PROJECT_ID: '1', CI_MERGE_REQUEST_IID: '2', CI_SERVER_HOST: 'gitlab.example.com', GITLAB_TOKEN: 'tok', PI_API_KEY: 'key' });
-    expect(cfg).toMatchObject({ project: '1', mr: '2', gitlabUrl: 'https://gitlab.example.com', gitlabToken: 'tok', model: 'anthropic/claude-sonnet-4-5', minSeverity: 'info', reviewFile: 'pi-review.md', output: 'review-comments.json' });
+    expect(cfg).toMatchObject({ project: '1', mr: '2', gitlabUrl: 'https://gitlab.example.com', gitlabToken: 'tok', gitlabAuthHeader: 'PRIVATE-TOKEN', model: 'anthropic/claude-sonnet-4-5', minSeverity: 'info', reviewFile: 'pi-review.md', output: 'review-comments.json' });
+  });
+
+  it('uses JOB-TOKEN auth for CI_JOB_TOKEN', () => {
+    const cfg = resolveConfig([], { CI_PROJECT_ID: '1', CI_MERGE_REQUEST_IID: '2', CI_SERVER_URL: 'https://gitlab.example.com', CI_JOB_TOKEN: 'job', PI_API_KEY: 'key' });
+    expect(cfg).toMatchObject({ gitlabToken: 'job', gitlabAuthHeader: 'JOB-TOKEN' });
   });
 });
 
@@ -20,9 +25,10 @@ describe('GitLabClient', () => {
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 1 }]), { headers: { 'x-next-page': '2' } }))
       .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 2 }]), { headers: { 'x-next-page': '' } }));
-    const client = new GitLabClient({ gitlabUrl: 'https://gitlab.example.com', token: 't', fetchImpl });
+    const client = new GitLabClient({ gitlabUrl: 'https://gitlab.example.com', token: 't', authHeader: 'JOB-TOKEN', fetchImpl });
     await expect(client.paginate('/items')).resolves.toEqual([{ id: 1 }, { id: 2 }]);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls[0][1].headers).toMatchObject({ 'JOB-TOKEN': 't' });
   });
 });
 
@@ -30,14 +36,14 @@ describe('review parsing and deterministic helpers', () => {
   it('parses pi-review markdown inline comments', () => {
     const md = 'Review\n== Inline Comments ==\n🟡 src/a.ts:3 (RIGHT)\nFix this\nacross lines\n\n🔴 old.ts:1 (LEFT)\nRemove it';
     expect(parseReviewMarkdown(md)).toEqual([
-      { file: 'src/a.ts', line: 3, side: 'RIGHT', severity: 'warning', body: 'Fix this\nacross lines' },
-      { file: 'old.ts', line: 1, side: 'LEFT', severity: 'error', body: 'Remove it' },
+      { file: 'src/a.ts', line: 3, side: 'RIGHT', severity: 'warn', body: 'Fix this\nacross lines' },
+      { file: 'old.ts', line: 1, side: 'LEFT', severity: 'critical', body: 'Remove it' },
     ]);
   });
 
   it('also parses JSON comment blocks', () => {
     const md = '```json\n{"comments":[{"file":"src/a.ts","line":3,"side":"RIGHT","body":"Fix this"}]}\n```';
-    expect(parseReviewMarkdown(md)).toEqual([{ file: 'src/a.ts', line: 3, side: 'RIGHT', body: 'Fix this' }]);
+    expect(parseReviewMarkdown(md)).toEqual([{ file: 'src/a.ts', line: 3, side: 'RIGHT', severity: 'info', body: 'Fix this' }]);
   });
 
   it('extracts diff hunk context', () => {

@@ -1,2 +1,7 @@
 #!/usr/bin/env node
-import '../dist/cli.js';
+import { main } from '../dist/cli.js';
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+});

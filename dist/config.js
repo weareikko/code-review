@@ -1,51 +1,98 @@
+const BOOLEAN_FLAGS = new Set(['dry-run', 'no-post', 'help', 'version']);
 export function parseArgs(argv) {
     const args = {};
-    for (let i = 0; i < argv.length; i++) {
+    for (let i = 0; i < argv.length; i += 1) {
         const arg = argv[i];
+        if (arg === '-h') {
+            args.help = true;
+            continue;
+        }
+        if (arg === '-v') {
+            args.version = true;
+            continue;
+        }
         if (!arg.startsWith('--'))
             continue;
-        const [rawKey, inline] = arg.slice(2).split('=', 2);
+        const [rawKey, inlineValue] = arg.slice(2).split('=', 2);
+        if (!rawKey)
+            continue;
         const key = rawKey.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-        if (inline !== undefined)
-            args[key] = inline;
-        else if (rawKey === 'dry-run' || rawKey === 'no-post')
+        if (inlineValue !== undefined) {
+            args[key] = inlineValue;
+        }
+        else if (BOOLEAN_FLAGS.has(rawKey)) {
             args[key] = true;
-        else
-            args[key] = argv[++i];
+        }
+        else {
+            const next = argv[i + 1];
+            if (!next || next.startsWith('--')) {
+                throw new Error(`Missing value for --${rawKey}`);
+            }
+            args[key] = next;
+            i += 1;
+        }
     }
     return args;
 }
 function first(...values) {
-    return values.find((value) => value && value.length > 0);
+    return values.find((value) => typeof value === 'string' && value.length > 0);
 }
-export function helpText() {
-    return `Usage: gitlab-review [options]\n\nRuns pi-reviewer and posts deduplicated GitLab MR discussions.\n\nOptions:\n  --project <id>        Defaults to CI_PROJECT_ID\n  --mr <iid>           Defaults to CI_MERGE_REQUEST_IID\n  --gitlab-url <url>   Defaults to CI_SERVER_URL or https://$CI_SERVER_HOST\n  --gitlab-token <tok> Defaults to GITLAB_TOKEN, GLAB_CLI_TOKEN, CI_JOB_TOKEN, GITLAB_PRIVATE_TOKEN\n  --model <model>      Defaults to PI_REVIEWER_MODEL or anthropic/claude-sonnet-4-5\n  --min-severity <s>   info, warning, or error\n  --api-key <key>      Defaults to PI_API_KEY, ANTHROPIC_API_KEY, or CLAUDE_API_KEY\n  --review-file <path> Defaults to pi-review.md\n  --output <path>      Defaults to review-comments.json\n  --dry-run            Write artifacts but do not post\n  --no-post            Write artifacts but do not post\n  --help               Show this help`;
+function toBoolean(value) {
+    return value === true || value === 'true' || value === '1';
+}
+function resolveMinSeverity(value) {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    return normalized;
+}
+function resolveGitLabToken(args, env) {
+    if (typeof args.gitlabToken === 'string' && args.gitlabToken.length > 0) {
+        return { token: args.gitlabToken, header: 'PRIVATE-TOKEN' };
+    }
+    if (env.GITLAB_TOKEN)
+        return { token: env.GITLAB_TOKEN, header: 'PRIVATE-TOKEN' };
+    if (env.GLAB_CLI_TOKEN)
+        return { token: env.GLAB_CLI_TOKEN, header: 'PRIVATE-TOKEN' };
+    if (env.CI_JOB_TOKEN)
+        return { token: env.CI_JOB_TOKEN, header: 'JOB-TOKEN' };
+    if (env.GITLAB_PRIVATE_TOKEN)
+        return { token: env.GITLAB_PRIVATE_TOKEN, header: 'PRIVATE-TOKEN' };
+    return { token: '', header: 'PRIVATE-TOKEN' };
 }
 export function resolveConfig(argv = process.argv.slice(2), env = process.env) {
     const args = parseArgs(argv);
-    const gitlabUrl = String(args.gitlabUrl ?? first(env.CI_SERVER_URL, env.CI_SERVER_HOST ? `https://${env.CI_SERVER_HOST}` : undefined) ?? '');
+    const gitlabUrl = String(args.gitlabUrl ?? first(env.CI_SERVER_URL, env.CI_SERVER_HOST ? `https://${env.CI_SERVER_HOST}` : undefined) ?? '').replace(/\/$/, '');
+    const token = resolveGitLabToken(args, env);
     return {
         project: String(args.project ?? env.CI_PROJECT_ID ?? ''),
         mr: String(args.mr ?? env.CI_MERGE_REQUEST_IID ?? ''),
-        gitlabUrl: gitlabUrl.replace(/\/$/, ''),
-        gitlabToken: String(args.gitlabToken ?? first(env.GITLAB_TOKEN, env.GLAB_CLI_TOKEN, env.CI_JOB_TOKEN, env.GITLAB_PRIVATE_TOKEN) ?? ''),
+        gitlabUrl,
+        gitlabToken: token.token,
+        gitlabAuthHeader: token.header,
         model: String(args.model ?? env.PI_REVIEWER_MODEL ?? 'anthropic/claude-sonnet-4-5'),
-        minSeverity: String(args.minSeverity ?? env.PI_REVIEWER_MIN_SEVERITY ?? 'info'),
+        minSeverity: resolveMinSeverity(args.minSeverity ?? env.PI_REVIEWER_MIN_SEVERITY ?? 'info'),
         apiKey: String(args.apiKey ?? first(env.PI_API_KEY, env.ANTHROPIC_API_KEY, env.CLAUDE_API_KEY) ?? ''),
         reviewFile: String(args.reviewFile ?? 'pi-review.md'),
         output: String(args.output ?? 'review-comments.json'),
-        dryRun: Boolean(args.dryRun),
-        noPost: Boolean(args.noPost),
+        dryRun: toBoolean(args.dryRun),
+        noPost: toBoolean(args.noPost),
+        cwd: String(args.cwd ?? process.cwd()),
     };
 }
 export function validateConfig(config) {
     const missing = [
-        ['project', config.project], ['mr', config.mr], ['gitlab-url', config.gitlabUrl],
-        ['gitlab-token', config.gitlabToken], ['api-key', config.apiKey],
-    ].filter(([, value]) => !value).map(([name]) => `--${name}`);
-    if (missing.length)
+        ['project', config.project],
+        ['mr', config.mr],
+        ['gitlab-url', config.gitlabUrl],
+        ['gitlab-token', config.gitlabToken],
+        ['api-key', config.apiKey],
+    ]
+        .filter(([, value]) => !value)
+        .map(([name]) => `--${name}`);
+    if (missing.length > 0) {
         throw new Error(`Missing required configuration: ${missing.join(', ')}. Provide CLI flags or GitLab CI environment variables.`);
-    if (!['info', 'warning', 'error'].includes(config.minSeverity))
-        throw new Error('--min-severity must be one of: info, warning, error');
+    }
+    if (!['info', 'warn', 'critical'].includes(config.minSeverity)) {
+        throw new Error('--min-severity must be one of: info, warn, critical');
+    }
 }
 //# sourceMappingURL=config.js.map

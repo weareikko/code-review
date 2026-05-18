@@ -1,22 +1,112 @@
-import { execFile } from 'node:child_process';
+import { execFile, type ExecFileException } from 'node:child_process';
+import { unlink } from 'node:fs/promises';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
+
 const exec = promisify(execFile);
 
-export async function git(args: string[]): Promise<string> {
-  const { stdout } = await exec('git', args, { maxBuffer: 20 * 1024 * 1024 });
+export interface GitOptions {
+  cwd?: string;
+}
+
+export interface PrepareGitHistoryOptions extends GitOptions {
+  remote?: string;
+  codeQualityArtifacts?: string[];
+}
+
+const DEFAULT_CODEQUALITY_ARTIFACTS = [
+  'gl-code-quality-report.json',
+  'codequality.json',
+  'codeclimate.json',
+  'code-quality-report.json',
+];
+
+function gitErrorMessage(error: unknown): string {
+  const err = error as ExecFileException & { stderr?: string; stdout?: string };
+  return [err.message, err.stderr, err.stdout].filter(Boolean).join('\n').trim();
+}
+
+export async function git(args: string[], options: GitOptions = {}): Promise<string> {
+  const { stdout } = await exec('git', args, {
+    cwd: options.cwd,
+    maxBuffer: 50 * 1024 * 1024,
+  });
   return stdout;
 }
 
-export async function prepareGitHistory(source: string, target: string): Promise<void> {
-  await git(['fetch', '--no-tags', 'origin', source, target]).catch(() => undefined);
-  await git(['fetch', '--unshallow']).catch(() => undefined);
+function remoteRef(remote: string, branch: string): string {
+  return `refs/remotes/${remote}/${branch}`;
+}
+
+async function fetchBranch(remote: string, branch: string, options: GitOptions): Promise<void> {
+  await git(['fetch', '--no-tags', remote, `+refs/heads/${branch}:${remoteRef(remote, branch)}`], options);
+}
+
+async function isTracked(path: string, options: GitOptions): Promise<boolean> {
   try {
-    await git(['merge-base', `origin/${target}`, 'HEAD']);
-  } catch (error) {
-    throw new Error(`Unable to prepare git history for origin/${target}...HEAD. Set GIT_DEPTH: 0 or ensure source (${source}) and target (${target}) branches are fetchable. ${error instanceof Error ? error.message : ''}`);
+    await git(['ls-files', '--error-unmatch', '--', path], options);
+    return true;
+  } catch {
+    return false;
   }
 }
 
-export async function getMergeDiff(targetBranch: string): Promise<string> {
-  return git(['diff', `origin/${targetBranch}...HEAD`, '--unified=20']);
+export async function removeGeneratedCodeQualityArtifacts(
+  paths = DEFAULT_CODEQUALITY_ARTIFACTS,
+  options: GitOptions = {},
+): Promise<string[]> {
+  const removed: string[] = [];
+  for (const path of paths) {
+    if (await isTracked(path, options)) continue;
+    try {
+      await unlink(options.cwd ? join(options.cwd, path) : path);
+      removed.push(path);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') throw error;
+    }
+  }
+  return removed;
+}
+
+export async function prepareGitHistory(
+  sourceBranch: string,
+  targetBranch: string,
+  options: PrepareGitHistoryOptions = {},
+): Promise<void> {
+  const remote = options.remote ?? 'origin';
+
+  await removeGeneratedCodeQualityArtifacts(options.codeQualityArtifacts, options);
+
+  // Unshallow first when possible. Git exits non-zero in full clones; that is not actionable.
+  await git(['fetch', '--unshallow', '--no-tags', remote], options).catch(() => undefined);
+
+  const fetchErrors: string[] = [];
+  for (const branch of [targetBranch, sourceBranch]) {
+    try {
+      await fetchBranch(remote, branch, options);
+    } catch (error) {
+      fetchErrors.push(`${branch}: ${gitErrorMessage(error)}`);
+    }
+  }
+
+  if (fetchErrors.length === 2) {
+    throw new Error(`Unable to fetch MR source/target branches from ${remote}.\n${fetchErrors.join('\n')}`);
+  }
+
+  try {
+    await git(['merge-base', remoteRef(remote, targetBranch), 'HEAD'], options);
+  } catch (error) {
+    const fetchDetail = fetchErrors.length > 0 ? `\nFetch warnings:\n${fetchErrors.join('\n')}` : '';
+    throw new Error(
+      `Unable to prepare Git history for MR review: merge-base ${remoteRef(remote, targetBranch)} HEAD failed. ` +
+        `Set GIT_DEPTH: 0 or ensure ${remote}/${targetBranch} is fetchable.${fetchDetail}\n${gitErrorMessage(error)}`,
+    );
+  }
+}
+
+export async function getMergeDiff(targetBranch: string, options: GitOptions & { remote?: string; context?: number } = {}): Promise<string> {
+  const remote = options.remote ?? 'origin';
+  const context = options.context ?? 20;
+  return git(['diff', `${remoteRef(remote, targetBranch)}...HEAD`, `--unified=${context}`, '--'], options);
 }
