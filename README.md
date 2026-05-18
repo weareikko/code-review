@@ -59,8 +59,7 @@ review:
   variables:
     GIT_DEPTH: '0'
   script:
-    - npm ci
-    - npx @ikko-dev/gitlab-review --min-severity warn
+    - npx @studiometa/gitlab-review
   artifacts:
     when: always
     paths:
@@ -101,6 +100,7 @@ The CLI auto-resolves values from CI variables and common token/key names.
 | `--min-severity <level>` | `info`, `warn`, `critical`          | `PI_REVIEWER_MIN_SEVERITY` or `info`                                     |
 | `--review-file <path>`   | Raw `pi-reviewer` output file       | `pi-review.md`                                                           |
 | `--output <path>`        | Generated payload artifact file     | `review-comments.json`                                                   |
+| `--cwd <path>`           | Working directory                   | `process.cwd()`                                                          |
 | `--dry-run`              | Generate artifacts and skip posting | `false`                                                                  |
 | `--no-post`              | Same behavior as `--dry-run`        | `false`                                                                  |
 | `--help`, `-h`           | Show help                           | -                                                                        |

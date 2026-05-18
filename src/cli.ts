@@ -30,6 +30,7 @@ Options:
   --min-severity <level>  info, warn, or critical (default: info)
   --review-file <path>    Raw pi-reviewer output file (default: pi-review.md)
   --output <path>         Generated payload artifact (default: review-comments.json)
+  --cwd <path>            Working directory (default: process.cwd())
   --dry-run               Generate artifacts and skip posting
   --no-post               Generate artifacts and skip posting
   --help, -h              Show help
