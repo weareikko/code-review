@@ -18,8 +18,8 @@ import {
 import { ConfigError, GitLabApiError, ReviewerError, formatError } from '../src/errors.js';
 import { getMergeDiffArguments } from '../src/git.js';
 import { GitLabClient } from '../src/gitlab.js';
-import { postGeneratedComments } from '../src/posting.js';
 import { filterDiff, runReview, type AgentLike, type ReviewUsage } from '../src/pi-reviewer.js';
+import { postGeneratedComments } from '../src/posting.js';
 import {
   appendFingerprintMarkers,
   buildGeneratedComments,
@@ -242,9 +242,7 @@ describe('GitLab pagination with mocked fetch', () => {
 
 describe('GitLab draft notes endpoints', () => {
   it('GETs /user with auth header', async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValue(new Response(JSON.stringify({ id: 42 })));
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 42 })));
     const client = new GitLabClient({
       gitlabUrl: 'https://gitlab.example.com',
       token: 't',
@@ -260,13 +258,11 @@ describe('GitLab draft notes endpoints', () => {
   });
 
   it('paginates draft notes with encoded project and MR IID', async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(JSON.stringify([{ id: 1, author_id: 7, note: 'a' }]), {
-          headers: { 'x-next-page': '' },
-        }),
-      );
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify([{ id: 1, author_id: 7, note: 'a' }]), {
+        headers: { 'x-next-page': '' },
+      }),
+    );
     const client = new GitLabClient({
       gitlabUrl: 'https://gitlab.example.com',
       token: 't',
@@ -305,9 +301,7 @@ describe('GitLab draft notes endpoints', () => {
   });
 
   it('DELETEs a draft note by id and tolerates 204 responses', async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValue(new Response(null, { status: 204 }));
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     const client = new GitLabClient({
       gitlabUrl: 'https://gitlab.example.com',
       token: 't',
@@ -322,9 +316,7 @@ describe('GitLab draft notes endpoints', () => {
   });
 
   it('POSTs to bulk_publish and tolerates 204 responses', async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValue(new Response(null, { status: 204 }));
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     const client = new GitLabClient({
       gitlabUrl: 'https://gitlab.example.com',
       token: 't',
@@ -381,9 +373,7 @@ describe('postGeneratedComments strategies', () => {
   it('direct mode posts one discussion per fresh comment', async () => {
     const fetchImpl = vi
       .fn()
-      .mockImplementation(() =>
-        Promise.resolve(new Response(JSON.stringify({ id: 'd1' }))),
-      );
+      .mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ id: 'd1' }))));
     const result = await postGeneratedComments(
       clientWith(fetchImpl),
       'p',
@@ -450,8 +440,9 @@ describe('postGeneratedComments strategies', () => {
     const calls = fetchImpl.mock.calls.map(
       (call) => `${call[1]?.method ?? 'GET'} ${call[0].replace(/.*\/api\/v4/, '')}`,
     );
-    expect(calls.filter((c) => c.startsWith('POST') && c.includes('/draft_notes/bulk_publish')))
-      .toHaveLength(1);
+    expect(
+      calls.filter((c) => c.startsWith('POST') && c.includes('/draft_notes/bulk_publish')),
+    ).toHaveLength(1);
     expect(
       calls.filter(
         (c) => c.startsWith('POST') && c.includes('/draft_notes') && !c.includes('bulk_publish'),
@@ -477,13 +468,7 @@ describe('postGeneratedComments strategies', () => {
       'POST /draft_notes': () => new Response(JSON.stringify({ id: 100, author_id: 1, note: 'x' })),
     });
 
-    const result = await postGeneratedComments(
-      clientWith(fetchImpl),
-      'p',
-      '1',
-      [draftA],
-      'draft',
-    );
+    const result = await postGeneratedComments(clientWith(fetchImpl), 'p', '1', [draftA], 'draft');
 
     expect(result.drafts).toMatchObject({ abandoned: 1, created: 1, published: 1 });
     const deletes = fetchImpl.mock.calls.filter((c) => c[1]?.method === 'DELETE');
@@ -512,8 +497,7 @@ describe('postGeneratedComments strategies', () => {
             {
               notes: [
                 {
-                  body:
-                    'collision <!-- pi-reviewer:fingerprint-primary:aaaa --> <!-- pi-reviewer:fingerprint-secondary:aabb -->',
+                  body: 'collision <!-- pi-reviewer:fingerprint-primary:aaaa --> <!-- pi-reviewer:fingerprint-secondary:aabb -->',
                 },
               ],
             },

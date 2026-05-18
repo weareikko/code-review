@@ -97,7 +97,7 @@ async function createDraftsConcurrently(
   mr: string,
   fresh: GeneratedComment[],
 ): Promise<DraftRecord[]> {
-  const records = new Array<DraftRecord>(fresh.length);
+  const records: DraftRecord[] = Array.from({ length: fresh.length });
   let next = 0;
 
   async function worker(): Promise<void> {
