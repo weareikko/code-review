@@ -7,13 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-05-18
+
 ### Added
 
-- Own the review pipeline: drive `@earendil-works/pi-agent-core` directly so token usage and cost are captured per run. Surface a `Review usage: ... in / ... out tokens — $... (model)` line at the end of the CLI run and write a sibling `review-usage.json` artifact with input/output/cacheRead/cacheWrite token and cost breakdowns.
+- Own the review pipeline: drive `@earendil-works/pi-agent-core` directly so token usage and cost are captured per run. Surface a `Review usage: ... in / ... out tokens — $... (model)` line at the end of the CLI run and write a sibling `review-usage.json` artifact with input/output/cacheRead/cacheWrite token and cost breakdowns ([#11]).
 
 ### Changed
 
-- Replace the bundled `pi-reviewer` dependency with direct pinned dependencies on `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and `@earendil-works/pi-coding-agent`. Conventions loading (`AGENTS.md` / `CLAUDE.md` / `REVIEW.md`), prompt building, and diff noise filtering now live in this package.
+- Replace the bundled `pi-reviewer` dependency with direct pinned dependencies on `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and `@earendil-works/pi-coding-agent`. Conventions loading (`AGENTS.md` / `CLAUDE.md` / `REVIEW.md`), prompt building, and diff noise filtering now live in this package ([#11]).
 
 ## [0.1.1] - 2026-05-18
 
@@ -46,8 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.1...HEAD
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.2...HEAD
+[0.1.2]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.2
 [0.1.1]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.1
+[#11]: https://github.com/ikko-dev/gitlab-review/pull/11
 [0.1.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.0
 [a6166f5]: https://github.com/ikko-dev/gitlab-review/commit/a6166f5
 [310dccf]: https://github.com/ikko-dev/gitlab-review/commit/310dccf
