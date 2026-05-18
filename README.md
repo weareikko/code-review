@@ -72,40 +72,44 @@ review:
 
 The CLI auto-resolves values from CI variables and common token/key names.
 
-| Variable                   | Purpose                                                  |
-| -------------------------- | -------------------------------------------------------- |
-| `CI_PROJECT_ID`            | Default for `--project`                                  |
-| `CI_MERGE_REQUEST_IID`     | Default for `--mr`                                       |
-| `CI_SERVER_URL`            | Default for `--gitlab-url`                               |
-| `CI_SERVER_HOST`           | Fallback for `--gitlab-url` as `https://$CI_SERVER_HOST` |
-| `GITLAB_TOKEN`             | Preferred GitLab API token (`PRIVATE-TOKEN`)             |
-| `GLAB_CLI_TOKEN`           | Fallback GitLab API token (`PRIVATE-TOKEN`)              |
-| `CI_JOB_TOKEN`             | Fallback token (`JOB-TOKEN`)                             |
-| `GITLAB_PRIVATE_TOKEN`     | Fallback token (`PRIVATE-TOKEN`)                         |
-| `PI_API_KEY`               | Preferred AI API key                                     |
-| `ANTHROPIC_API_KEY`        | Fallback AI API key                                      |
-| `CLAUDE_API_KEY`           | Fallback AI API key                                      |
-| `PI_REVIEWER_MODEL`        | Default for `--model`                                    |
-| `PI_REVIEWER_MIN_SEVERITY` | Default for `--min-severity`                             |
+| Variable                     | Purpose                                                  |
+| ---------------------------- | -------------------------------------------------------- |
+| `CI_PROJECT_ID`              | Default for `--project`                                  |
+| `CI_MERGE_REQUEST_IID`       | Default for `--mr`                                       |
+| `CI_SERVER_URL`              | Default for `--gitlab-url`                               |
+| `CI_SERVER_HOST`             | Fallback for `--gitlab-url` as `https://$CI_SERVER_HOST` |
+| `GITLAB_TOKEN`               | Preferred GitLab API token (`PRIVATE-TOKEN`)             |
+| `GLAB_CLI_TOKEN`             | Fallback GitLab API token (`PRIVATE-TOKEN`)              |
+| `CI_JOB_TOKEN`               | Fallback token (`JOB-TOKEN`)                             |
+| `GITLAB_PRIVATE_TOKEN`       | Fallback token (`PRIVATE-TOKEN`)                         |
+| `PI_API_KEY`                 | Preferred AI API key                                     |
+| `ANTHROPIC_API_KEY`          | Fallback AI API key                                      |
+| `CLAUDE_API_KEY`             | Fallback AI API key                                      |
+| `PI_REVIEWER_MODEL`          | Default for `--model`                                    |
+| `PI_REVIEWER_MIN_SEVERITY`   | Default for `--min-severity`                             |
+| `PI_REVIEWER_THINKING_LEVEL` | Default for `--thinking`                                 |
 
 ## Flags
 
-| Flag                     | Description                         | Default                                                                  |
-| ------------------------ | ----------------------------------- | ------------------------------------------------------------------------ |
-| `--project <id>`         | GitLab project ID/path              | `CI_PROJECT_ID`                                                          |
-| `--mr <iid>`             | Merge request IID                   | `CI_MERGE_REQUEST_IID`                                                   |
-| `--gitlab-url <url>`     | GitLab URL                          | `CI_SERVER_URL` or `https://${CI_SERVER_HOST}`                           |
-| `--gitlab-token <token>` | GitLab token                        | `GITLAB_TOKEN`, `GLAB_CLI_TOKEN`, `CI_JOB_TOKEN`, `GITLAB_PRIVATE_TOKEN` |
-| `--api-key <key>`        | API key passed to the review agent  | `PI_API_KEY`, `ANTHROPIC_API_KEY`, `CLAUDE_API_KEY`                      |
-| `--model <provider/id>`  | Model passed to the review agent    | `PI_REVIEWER_MODEL` or `anthropic/claude-sonnet-4-5`                     |
-| `--min-severity <level>` | `info`, `warn`, `critical`          | `PI_REVIEWER_MIN_SEVERITY` or `info`                                     |
-| `--review-file <path>`   | Raw `pi-reviewer` output file       | `pi-review.md`                                                           |
-| `--output <path>`        | Generated payload artifact file     | `review-comments.json`                                                   |
-| `--cwd <path>`           | Working directory                   | `process.cwd()`                                                          |
-| `--dry-run`              | Generate artifacts and skip posting | `false`                                                                  |
-| `--no-post`              | Same behavior as `--dry-run`        | `false`                                                                  |
-| `--help`, `-h`           | Show help                           | -                                                                        |
-| `--version`, `-v`        | Show version                        | -                                                                        |
+| Flag                     | Description                                        | Default                                                                  |
+| ------------------------ | -------------------------------------------------- | ------------------------------------------------------------------------ |
+| `--project <id>`         | GitLab project ID/path                             | `CI_PROJECT_ID`                                                          |
+| `--mr <iid>`             | Merge request IID                                  | `CI_MERGE_REQUEST_IID`                                                   |
+| `--gitlab-url <url>`     | GitLab URL                                         | `CI_SERVER_URL` or `https://${CI_SERVER_HOST}`                           |
+| `--gitlab-token <token>` | GitLab token                                       | `GITLAB_TOKEN`, `GLAB_CLI_TOKEN`, `CI_JOB_TOKEN`, `GITLAB_PRIVATE_TOKEN` |
+| `--api-key <key>`        | API key passed to the review agent                 | `PI_API_KEY`, `ANTHROPIC_API_KEY`, `CLAUDE_API_KEY`                      |
+| `--model <provider/id>`  | Model passed to the review agent                   | `PI_REVIEWER_MODEL` or `anthropic/claude-sonnet-4-5`                     |
+| `--min-severity <level>` | `info`, `warn`, `critical`                         | `PI_REVIEWER_MIN_SEVERITY` or `info`                                     |
+| `--thinking <level>`     | `off`, `minimal`, `low`, `medium`, `high`, `xhigh` | `PI_REVIEWER_THINKING_LEVEL` or `off`                                    |
+| `--review-file <path>`   | Raw `pi-reviewer` output file                      | `pi-review.md`                                                           |
+| `--output <path>`        | Generated payload artifact file                    | `review-comments.json`                                                   |
+| `--cwd <path>`           | Working directory                                  | `process.cwd()`                                                          |
+| `--dry-run`              | Generate artifacts and skip posting                | `false`                                                                  |
+| `--no-post`              | Same behavior as `--dry-run`                       | `false`                                                                  |
+| `--help`, `-h`           | Show help                                          | -                                                                        |
+| `--version`, `-v`        | Show version                                       | -                                                                        |
+
+`--thinking` controls extended thinking on the underlying agent. Thinking tokens are billed at the model's output token rate, so higher levels cost more — the `Review usage:` line and `review-usage.json` reflect that cost.
 
 ## Artifacts
 

@@ -45,6 +45,8 @@ Options:
   --api-key <key>         pi/AI API key (default: PI_API_KEY, ANTHROPIC_API_KEY, CLAUDE_API_KEY)
   --model <provider/id>   pi-reviewer model (default: anthropic/claude-sonnet-4-5)
   --min-severity <level>  info, warn, or critical (default: info)
+  --thinking <level>      off, minimal, low, medium, high, or xhigh (default: off).
+                          Higher levels add billable thinking tokens at the model output rate.
   --review-file <path>    Raw pi-reviewer output file (default: pi-review.md)
   --output <path>         Generated payload artifact (default: review-comments.json)
   --cwd <path>            Working directory (default: process.cwd())

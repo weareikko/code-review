@@ -13,6 +13,7 @@ import {
   validateConfig,
   type Config,
   type Severity,
+  type ThinkingLevel,
 } from '../src/config.js';
 import { ConfigError, GitLabApiError, ReviewerError, formatError } from '../src/errors.js';
 import { getMergeDiffArguments } from '../src/git.js';
@@ -52,6 +53,7 @@ describe('config env defaults', () => {
       gitlabAuthHeader: 'PRIVATE-TOKEN',
       model: 'anthropic/claude-sonnet-4-5',
       minSeverity: 'info',
+      thinkingLevel: 'off',
       reviewFile: 'pi-review.md',
       output: 'review-comments.json',
       dryRun: false,
@@ -244,6 +246,7 @@ describe('runReview pipeline', () => {
     gitlabAuthHeader: 'PRIVATE-TOKEN',
     model: 'anthropic/claude-sonnet-4-5',
     minSeverity: 'info',
+    thinkingLevel: 'off',
     apiKey: 'key',
     reviewFile: 'pi-review.md',
     output: 'review-comments.json',
@@ -417,6 +420,27 @@ describe('runReview pipeline', () => {
     expect(params.systemPrompt).toContain('Only report CRITICAL and WARN issues');
     expect(Array.isArray(params.tools)).toBe(true);
     expect(params.tools.length).toBeGreaterThan(0);
+    expect(params.thinkingLevel).toBe('off');
+  });
+
+  it('forwards config.thinkingLevel to the agent factory', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const captured = vi.fn();
+    const messages = [makeAssistant('ok', { input: 1, output: 1 })];
+
+    await runReview(
+      { ...minimalConfig, cwd, thinkingLevel: 'high' },
+      {
+        cwd,
+        diff: sampleDiff,
+        createAgent: (params) => {
+          captured(params);
+          return fakeAgent(messages);
+        },
+      },
+    );
+
+    expect(captured.mock.calls[0][0].thinkingLevel).toBe('high');
   });
 
   it('throws ReviewerError when the agent returns no text', async () => {
@@ -651,6 +675,7 @@ describe('validateConfig', () => {
     gitlabAuthHeader: 'PRIVATE-TOKEN',
     model: 'anthropic/claude-sonnet-4-5',
     minSeverity: 'info',
+    thinkingLevel: 'off',
     apiKey: 'key',
     reviewFile: 'pi-review.md',
     output: 'review-comments.json',
@@ -669,6 +694,81 @@ describe('validateConfig', () => {
     expect(() => validateConfig({ ...minimalConfig, minSeverity: 'bad' as Severity })).toThrow(
       '--min-severity must be one of',
     );
+  });
+
+  it('throws on invalid thinking level', () => {
+    expect(() =>
+      validateConfig({
+        ...minimalConfig,
+        thinkingLevel: 'bogus' as ThinkingLevel,
+      }),
+    ).toThrow('--thinking must be one of: off, minimal, low, medium, high, xhigh');
+  });
+
+  it('accepts every documented thinking level', () => {
+    for (const level of ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const) {
+      expect(() => validateConfig({ ...minimalConfig, thinkingLevel: level })).not.toThrow();
+    }
+  });
+});
+
+describe('thinking level resolution', () => {
+  it('defaults to off when neither flag nor env is set', () => {
+    const cfg = resolveConfig([], {
+      CI_PROJECT_ID: '1',
+      CI_MERGE_REQUEST_IID: '2',
+      CI_SERVER_URL: 'https://gl.example.com',
+      GITLAB_TOKEN: 't',
+      PI_API_KEY: 'k',
+    });
+    expect(cfg.thinkingLevel).toBe('off');
+  });
+
+  it('reads from PI_REVIEWER_THINKING_LEVEL env var', () => {
+    const cfg = resolveConfig([], {
+      CI_PROJECT_ID: '1',
+      CI_MERGE_REQUEST_IID: '2',
+      CI_SERVER_URL: 'https://gl.example.com',
+      GITLAB_TOKEN: 't',
+      PI_API_KEY: 'k',
+      PI_REVIEWER_THINKING_LEVEL: 'medium',
+    });
+    expect(cfg.thinkingLevel).toBe('medium');
+  });
+
+  it('lower-cases and trims env values before validation', () => {
+    const cfg = resolveConfig([], {
+      CI_PROJECT_ID: '1',
+      CI_MERGE_REQUEST_IID: '2',
+      CI_SERVER_URL: 'https://gl.example.com',
+      GITLAB_TOKEN: 't',
+      PI_API_KEY: 'k',
+      PI_REVIEWER_THINKING_LEVEL: '  HIGH  ',
+    });
+    expect(cfg.thinkingLevel).toBe('high');
+  });
+
+  it('lets --thinking override PI_REVIEWER_THINKING_LEVEL', () => {
+    const cfg = resolveConfig(['--thinking', 'xhigh'], {
+      CI_PROJECT_ID: '1',
+      CI_MERGE_REQUEST_IID: '2',
+      CI_SERVER_URL: 'https://gl.example.com',
+      GITLAB_TOKEN: 't',
+      PI_API_KEY: 'k',
+      PI_REVIEWER_THINKING_LEVEL: 'low',
+    });
+    expect(cfg.thinkingLevel).toBe('xhigh');
+  });
+
+  it('rejects invalid values via validateConfig', () => {
+    const cfg = resolveConfig(['--thinking', 'sometimes'], {
+      CI_PROJECT_ID: '1',
+      CI_MERGE_REQUEST_IID: '2',
+      CI_SERVER_URL: 'https://gl.example.com',
+      GITLAB_TOKEN: 't',
+      PI_API_KEY: 'k',
+    });
+    expect(() => validateConfig(cfg)).toThrow('--thinking must be one of');
   });
 });
 
@@ -703,6 +803,7 @@ describe('diagnostics_channel instrumentation', () => {
     gitlabAuthHeader: 'PRIVATE-TOKEN',
     model: 'anthropic/claude-sonnet-4-5',
     minSeverity: 'info',
+    thinkingLevel: 'off',
     apiKey: 'key',
     reviewFile: 'pi-review.md',
     output: 'review-comments.json',

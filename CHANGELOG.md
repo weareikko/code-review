@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Make the review agent's `thinkingLevel` configurable. New `--thinking <level>` flag and `PI_REVIEWER_THINKING_LEVEL` env var accept `off`, `minimal`, `low`, `medium`, `high`, or `xhigh` (default: `off`). Thinking tokens are billed at the model output rate and are reflected in the `Review usage:` line and `review-usage.json`.
+
 ## [0.1.3] - 2026-05-18
 
 ### Fixed
