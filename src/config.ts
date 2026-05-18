@@ -69,11 +69,10 @@ function toBoolean(value: unknown): boolean {
   return value === true || value === 'true' || value === '1';
 }
 
-function resolveMinSeverity(value: unknown): Severity {
-  const normalized = String(value ?? '')
+function resolveMinSeverity(value: unknown): Severity | string {
+  return String(value ?? '')
     .trim()
     .toLowerCase();
-  return normalized as Severity;
 }
 
 function resolveGitLabToken(
@@ -108,7 +107,9 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     gitlabToken: token.token,
     gitlabAuthHeader: token.header,
     model: String(args.model ?? env.PI_REVIEWER_MODEL ?? 'anthropic/claude-sonnet-4-5'),
-    minSeverity: resolveMinSeverity(args.minSeverity ?? env.PI_REVIEWER_MIN_SEVERITY ?? 'info'),
+    minSeverity: resolveMinSeverity(
+      args.minSeverity ?? env.PI_REVIEWER_MIN_SEVERITY ?? 'info',
+    ) as Severity,
     apiKey: String(
       args.apiKey ?? first(env.PI_API_KEY, env.ANTHROPIC_API_KEY, env.CLAUDE_API_KEY) ?? '',
     ),

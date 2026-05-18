@@ -20,6 +20,16 @@
   "bin": {
     "gitlab-review": "./bin/gitlab-review.js"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/review.d.ts",
+      "default": "./dist/cli.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "default": "./dist/cli.js"
+    }
+  },
   "files": [
     "bin/",
     "dist/",
