@@ -1,0 +1,37 @@
+{
+  "name": "@studiometa/gitlab-review",
+  "version": "0.1.0",
+  "description": "Run pi-reviewer in GitLab CI and post deduplicated MR discussions.",
+  "type": "module",
+  "bin": {
+    "gitlab-review": "./bin/gitlab-review.js"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest --run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "npm test && npm run build"
+  },
+  "bundledDependencies": [
+    "pi-reviewer"
+  ],
+  "dependencies": {
+    "pi-reviewer": "github:zeflq/pi-reviewer#afa77eedd9e29eba096baa404a1db81a6509ff7f"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
