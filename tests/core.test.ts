@@ -56,6 +56,7 @@ describe('config env defaults', () => {
       model: 'anthropic/claude-sonnet-4-5',
       minSeverity: 'info',
       thinkingLevel: 'off',
+      postingMode: 'direct',
       reviewFile: 'pi-review.md',
       output: 'review-comments.json',
       dryRun: false,
@@ -436,6 +437,7 @@ describe('runReview pipeline', () => {
     model: 'anthropic/claude-sonnet-4-5',
     minSeverity: 'info',
     thinkingLevel: 'off',
+    postingMode: 'direct',
     apiKey: 'key',
     reviewFile: 'pi-review.md',
     output: 'review-comments.json',
@@ -865,6 +867,7 @@ describe('validateConfig', () => {
     model: 'anthropic/claude-sonnet-4-5',
     minSeverity: 'info',
     thinkingLevel: 'off',
+    postingMode: 'direct',
     apiKey: 'key',
     reviewFile: 'pi-review.md',
     output: 'review-comments.json',
@@ -961,6 +964,54 @@ describe('thinking level resolution', () => {
   });
 });
 
+describe('posting mode resolution', () => {
+  it('defaults to direct when neither flag nor env is set', () => {
+    const cfg = resolveConfig([], {
+      CI_PROJECT_ID: '1',
+      CI_MERGE_REQUEST_IID: '2',
+      CI_SERVER_URL: 'https://gl.example.com',
+      GITLAB_TOKEN: 't',
+      PI_API_KEY: 'k',
+    });
+    expect(cfg.postingMode).toBe('direct');
+  });
+
+  it('reads from PI_REVIEWER_POSTING_MODE env var and trims case', () => {
+    const cfg = resolveConfig([], {
+      CI_PROJECT_ID: '1',
+      CI_MERGE_REQUEST_IID: '2',
+      CI_SERVER_URL: 'https://gl.example.com',
+      GITLAB_TOKEN: 't',
+      PI_API_KEY: 'k',
+      PI_REVIEWER_POSTING_MODE: '  DRAFT  ',
+    });
+    expect(cfg.postingMode).toBe('draft');
+  });
+
+  it('lets --posting-mode override the env value', () => {
+    const cfg = resolveConfig(['--posting-mode', 'direct'], {
+      CI_PROJECT_ID: '1',
+      CI_MERGE_REQUEST_IID: '2',
+      CI_SERVER_URL: 'https://gl.example.com',
+      GITLAB_TOKEN: 't',
+      PI_API_KEY: 'k',
+      PI_REVIEWER_POSTING_MODE: 'draft',
+    });
+    expect(cfg.postingMode).toBe('direct');
+  });
+
+  it('validateConfig rejects unknown posting modes', () => {
+    const cfg = resolveConfig(['--posting-mode', 'bogus'], {
+      CI_PROJECT_ID: '1',
+      CI_MERGE_REQUEST_IID: '2',
+      CI_SERVER_URL: 'https://gl.example.com',
+      GITLAB_TOKEN: 't',
+      PI_API_KEY: 'k',
+    });
+    expect(() => validateConfig(cfg)).toThrow('--posting-mode must be one of');
+  });
+});
+
 describe('parseArgs', () => {
   it('parses --key=value inline syntax', () => {
     expect(parseArgs(['--project=123'])).toMatchObject({ project: '123' });
@@ -993,6 +1044,7 @@ describe('diagnostics_channel instrumentation', () => {
     model: 'anthropic/claude-sonnet-4-5',
     minSeverity: 'info',
     thinkingLevel: 'off',
+    postingMode: 'direct',
     apiKey: 'key',
     reviewFile: 'pi-review.md',
     output: 'review-comments.json',

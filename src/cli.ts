@@ -47,6 +47,8 @@ Options:
   --min-severity <level>  info, warn, or critical (default: info)
   --thinking <level>      off, minimal, low, medium, high, or xhigh (default: off).
                           Higher levels add billable thinking tokens at the model output rate.
+  --posting-mode <mode>   direct (sequential discussions) or draft (atomic bulk publish)
+                          (default: direct)
   --review-file <path>    Raw pi-reviewer output file (default: pi-review.md)
   --output <path>         Generated payload artifact (default: review-comments.json)
   --cwd <path>            Working directory (default: process.cwd())
@@ -189,6 +191,7 @@ export async function run(config: Config): Promise<RunResult> {
           config.project,
           config.mr,
           generated,
+          config.postingMode,
         );
         recordCommentCounts(context, generated);
         context.posted = result.posted;

@@ -88,6 +88,7 @@ The CLI auto-resolves values from CI variables and common token/key names.
 | `PI_REVIEWER_MODEL`          | Default for `--model`                                    |
 | `PI_REVIEWER_MIN_SEVERITY`   | Default for `--min-severity`                             |
 | `PI_REVIEWER_THINKING_LEVEL` | Default for `--thinking`                                 |
+| `PI_REVIEWER_POSTING_MODE`   | Default for `--posting-mode`                             |
 
 ## Flags
 
@@ -101,6 +102,7 @@ The CLI auto-resolves values from CI variables and common token/key names.
 | `--model <provider/id>`  | Model passed to the review agent                   | `PI_REVIEWER_MODEL` or `anthropic/claude-sonnet-4-5`                     |
 | `--min-severity <level>` | `info`, `warn`, `critical`                         | `PI_REVIEWER_MIN_SEVERITY` or `info`                                     |
 | `--thinking <level>`     | `off`, `minimal`, `low`, `medium`, `high`, `xhigh` | `PI_REVIEWER_THINKING_LEVEL` or `off`                                    |
+| `--posting-mode <mode>`  | `direct` or `draft` (atomic bulk publish)          | `PI_REVIEWER_POSTING_MODE` or `direct`                                   |
 | `--review-file <path>`   | Raw `pi-reviewer` output file                      | `pi-review.md`                                                           |
 | `--output <path>`        | Generated payload artifact file                    | `review-comments.json`                                                   |
 | `--cwd <path>`           | Working directory                                  | `process.cwd()`                                                          |
@@ -110,6 +112,8 @@ The CLI auto-resolves values from CI variables and common token/key names.
 | `--version`, `-v`        | Show version                                       | -                                                                        |
 
 `--thinking` controls extended thinking on the underlying agent. Thinking tokens are billed at the model's output token rate, so higher levels cost more — the `Review usage:` line and `review-usage.json` reflect that cost.
+
+`--posting-mode draft` creates GitLab draft notes for every fresh comment and publishes them atomically via `POST /draft_notes/bulk_publish`. The reviewer either appears fully on the MR or not at all, instead of leaking partial state if the job is interrupted. Requires a GitLab version that exposes the `draft_notes` and `bulk_publish` endpoints (≥ 15.10) and a token whose user can own draft notes — keep `direct` for older self-hosted instances or restricted tokens.
 
 ## Artifacts
 

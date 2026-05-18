@@ -1,4 +1,5 @@
 import { ConfigError } from './errors.js';
+import { POSTING_MODES, type PostingMode } from './posting.js';
 import { THINKING_LEVELS, type Severity, type ThinkingLevel } from './types.js';
 
 export type GitLabAuthHeader = 'PRIVATE-TOKEN' | 'JOB-TOKEN';
@@ -12,6 +13,7 @@ export interface Config {
   model: string;
   minSeverity: Severity;
   thinkingLevel: ThinkingLevel;
+  postingMode: PostingMode;
   apiKey: string;
   reviewFile: string;
   output: string;
@@ -82,6 +84,12 @@ function resolveThinkingLevel(value: unknown): ThinkingLevel | string {
     .toLowerCase();
 }
 
+function resolvePostingMode(value: unknown): PostingMode | string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase();
+}
+
 function resolveGitLabToken(
   args: ParsedArgs,
   env: NodeJS.ProcessEnv,
@@ -120,6 +128,9 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     thinkingLevel: resolveThinkingLevel(
       args.thinking ?? env.PI_REVIEWER_THINKING_LEVEL ?? 'off',
     ) as ThinkingLevel,
+    postingMode: resolvePostingMode(
+      args.postingMode ?? env.PI_REVIEWER_POSTING_MODE ?? 'direct',
+    ) as PostingMode,
     apiKey: String(
       args.apiKey ?? first(env.PI_API_KEY, env.ANTHROPIC_API_KEY, env.CLAUDE_API_KEY) ?? '',
     ),
@@ -154,6 +165,10 @@ export function validateConfig(config: Config): void {
 
   if (!THINKING_LEVELS.includes(config.thinkingLevel)) {
     throw new ConfigError(`--thinking must be one of: ${THINKING_LEVELS.join(', ')}`);
+  }
+
+  if (!POSTING_MODES.includes(config.postingMode)) {
+    throw new ConfigError(`--posting-mode must be one of: ${POSTING_MODES.join(', ')}`);
   }
 }
 
