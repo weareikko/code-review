@@ -53,7 +53,9 @@
     "prepublishOnly": "npm run check && npm run build && npm pack --dry-run"
   },
   "dependencies": {
-    "pi-reviewer": "github:zeflq/pi-reviewer#afa77eedd9e29eba096baa404a1db81a6509ff7f"
+    "@earendil-works/pi-agent-core": "0.75.3",
+    "@earendil-works/pi-ai": "0.75.3",
+    "@earendil-works/pi-coding-agent": "0.75.3"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
@@ -65,9 +67,6 @@
     "vite": "^8.0.7",
     "vitest": "^4.1.0-beta.5"
   },
-  "bundledDependencies": [
-    "pi-reviewer"
-  ],
   "engines": {
     "node": ">=24"
   }

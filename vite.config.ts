@@ -4,7 +4,7 @@ import { defineConfig } from 'vitest/config';
 const external = [
   ...builtinModules,
   ...builtinModules.map((moduleName) => `node:${moduleName}`),
-  'pi-reviewer',
+  /^@earendil-works\//,
 ];
 
 export default defineConfig({

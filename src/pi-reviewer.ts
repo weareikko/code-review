@@ -1,107 +1,424 @@
-import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import type { AgentEvent, AgentTool } from '@earendil-works/pi-agent-core';
+import type { AssistantMessage, KnownProvider, Model } from '@earendil-works/pi-ai';
+
+import { Agent } from '@earendil-works/pi-agent-core';
+import { getModel } from '@earendil-works/pi-ai';
+import { createReadOnlyTools } from '@earendil-works/pi-coding-agent';
+import { execFile } from 'node:child_process';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, join, relative, resolve } from 'node:path';
+import { promisify } from 'node:util';
 
 import type { Config } from './config.js';
+import type { PiReviewerSeverity } from './types.js';
 
 import { ReviewerError } from './errors.js';
-import { toPiReviewerSeverity, type PiReviewerSeverity } from './types.js';
+import { toPiReviewerSeverity } from './types.js';
 
-export interface PiReviewerOptions {
+export interface UsageBreakdown {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+}
+
+export interface ReviewUsage {
+  model: string;
+  tokens: UsageBreakdown;
+  cost: UsageBreakdown;
+}
+
+export interface AgentLike {
+  subscribe(listener: (event: AgentEvent) => void | Promise<void>): () => void;
+  prompt(input: string): Promise<void>;
+}
+
+export interface CreateAgentParams {
+  systemPrompt: string;
+  model: Model<string>;
+  tools: AgentTool[];
+  getApiKey: () => Promise<string>;
+}
+
+export type CreateAgent = (params: CreateAgentParams) => AgentLike;
+
+export interface RunReviewOptions {
   cwd?: string;
-  /** Pre-formatted, shell-safe value forwarded to pi-reviewer's `diff` option. */
-  diff?: string;
-  /** Git diff arguments to shell-quote before forwarding to pi-reviewer. */
-  diffArgs?: string[];
-  review?: PiReviewFunction;
+  diff: string;
+  createAgent?: CreateAgent;
 }
 
-export interface PiReviewOptions {
-  cwd?: string;
-  diff?: string;
-  branch?: string;
-  output?: 'terminal' | 'comment' | 'file';
-  dryRun?: boolean;
-  piApiKey?: string;
-  model?: string;
-  minSeverity?: PiReviewerSeverity;
+interface ContextFile {
+  path: string;
+  content: string;
 }
 
-export type PiReviewFunction = (options: PiReviewOptions) => Promise<void>;
-
-async function resolvePiReviewer(): Promise<PiReviewFunction> {
-  const require = createRequire(import.meta.url);
-  const pkg = require.resolve('pi-reviewer/package.json');
-  const reviewModule = pathToFileURL(join(dirname(pkg), 'dist/src/ci/review.js')).href;
-  const imported = (await import(reviewModule)) as { review?: unknown };
-  if (typeof imported.review !== 'function') {
-    throw new ReviewerError('Unable to load pi-reviewer review() from pinned dependency.', {
-      hint: 'Run npm install and ensure the pinned pi-reviewer dependency is available.',
-    });
-  }
-  return imported.review as PiReviewFunction;
+interface ReviewContext {
+  conventions: ContextFile[];
+  reviewRules: ContextFile[];
 }
 
-export function shellQuote(argument: string): string {
-  return `'${argument.replaceAll("'", "'\\''")}'`;
+const DEFAULT_MAX_DIFF_CHARS = 100_000;
+const CONVENTION_FILES = ['AGENTS.md', 'CLAUDE.md'];
+const REVIEW_RULE_FILES = ['REVIEW.md'];
+const CONFIG_DIRS = ['.pi', '.claude', '.agents'];
+
+const NOISE_PATTERNS: RegExp[] = [
+  /^pi-review\.md$/,
+  /^package-lock\.json$/,
+  /^yarn\.lock$/,
+  /^pnpm-lock\.yaml$/,
+  /^bun\.lockb$/,
+  /^\.yarn\//,
+  /^dist\//,
+  /^build\//,
+  /^\.next\//,
+  /^out\//,
+  /^coverage\//,
+  /^node_modules\//,
+  /\.min\.(js|css)$/,
+  /\.generated\.(ts|js)$/,
+  /\.d\.ts$/,
+];
+
+const SEVERITY_RULE: Record<PiReviewerSeverity, string | null> = {
+  INFO: null,
+  WARN: '- Only report CRITICAL and WARN issues — skip INFO',
+  CRITICAL: '- Only report CRITICAL issues — skip WARN and INFO',
+};
+
+const exec = promisify(execFile);
+
+function defaultCreateAgent(params: CreateAgentParams): AgentLike {
+  return new Agent({
+    initialState: {
+      systemPrompt: params.systemPrompt,
+      model: params.model,
+      tools: params.tools,
+      thinkingLevel: 'off',
+    },
+    getApiKey: params.getApiKey,
+  });
 }
 
-export function shellJoin(arguments_: string[]): string {
-  return arguments_.map(shellQuote).join(' ');
-}
-
-async function ensureReadableFile(path: string): Promise<void> {
+async function findGitRoot(cwd: string): Promise<string> {
   try {
-    await access(path);
+    const { stdout } = await exec('git', ['rev-parse', '--show-toplevel'], { cwd });
+    return stdout.trim() || cwd;
   } catch {
-    throw new ReviewerError(`pi-reviewer did not generate ${path}`, {
-      hint: 'Check pi-reviewer logs and ensure the review command completed successfully.',
-    });
-  }
-
-  const content = await readFile(path, 'utf8');
-  if (content.trim().length === 0) {
-    throw new ReviewerError(`pi-reviewer generated an empty review file at ${path}`);
+    return cwd;
   }
 }
 
-export async function runPiReviewer(
-  config: Config,
-  options: PiReviewerOptions = {},
-): Promise<void> {
-  const cwd = options.cwd ?? config.cwd;
-  const review = options.review ?? (await resolvePiReviewer());
-  const generatedPath = resolve(cwd, 'pi-review.md');
-  const targetPath = resolve(cwd, config.reviewFile);
+async function readFirstMatch(dir: string, filenames: string[]): Promise<ContextFile | null> {
+  for (const candidate of [dir, ...CONFIG_DIRS.map((d) => join(dir, d))]) {
+    let entries: string[];
+    try {
+      entries = await readdir(candidate);
+    } catch {
+      continue;
+    }
+    const wanted = new Set(filenames.map((f) => f.toLowerCase()));
+    const match = entries.find((entry) => wanted.has(entry.toLowerCase()));
+    if (!match) continue;
+    const fullPath = join(candidate, match);
+    try {
+      const content = await readFile(fullPath, 'utf8');
+      return { path: fullPath, content };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
 
+async function walkUpContextFiles(
+  cwd: string,
+  filenames: string[],
+  gitRoot: string,
+): Promise<ContextFile[]> {
+  const dirs: string[] = [];
+  let current = cwd;
+  while (true) {
+    dirs.unshift(current);
+    if (current === gitRoot) break;
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+
+  const result: ContextFile[] = [];
+  const seen = new Set<string>();
+  for (const dir of dirs) {
+    const file = await readFirstMatch(dir, filenames);
+    if (!file || seen.has(file.path)) continue;
+    seen.add(file.path);
+    result.push({ path: relative(cwd, file.path) || file.path, content: file.content });
+  }
+  return result;
+}
+
+export async function loadReviewContext(cwd: string): Promise<ReviewContext> {
+  const gitRoot = await findGitRoot(cwd);
+  const [conventions, reviewRules] = await Promise.all([
+    walkUpContextFiles(cwd, CONVENTION_FILES, gitRoot),
+    walkUpContextFiles(cwd, REVIEW_RULE_FILES, gitRoot),
+  ]);
+  return { conventions, reviewRules };
+}
+
+export interface FilteredDiff {
+  diff: string;
+  skippedFiles: string[];
+}
+
+function parseFilePath(header: string): string | null {
+  const match = header.match(/^diff --git a\/.+ b\/(.+)$/);
+  return match?.[1] ?? null;
+}
+
+function isNoise(filePath: string): boolean {
+  return NOISE_PATTERNS.some((re) => re.test(filePath));
+}
+
+export function filterDiff(raw: string, maxChars = DEFAULT_MAX_DIFF_CHARS): FilteredDiff {
+  const sections = raw.split(/(?=^diff --git )/m).filter((section) => section.trim());
+  const kept: string[] = [];
+  const skippedFiles: string[] = [];
+
+  for (const section of sections) {
+    const firstLine = section.split('\n', 1)[0] ?? '';
+    const filePath = parseFilePath(firstLine);
+    if (filePath && isNoise(filePath)) {
+      skippedFiles.push(filePath);
+    } else {
+      kept.push(section);
+    }
+  }
+
+  const included: string[] = [];
+  let totalChars = 0;
+  for (const section of kept) {
+    if (totalChars + section.length > maxChars) {
+      const firstLine = section.split('\n', 1)[0] ?? '';
+      const filePath = parseFilePath(firstLine);
+      if (filePath) skippedFiles.push(filePath);
+      continue;
+    }
+    included.push(section);
+    totalChars += section.length;
+  }
+
+  return { diff: included.join(''), skippedFiles };
+}
+
+function mergeContent(files: ContextFile[]): string {
+  return files.map((file) => file.content).join('\n\n');
+}
+
+function buildSharedBase(minSeverity: PiReviewerSeverity): string[] {
+  const rule = SEVERITY_RULE[minSeverity];
+  return [
+    'You are a code reviewer. Review the following PR diff carefully.',
+    '',
+    '<severity_tiers>',
+    '- 🔴 CRITICAL: bugs causing runtime failures, security vulnerabilities, data loss risks',
+    '- 🟡 WARN: type errors, missing error handling, logic issues, test gaps',
+    '- 🔵 INFO: style, naming, performance hints, suggestions',
+    '</severity_tiers>',
+    '',
+    '<rules>',
+    '- Only flag what is actually wrong in the diff — no hypotheticals',
+    '- If nothing is wrong, say so clearly',
+    ...(rule ? [rule] : []),
+    '</rules>',
+  ];
+}
+
+export function buildJSONSystemPrompt(
+  context: ReviewContext,
+  minSeverity: PiReviewerSeverity,
+): string {
+  const base = [
+    ...buildSharedBase(minSeverity),
+    '- Do not repeat what the project conventions already enforce',
+    '',
+    'Return only a JSON object matching this schema exactly (no markdown fences, no extra text, no extra fields — do not include the diff or any other field):',
+    '<output_format>',
+    '{',
+    '  "summary": "Overall review in **Markdown**. Use bullet points, `code spans`, and **bold** for clarity.",',
+    '  "comments": [',
+    '    { "file": "src/auth.ts", "line": 42, "side": "RIGHT", "severity": "CRITICAL", "body": "Inline comment in Markdown." }',
+    '  ]',
+    '}',
+    '</output_format>',
+    '',
+    'Field rules:',
+    '- summary: overall review written in Markdown',
+    '- comments: inline comments attached to specific diff lines (may be empty [])',
+    '- file: relative path from repo root',
+    '- line: line number in the file (not the diff position)',
+    '- side: "RIGHT" for added/context lines, "LEFT" for removed lines',
+    '- severity: "CRITICAL" | "WARN" | "INFO"',
+    '- body: inline comment text, may use Markdown',
+  ].join('\n');
+
+  const sections = [base];
+  const conventions = mergeContent(context.conventions).trim();
+  if (conventions) sections.push(`<conventions>\n${conventions}\n</conventions>`);
+  const reviewRules = mergeContent(context.reviewRules).trim();
+  if (reviewRules) sections.push(`<review_rules>\n${reviewRules}\n</review_rules>`);
+  return sections.join('\n\n');
+}
+
+export function buildUserPrompt(diff: string, skippedFiles: string[] = []): string {
+  const parts = [`Review this diff:\n<diff>\n${diff}\n</diff>`];
+  if (skippedFiles.length > 0) {
+    parts.push(
+      `<skipped_files>\n${skippedFiles
+        .map((file) => `- ${file}`)
+        .join(
+          '\n',
+        )}\n</skipped_files>\nThe above files were not included because the diff exceeded the size limit. Mention them explicitly in your summary as not reviewed.`,
+    );
+  }
+  return parts.join('\n\n');
+}
+
+function extractAssistantText(message: AssistantMessage): string {
+  return message.content
+    .map((part) => (part.type === 'text' ? part.text : ''))
+    .join('')
+    .trim();
+}
+
+export function extractLastAssistantText(messages: AssistantMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const text = extractAssistantText(messages[i]);
+    if (text) return text;
+  }
+  return '';
+}
+
+function resolveModel(modelString: string): Model<string> {
+  const [provider, modelId] = modelString.split('/');
+  if (!provider || !modelId) {
+    throw new ReviewerError(
+      `Invalid model format "${modelString}". Expected "provider/modelId" (e.g. "anthropic/claude-sonnet-4-5").`,
+    );
+  }
   try {
-    await review({
-      cwd,
-      diff: options.diffArgs ? shellJoin(options.diffArgs) : options.diff,
-      output: 'file',
-      model: config.model,
-      minSeverity: toPiReviewerSeverity(config.minSeverity),
-      piApiKey: config.apiKey,
-    });
+    return getModel(provider as KnownProvider, modelId as never) as Model<string>;
   } catch (error) {
-    throw new ReviewerError('pi-reviewer failed.', {
+    throw new ReviewerError(`Unknown model "${modelString}".`, {
       cause: error,
       hint: error instanceof Error ? error.message : undefined,
     });
   }
+}
 
-  await ensureReadableFile(generatedPath);
+interface AggregatedUsage {
+  tokens: UsageBreakdown;
+  cost: UsageBreakdown;
+}
 
-  if (generatedPath !== targetPath) {
-    await mkdir(dirname(targetPath), { recursive: true });
-    try {
-      await rename(generatedPath, targetPath);
-    } catch {
-      const content = await readFile(generatedPath, 'utf8');
-      await writeFile(targetPath, content, 'utf8');
-    }
+function emptyUsage(): AggregatedUsage {
+  return {
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+}
+
+function accumulateUsage(target: AggregatedUsage, message: AssistantMessage): void {
+  const usage = message.usage;
+  if (!usage) return;
+  target.tokens.input += usage.input;
+  target.tokens.output += usage.output;
+  target.tokens.cacheRead += usage.cacheRead;
+  target.tokens.cacheWrite += usage.cacheWrite;
+  target.tokens.total += usage.totalTokens;
+  if (usage.cost) {
+    target.cost.input += usage.cost.input;
+    target.cost.output += usage.cost.output;
+    target.cost.cacheRead += usage.cost.cacheRead;
+    target.cost.cacheWrite += usage.cost.cacheWrite;
+    target.cost.total += usage.cost.total;
+  }
+}
+
+export async function runReview(config: Config, options: RunReviewOptions): Promise<ReviewUsage> {
+  const cwd = options.cwd ?? config.cwd;
+  const minSeverity = toPiReviewerSeverity(config.minSeverity);
+
+  const { diff, skippedFiles } = filterDiff(options.diff);
+  if (!diff.trim()) {
+    throw new ReviewerError('No reviewable diff content after filtering noise files.', {
+      hint: 'Ensure the merge request introduces changes outside of generated/lock files.',
+    });
   }
 
-  await ensureReadableFile(targetPath);
+  const context = await loadReviewContext(cwd);
+  const systemPrompt = buildJSONSystemPrompt(context, minSeverity);
+  const userPrompt = buildUserPrompt(diff, skippedFiles);
+
+  const model = resolveModel(config.model);
+  const tools = createReadOnlyTools(cwd) as AgentTool[];
+
+  const createAgent = options.createAgent ?? defaultCreateAgent;
+  const agent = createAgent({
+    systemPrompt,
+    model,
+    tools,
+    getApiKey: async () => config.apiKey,
+  });
+
+  const aggregated = emptyUsage();
+  const collectedAssistantMessages: AssistantMessage[] = [];
+
+  let unsubscribe: (() => void) | undefined;
+  let finalText = '';
+  try {
+    const ended = new Promise<void>((resolvePromise, rejectPromise) => {
+      unsubscribe = agent.subscribe((event) => {
+        if (event.type === 'message_end' && event.message.role === 'assistant') {
+          const assistant = event.message as AssistantMessage;
+          collectedAssistantMessages.push(assistant);
+          accumulateUsage(aggregated, assistant);
+        }
+        if (event.type !== 'agent_end') return;
+        const messages = event.messages.filter(
+          (message): message is AssistantMessage => message.role === 'assistant',
+        );
+        const last = messages[messages.length - 1];
+        if (last?.stopReason === 'error' || last?.errorMessage) {
+          rejectPromise(new ReviewerError(`Agent failed: ${last.errorMessage ?? 'unknown error'}`));
+          return;
+        }
+        finalText = extractLastAssistantText(
+          collectedAssistantMessages.length > 0 ? collectedAssistantMessages : messages,
+        );
+        if (!finalText) {
+          rejectPromise(new ReviewerError('Agent returned an empty response.'));
+          return;
+        }
+        resolvePromise();
+      });
+    });
+
+    await agent.prompt(userPrompt);
+    await ended;
+  } finally {
+    unsubscribe?.();
+  }
+
+  const reviewPath = resolve(cwd, config.reviewFile);
+  await mkdir(dirname(reviewPath), { recursive: true });
+  await writeFile(reviewPath, finalText, 'utf8');
+
+  return {
+    model: config.model,
+    tokens: aggregated.tokens,
+    cost: aggregated.cost,
+  };
 }
