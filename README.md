@@ -113,7 +113,7 @@ The CLI auto-resolves values from CI variables and common token/key names.
 
 `--thinking` controls extended thinking on the underlying agent. Thinking tokens are billed at the model's output token rate, so higher levels cost more — the `Review usage:` line and `review-usage.json` reflect that cost.
 
-`--posting-mode draft` creates GitLab draft notes for every fresh comment and publishes them atomically via `POST /draft_notes/bulk_publish`. The reviewer either appears fully on the MR or not at all, instead of leaking partial state if the job is interrupted. Requires a GitLab version that exposes the `draft_notes` and `bulk_publish` endpoints (≥ 15.10) and a token whose user can own draft notes — keep `direct` for older self-hosted instances or restricted tokens.
+`--posting-mode draft` creates GitLab draft notes for every fresh comment and publishes them atomically via `POST /draft_notes/bulk_publish`. The reviewer either appears fully on the MR or not at all, instead of leaking partial state if the job is interrupted. If a draft creation fails mid-flight, the run sweeps the partial drafts before reporting the failure; if the job is killed before that, the next run's orphan cleanup picks them up. Requires a GitLab version that exposes the `draft_notes` and `bulk_publish` endpoints (≥ 15.10) and a token whose user can own draft notes — keep `direct` for older self-hosted instances or restricted tokens. `bulk_publish` publishes _all_ of the current user's drafts on the MR, so use a dedicated bot account if multiple processes may share the token.
 
 ## Artifacts
 

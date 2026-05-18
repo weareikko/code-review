@@ -1,4 +1,4 @@
-import type { DraftNote, GitLabClient } from './gitlab.js';
+import type { GitLabClient } from './gitlab.js';
 import type { Fingerprints, GeneratedComment } from './types.js';
 
 import { extractExistingFingerprints } from './fingerprints.js';
@@ -66,12 +66,22 @@ async function postViaDrafts(
     };
   }
 
-  const drafts = await createDraftsConcurrently(gitlab, project, mr, fresh);
+  let drafts: DraftRecord[];
+  try {
+    drafts = await createDraftsConcurrently(gitlab, project, mr, fresh);
+  } catch (error) {
+    // A draft creation failed mid-flight. Some siblings may have succeeded
+    // and now sit as unpublished drafts on the MR — sweep them before
+    // re-throwing so the failure does not leak partial state.
+    await cleanupOrphanDrafts(gitlab, project, mr).catch(() => undefined);
+    throw error;
+  }
+
   const deletedPrePublish = await deleteRaceLosers(gitlab, project, mr, drafts);
-
-  await gitlab.bulkPublishDraftNotes(project, mr);
-
   const published = drafts.length - deletedPrePublish;
+
+  if (published > 0) await gitlab.bulkPublishDraftNotes(project, mr);
+
   return {
     posted: published,
     drafts: { abandoned, created: drafts.length, deletedPrePublish, published },
@@ -85,7 +95,7 @@ async function cleanupOrphanDrafts(
 ): Promise<number> {
   const me = await gitlab.getCurrentUser();
   const drafts = await gitlab.listDraftNotes(project, mr);
-  const mine = drafts.filter((draft: DraftNote) => draft.author_id === me.id);
+  const mine = drafts.filter((draft) => draft.author_id === me.id);
   if (mine.length === 0) return 0;
   await Promise.all(mine.map((draft) => gitlab.deleteDraftNote(project, mr, draft.id)));
   return mine.length;
@@ -112,7 +122,12 @@ async function createDraftsConcurrently(
   }
 
   const workerCount = Math.min(DRAFT_CONCURRENCY, fresh.length);
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  // allSettled (not all) so siblings finish their POSTs before we report
+  // failure — that way the caller's cleanup can see every draft GitLab has
+  // accepted, not just the ones that beat the rejection.
+  const results = await Promise.allSettled(Array.from({ length: workerCount }, () => worker()));
+  const failure = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+  if (failure) throw failure.reason;
   return records;
 }
 

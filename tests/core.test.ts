@@ -474,6 +474,95 @@ describe('postGeneratedComments strategies', () => {
     const deletes = fetchImpl.mock.calls.filter((c) => c[1]?.method === 'DELETE');
     expect(deletes).toHaveLength(1);
     expect(deletes[0][0]).toContain('/draft_notes/7');
+
+    // Orphan cleanup must complete before any new draft is created.
+    const firstOrphanDelete = fetchImpl.mock.calls.findIndex(
+      (c) => c[1]?.method === 'DELETE' && c[0].includes('/draft_notes/7'),
+    );
+    const firstCreate = fetchImpl.mock.calls.findIndex(
+      (c) =>
+        c[1]?.method === 'POST' && c[0].includes('/draft_notes') && !c[0].includes('bulk_publish'),
+    );
+    expect(firstOrphanDelete).toBeGreaterThanOrEqual(0);
+    expect(firstCreate).toBeGreaterThan(firstOrphanDelete);
+  });
+
+  it('draft mode: skips bulk_publish when every draft is race-deleted', async () => {
+    let createdId = 100;
+    const fetchImpl = routeFetch({
+      'GET /user': () => new Response(JSON.stringify({ id: 1 })),
+      'GET /draft_notes': () =>
+        new Response(JSON.stringify([]), { headers: { 'x-next-page': '' } }),
+      'POST /draft_notes': () =>
+        new Response(JSON.stringify({ id: createdId++, author_id: 1, note: 'x' })),
+      'GET /discussions': () =>
+        new Response(
+          JSON.stringify([
+            {
+              notes: [
+                {
+                  body: 'collide <!-- pi-reviewer:fingerprint-primary:aaaa --> <!-- pi-reviewer:fingerprint-secondary:aabb -->',
+                },
+                {
+                  body: 'collide <!-- pi-reviewer:fingerprint-primary:bbbb --> <!-- pi-reviewer:fingerprint-secondary:bbcc -->',
+                },
+              ],
+            },
+          ]),
+          { headers: { 'x-next-page': '' } },
+        ),
+      'DELETE /draft_notes': () => new Response(null, { status: 204 }),
+    });
+
+    const result = await postGeneratedComments(
+      clientWith(fetchImpl),
+      'p',
+      '1',
+      [draftA, draftB],
+      'draft',
+    );
+
+    expect(result.posted).toBe(0);
+    expect(result.drafts).toMatchObject({ created: 2, deletedPrePublish: 2, published: 0 });
+    expect(fetchImpl.mock.calls.filter((c) => c[0].includes('bulk_publish'))).toHaveLength(0);
+  });
+
+  it('draft mode: self-heals partial drafts when a create call fails mid-flight', async () => {
+    let createsSeen = 0;
+    let listsSeen = 0;
+    const successfulDraftId = 100;
+    const fetchImpl = routeFetch({
+      'GET /user': () => new Response(JSON.stringify({ id: 1 })),
+      'GET /draft_notes': () => {
+        listsSeen += 1;
+        // 1st list: orphan cleanup at run start, empty.
+        // 2nd list: self-heal cleanup after the failure, returns the draft
+        // we managed to create before the sibling worker failed.
+        const body =
+          listsSeen === 1 ? [] : [{ id: successfulDraftId, author_id: 1, note: 'partial' }];
+        return new Response(JSON.stringify(body), { headers: { 'x-next-page': '' } });
+      },
+      'POST /draft_notes': () => {
+        createsSeen += 1;
+        if (createsSeen === 1) {
+          return new Response(JSON.stringify({ id: successfulDraftId, author_id: 1, note: 'ok' }));
+        }
+        return new Response('boom', { status: 500, statusText: 'Internal Server Error' });
+      },
+      'DELETE /draft_notes': () => new Response(null, { status: 204 }),
+    });
+
+    await expect(
+      postGeneratedComments(clientWith(fetchImpl), 'p', '1', [draftA, draftB], 'draft'),
+    ).rejects.toBeInstanceOf(GitLabApiError);
+
+    // Self-heal ran a second list-and-delete that swept the partial draft.
+    expect(listsSeen).toBe(2);
+    const deletes = fetchImpl.mock.calls.filter((c) => c[1]?.method === 'DELETE');
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0][0]).toContain(`/draft_notes/${successfulDraftId}`);
+    // We never attempted to publish anything.
+    expect(fetchImpl.mock.calls.filter((c) => c[0].includes('bulk_publish'))).toHaveLength(0);
   });
 
   it('draft mode: deletes drafts whose fingerprints collide with newly-published discussions', async () => {
