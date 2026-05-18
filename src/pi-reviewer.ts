@@ -2,7 +2,9 @@ import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+
 import type { Config } from './config.js';
+
 import { toPiReviewerSeverity, type PiReviewerSeverity } from './types.js';
 
 export interface PiReviewerOptions {
@@ -48,7 +50,10 @@ async function ensureReadableFile(path: string): Promise<void> {
   }
 }
 
-export async function runPiReviewer(config: Config, options: PiReviewerOptions = {}): Promise<void> {
+export async function runPiReviewer(
+  config: Config,
+  options: PiReviewerOptions = {},
+): Promise<void> {
   const cwd = options.cwd ?? config.cwd;
   const review = options.review ?? (await resolvePiReviewer());
   const generatedPath = resolve(cwd, 'pi-review.md');

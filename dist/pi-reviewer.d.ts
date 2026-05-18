@@ -17,3 +17,4 @@ export interface PiReviewOptions {
 }
 export type PiReviewFunction = (options: PiReviewOptions) => Promise<void>;
 export declare function runPiReviewer(config: Config, options?: PiReviewerOptions): Promise<void>;
+//# sourceMappingURL=pi-reviewer.d.ts.map

@@ -39,7 +39,10 @@ function remoteRef(remote: string, branch: string): string {
 }
 
 async function fetchBranch(remote: string, branch: string, options: GitOptions): Promise<void> {
-  await git(['fetch', '--no-tags', remote, `+refs/heads/${branch}:${remoteRef(remote, branch)}`], options);
+  await git(
+    ['fetch', '--no-tags', remote, `+refs/heads/${branch}:${remoteRef(remote, branch)}`],
+    options,
+  );
 }
 
 async function isTracked(path: string, options: GitOptions): Promise<boolean> {
@@ -91,22 +94,32 @@ export async function prepareGitHistory(
   }
 
   if (fetchErrors.length === 2) {
-    throw new Error(`Unable to fetch MR source/target branches from ${remote}.\n${fetchErrors.join('\n')}`);
+    throw new Error(
+      `Unable to fetch MR source/target branches from ${remote}.\n${fetchErrors.join('\n')}`,
+    );
   }
 
   try {
     await git(['merge-base', remoteRef(remote, targetBranch), 'HEAD'], options);
   } catch (error) {
-    const fetchDetail = fetchErrors.length > 0 ? `\nFetch warnings:\n${fetchErrors.join('\n')}` : '';
+    const fetchDetail =
+      fetchErrors.length > 0 ? `\nFetch warnings:\n${fetchErrors.join('\n')}` : '';
     throw new Error(
       `Unable to prepare Git history for MR review: merge-base ${remoteRef(remote, targetBranch)} HEAD failed. ` +
         `Set GIT_DEPTH: 0 or ensure ${remote}/${targetBranch} is fetchable.${fetchDetail}\n${gitErrorMessage(error)}`,
+      { cause: error },
     );
   }
 }
 
-export async function getMergeDiff(targetBranch: string, options: GitOptions & { remote?: string; context?: number } = {}): Promise<string> {
+export async function getMergeDiff(
+  targetBranch: string,
+  options: GitOptions & { remote?: string; context?: number } = {},
+): Promise<string> {
   const remote = options.remote ?? 'origin';
   const context = options.context ?? 20;
-  return git(['diff', `${remoteRef(remote, targetBranch)}...HEAD`, `--unified=${context}`, '--'], options);
+  return git(
+    ['diff', `${remoteRef(remote, targetBranch)}...HEAD`, `--unified=${context}`, '--'],
+    options,
+  );
 }

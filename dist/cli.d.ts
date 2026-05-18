@@ -6,3 +6,4 @@ export interface RunResult {
 }
 export declare function run(config: Config): Promise<RunResult>;
 export declare function main(argv?: string[]): Promise<void>;
+//# sourceMappingURL=cli.d.ts.map

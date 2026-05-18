@@ -38,3 +38,4 @@ export interface GitLabDiscussionPayload {
 }
 export declare function toPiReviewerSeverity(severity: Severity): PiReviewerSeverity;
 export declare function normalizeSeverity(value: unknown): Severity;
+//# sourceMappingURL=types.d.ts.map

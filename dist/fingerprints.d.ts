@@ -6,3 +6,4 @@ export declare function extractDiffHunkContext(diff: string, file: string, line:
 export declare function fingerprints(comment: ReviewComment, hunkContext: string): Fingerprints;
 export declare function appendFingerprintMarkers(body: string, fp: Fingerprints): string;
 export declare function extractExistingFingerprints(discussions: Discussion[]): Set<string>;
+//# sourceMappingURL=fingerprints.d.ts.map

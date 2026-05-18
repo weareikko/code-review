@@ -3,21 +3,20 @@
   "version": "0.1.0",
   "description": "Run pi-reviewer in GitLab CI and post deduplicated MR discussions.",
   "keywords": [
+    "ci",
+    "code-review",
     "gitlab",
     "merge-request",
-    "code-review",
-    "ci",
     "pi-reviewer"
   ],
+  "homepage": "https://github.com/ikko-dev/gitlab-review#readme",
+  "bugs": {
+    "url": "https://github.com/ikko-dev/gitlab-review/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/ikko-dev/gitlab-review.git"
   },
-  "bugs": {
-    "url": "https://github.com/ikko-dev/gitlab-review/issues"
-  },
-  "homepage": "https://github.com/ikko-dev/gitlab-review#readme",
-  "type": "module",
   "bin": {
     "gitlab-review": "./bin/gitlab-review.js"
   },
@@ -26,27 +25,38 @@
     "dist/",
     "README.md"
   ],
-  "engines": {
-    "node": ">=24"
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "test": "vitest --run",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prepublishOnly": "npm run typecheck && npm test && npm run build && npm pack --dry-run"
+    "build": "vite build && tsgo --emitDeclarationOnly",
+    "test": "vitest run",
+    "typecheck": "tsgo --noEmit",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "lint:types": "oxlint --type-aware",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm test",
+    "prepublishOnly": "npm run check && npm run build && npm pack --dry-run"
   },
-  "bundledDependencies": [
-    "pi-reviewer"
-  ],
   "dependencies": {
     "pi-reviewer": "github:zeflq/pi-reviewer#afa77eedd9e29eba096baa404a1db81a6509ff7f"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "typescript": "^5.7.3",
-    "vitest": "^4.0.18"
+    "@typescript/native-preview": "7.0.0-dev.20260304.1",
+    "oxfmt": "0.36.0",
+    "oxlint": "1.51.0",
+    "oxlint-tsgolint": "^0.16.0",
+    "vite": "^8.0.7",
+    "vitest": "^4.1.0-beta.5"
   },
-  "publishConfig": {
-    "access": "public"
+  "bundledDependencies": [
+    "pi-reviewer"
+  ],
+  "engines": {
+    "node": ">=24"
   }
 }

@@ -37,3 +37,4 @@ export declare class GitLabClient {
     getDiscussions(project: string, mr: string): Promise<Discussion[]>;
     postDiscussion(project: string, mr: string, payload: unknown): Promise<unknown>;
 }
+//# sourceMappingURL=gitlab.d.ts.map

@@ -5,3 +5,4 @@ export interface ParseResult {
 }
 export declare function parseReviewMarkdownWithWarnings(markdown: string): ParseResult;
 export declare function parseReviewMarkdown(markdown: string): ReviewComment[];
+//# sourceMappingURL=parser.d.ts.map

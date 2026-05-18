@@ -20,3 +20,4 @@ export declare function parseArgs(argv: string[]): ParsedArgs;
 export declare function resolveConfig(argv?: string[], env?: NodeJS.ProcessEnv): Config;
 export declare function validateConfig(config: Config): void;
 export { type Severity };
+//# sourceMappingURL=config.d.ts.map

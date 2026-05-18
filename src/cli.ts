@@ -1,17 +1,19 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { resolveConfig, validateConfig } from './config.js';
-import { GitLabClient } from './gitlab.js';
-import { getMergeDiff, prepareGitHistory } from './git.js';
-import { runPiReviewer } from './pi-reviewer.js';
-import { extractExistingFingerprints } from './fingerprints.js';
-import { buildGeneratedComments } from './payloads.js';
-import { parseReviewMarkdownWithWarnings } from './parser.js';
-import { postGeneratedComments } from './posting.js';
+
 import type { Config } from './config.js';
 import type { DiffRefs, GeneratedComment } from './types.js';
+
+import { resolveConfig, validateConfig } from './config.js';
+import { extractExistingFingerprints } from './fingerprints.js';
+import { getMergeDiff, prepareGitHistory } from './git.js';
+import { GitLabClient } from './gitlab.js';
+import { parseReviewMarkdownWithWarnings } from './parser.js';
+import { buildGeneratedComments } from './payloads.js';
+import { runPiReviewer } from './pi-reviewer.js';
+import { postGeneratedComments } from './posting.js';
 
 const HELP = `Usage: gitlab-review [options]
 
@@ -40,7 +42,9 @@ export interface RunResult {
 
 function readVersion(): string {
   try {
-    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version?: string };
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      version?: string;
+    };
     return pkg.version ?? '0.0.0';
   } catch {
     return '0.0.0';
@@ -54,7 +58,11 @@ function assertNodeVersion(): void {
   }
 }
 
-function refsFromVersion(version: { base_commit_sha: string; start_commit_sha: string; head_commit_sha: string }): DiffRefs {
+function refsFromVersion(version: {
+  base_commit_sha: string;
+  start_commit_sha: string;
+  head_commit_sha: string;
+}): DiffRefs {
   return {
     base_sha: version.base_commit_sha,
     start_sha: version.start_commit_sha,
@@ -85,7 +93,12 @@ export async function run(config: Config): Promise<RunResult> {
 
   const discussions = await gitlab.getDiscussions(config.project, config.mr);
   const existing = extractExistingFingerprints(discussions);
-  const generated = buildGeneratedComments(parsed.comments, diff, refsFromVersion(version), existing);
+  const generated = buildGeneratedComments(
+    parsed.comments,
+    diff,
+    refsFromVersion(version),
+    existing,
+  );
 
   const outputPath = resolve(config.cwd, config.output);
   await mkdir(dirname(outputPath), { recursive: true });
@@ -98,7 +111,9 @@ export async function run(config: Config): Promise<RunResult> {
   }
 
   const posted = await postGeneratedComments(gitlab, config.project, config.mr, generated);
-  console.log(`Posted ${posted} new GitLab MR discussions (${generated.length - posted} duplicates skipped).`);
+  console.log(
+    `Posted ${posted} new GitLab MR discussions (${generated.length - posted} duplicates skipped).`,
+  );
   return { generated, posted };
 }
 

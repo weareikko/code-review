@@ -47,7 +47,9 @@ export function toPiReviewerSeverity(severity: Severity): PiReviewerSeverity {
 }
 
 export function normalizeSeverity(value: unknown): Severity {
-  const normalized = String(value ?? '').trim().toLowerCase();
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
   if (normalized === 'critical' || normalized === 'error' || normalized === '🔴') return 'critical';
   if (normalized === 'warn' || normalized === 'warning' || normalized === '🟡') return 'warn';
   return 'info';

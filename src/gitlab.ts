@@ -46,11 +46,11 @@ export class GitLabClient {
     return url.toString();
   }
 
-  private headers(headers?: HeadersInit): HeadersInit {
+  private headers(headers?: Record<string, string>): Record<string, string> {
     return {
       [this.authHeader]: this.token,
       Accept: 'application/json',
-      ...(headers ?? {}),
+      ...headers,
     };
   }
 
@@ -61,7 +61,10 @@ export class GitLabClient {
   ): Promise<T> {
     const response = await this.fetchImpl(this.url(path, query), {
       ...init,
-      headers: this.headers({ 'Content-Type': 'application/json', ...(init.headers ?? {}) }),
+      headers: this.headers({
+        'Content-Type': 'application/json',
+        ...(init.headers as Record<string, string> | undefined),
+      }),
     });
 
     if (!response.ok) {
@@ -76,7 +79,10 @@ export class GitLabClient {
     return JSON.parse(text) as T;
   }
 
-  async paginate<T>(path: string, query: Record<string, string | number | boolean | undefined> = {}): Promise<T[]> {
+  async paginate<T>(
+    path: string,
+    query: Record<string, string | number | boolean | undefined> = {},
+  ): Promise<T[]> {
     const items: T[] = [];
     let page = 1;
 
@@ -86,7 +92,9 @@ export class GitLabClient {
       });
 
       if (!response.ok) {
-        throw new Error(`GitLab API GET ${path} failed: ${response.status} ${response.statusText}\n${await response.text()}`);
+        throw new Error(
+          `GitLab API GET ${path} failed: ${response.status} ${response.statusText}\n${await response.text()}`,
+        );
       }
 
       const body = (await response.json()) as unknown;
@@ -108,19 +116,24 @@ export class GitLabClient {
   }
 
   getMergeRequest(project: string, mr: string): Promise<MergeRequest> {
-    return this.request(`/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}`);
+    return this.request(
+      `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}`,
+    );
   }
 
   async getLatestVersion(project: string, mr: string): Promise<Version> {
     const versions = await this.paginate<Version>(
       `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/versions`,
     );
-    if (!versions[0]) throw new Error('No GitLab MR version found. Ensure the merge request has a diff version.');
+    if (!versions[0])
+      throw new Error('No GitLab MR version found. Ensure the merge request has a diff version.');
     return versions[0];
   }
 
   getDiscussions(project: string, mr: string): Promise<Discussion[]> {
-    return this.paginate(`/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/discussions`);
+    return this.paginate(
+      `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/discussions`,
+    );
   }
 
   postDiscussion(project: string, mr: string, payload: unknown): Promise<unknown> {

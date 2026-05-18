@@ -67,11 +67,16 @@ function toBoolean(value: unknown): boolean {
 }
 
 function resolveMinSeverity(value: unknown): Severity {
-  const normalized = String(value ?? '').trim().toLowerCase();
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
   return normalized as Severity;
 }
 
-function resolveGitLabToken(args: ParsedArgs, env: NodeJS.ProcessEnv): { token: string; header: GitLabAuthHeader } {
+function resolveGitLabToken(
+  args: ParsedArgs,
+  env: NodeJS.ProcessEnv,
+): { token: string; header: GitLabAuthHeader } {
   if (typeof args.gitlabToken === 'string' && args.gitlabToken.length > 0) {
     return { token: args.gitlabToken, header: 'PRIVATE-TOKEN' };
   }
@@ -87,7 +92,9 @@ function resolveGitLabToken(args: ParsedArgs, env: NodeJS.ProcessEnv): { token: 
 export function resolveConfig(argv = process.argv.slice(2), env = process.env): Config {
   const args = parseArgs(argv);
   const gitlabUrl = String(
-    args.gitlabUrl ?? first(env.CI_SERVER_URL, env.CI_SERVER_HOST ? `https://${env.CI_SERVER_HOST}` : undefined) ?? '',
+    args.gitlabUrl ??
+      first(env.CI_SERVER_URL, env.CI_SERVER_HOST ? `https://${env.CI_SERVER_HOST}` : undefined) ??
+      '',
   ).replace(/\/$/, '');
   const token = resolveGitLabToken(args, env);
 
@@ -99,7 +106,9 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     gitlabAuthHeader: token.header,
     model: String(args.model ?? env.PI_REVIEWER_MODEL ?? 'anthropic/claude-sonnet-4-5'),
     minSeverity: resolveMinSeverity(args.minSeverity ?? env.PI_REVIEWER_MIN_SEVERITY ?? 'info'),
-    apiKey: String(args.apiKey ?? first(env.PI_API_KEY, env.ANTHROPIC_API_KEY, env.CLAUDE_API_KEY) ?? ''),
+    apiKey: String(
+      args.apiKey ?? first(env.PI_API_KEY, env.ANTHROPIC_API_KEY, env.CLAUDE_API_KEY) ?? '',
+    ),
     reviewFile: String(args.reviewFile ?? 'pi-review.md'),
     output: String(args.output ?? 'review-comments.json'),
     dryRun: toBoolean(args.dryRun),

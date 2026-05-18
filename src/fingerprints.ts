@@ -1,9 +1,12 @@
 import { createHash } from 'node:crypto';
+
 import type { Discussion } from './gitlab.js';
 import type { Fingerprints, ReviewComment, Side } from './types.js';
 
-const FINGERPRINT_MARKER_RE = /<!--\s*pi-reviewer:fingerprint-(?:primary|secondary):([a-f0-9]+)\s*-->/gi;
-const STRIP_FINGERPRINT_MARKER_RE = /<!--\s*pi-reviewer:fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->/gi;
+const FINGERPRINT_MARKER_RE =
+  /<!--\s*pi-reviewer:fingerprint-(?:primary|secondary):([a-f0-9]+)\s*-->/gi;
+const STRIP_FINGERPRINT_MARKER_RE =
+  /<!--\s*pi-reviewer:fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->/gi;
 
 export function sha256(input: string): string {
   return createHash('sha256').update(input).digest('hex');
@@ -12,7 +15,7 @@ export function sha256(input: string): string {
 export function normalizeBody(body: string): string {
   return body
     .replace(STRIP_FINGERPRINT_MARKER_RE, '')
-    .replace(/^[🔴🟡🔵]\s*/gm, '')
+    .replace(/^(?:🔴|🟡|🔵)\s*/gmu, '')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -32,7 +35,13 @@ function parseHunkHeader(line: string): { oldLine: number; newLine: number } | n
   return { oldLine: Number(match[1]), newLine: Number(match[2]) };
 }
 
-function hunkContainsLine(hunkLines: string[], targetLine: number, side: Side, startOld: number, startNew: number): boolean {
+function hunkContainsLine(
+  hunkLines: string[],
+  targetLine: number,
+  side: Side,
+  startOld: number,
+  startNew: number,
+): boolean {
   let oldLine = startOld;
   let newLine = startNew;
 
@@ -47,7 +56,12 @@ function hunkContainsLine(hunkLines: string[], targetLine: number, side: Side, s
   return false;
 }
 
-export function extractDiffHunkContext(diff: string, file: string, line: number, side: Side): string {
+export function extractDiffHunkContext(
+  diff: string,
+  file: string,
+  line: number,
+  side: Side,
+): string {
   const lines = diff.split('\n');
   const state: FileState = { oldPath: '', newPath: '' };
 
@@ -69,7 +83,11 @@ export function extractDiffHunkContext(diff: string, file: string, line: number,
     if (!header) continue;
 
     let end = i + 1;
-    while (end < lines.length && !lines[end].startsWith('@@') && !lines[end].startsWith('diff --git ')) {
+    while (
+      end < lines.length &&
+      !lines[end].startsWith('@@') &&
+      !lines[end].startsWith('diff --git ')
+    ) {
       end += 1;
     }
 

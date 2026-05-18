@@ -12,3 +12,4 @@ export declare function getMergeDiff(targetBranch: string, options?: GitOptions 
     remote?: string;
     context?: number;
 }): Promise<string>;
+//# sourceMappingURL=git.d.ts.map
