@@ -204,8 +204,11 @@ export async function run(config: Config): Promise<RunResult> {
         return result.posted;
       },
     );
+    const duplicates = generated.length - newCount;
+    const raceLost = newCount - posted;
+    const extra = raceLost > 0 ? `, ${raceLost} dropped by pre-publish re-check` : '';
     console.log(
-      `Posted ${posted} new GitLab MR discussions (${generated.length - posted} duplicates skipped).`,
+      `Posted ${posted} new GitLab MR discussions (${duplicates} duplicates skipped${extra}).`,
     );
     runContext.posted = posted;
     return { generated, posted, usage };
