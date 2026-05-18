@@ -29,5 +29,18 @@ export default defineConfig({
     outputFile: {
       junit: './test-results/junit.xml',
     },
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'json-summary', 'html', 'lcov'],
+      reportsDirectory: './coverage',
+      include: ['src/**/*.ts'],
+      exclude: ['src/**/*.test.ts', 'src/cli.ts', 'src/types.ts'],
+      thresholds: {
+        statements: 70,
+        branches: 65,
+        functions: 65,
+        lines: 70,
+      },
+    },
   },
 });

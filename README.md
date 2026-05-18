@@ -117,6 +117,40 @@ The CLI auto-resolves values from CI variables and common token/key names.
 
 Use these files for CI debugging and auditing.
 
+## Diagnostics channels
+
+`gitlab-review` publishes opt-in Node.js `diagnostics_channel` tracing events with no external telemetry dependency. Subscribers can listen before calling `run()` or from a Node preload/import hook before running the CLI.
+
+Base tracing channel names:
+
+- `@ikko-dev/gitlab-review:run`
+- `@ikko-dev/gitlab-review:gitlab.get_merge_request`
+- `@ikko-dev/gitlab-review:gitlab.get_latest_version`
+- `@ikko-dev/gitlab-review:git.prepare_history`
+- `@ikko-dev/gitlab-review:git.get_merge_diff`
+- `@ikko-dev/gitlab-review:reviewer.run`
+- `@ikko-dev/gitlab-review:review.parse`
+- `@ikko-dev/gitlab-review:gitlab.get_discussions`
+- `@ikko-dev/gitlab-review:comments.build`
+- `@ikko-dev/gitlab-review:artifact.write_output`
+- `@ikko-dev/gitlab-review:gitlab.post_comments`
+
+Node emits tracing subchannels as `tracing:<base>:start`, `:end`, `:asyncStart`, `:asyncEnd`, and `:error`. Payloads include safe run metadata (`runId`, phase, project, MR, GitLab URL, model, severity, timings, comment counts, and sanitized `errorInfo`) and intentionally exclude tokens/API keys.
+
+```js
+import { diagnosticChannels, run } from '@ikko-dev/gitlab-review';
+
+const onStart = (ctx) => console.log('review started', ctx.runId);
+const onEnd = (ctx) => console.log('review completed', ctx.durationMs, ctx.generated);
+const onError = (ctx) => console.error('review failed', ctx.errorInfo);
+
+diagnosticChannels.run.start.subscribe(onStart);
+diagnosticChannels.run.asyncEnd.subscribe(onEnd);
+diagnosticChannels.run.error.subscribe(onError);
+
+await run(config);
+```
+
 ## Duplicate prevention
 
 Each generated comment body includes hidden markers:

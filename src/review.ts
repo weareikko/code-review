@@ -1,3 +1,13 @@
+export type { DiagnosticContext, DiagnosticError, DiagnosticPhase } from './diagnostics.js';
+export {
+  DIAGNOSTIC_CHANNEL_NAMES,
+  DIAGNOSTIC_CHANNEL_PREFIX,
+  createDiagnosticContext,
+  createDiagnosticRunId,
+  diagnosticChannels,
+  traceDiagnostic,
+  traceDiagnosticPhase,
+} from './diagnostics.js';
 export type {
   DiffRefs,
   Fingerprints,
