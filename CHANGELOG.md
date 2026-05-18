@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-05-18
+
 ### Added
 
-- Make the review agent's `thinkingLevel` configurable. New `--thinking <level>` flag and `PI_REVIEWER_THINKING_LEVEL` env var accept `off`, `minimal`, `low`, `medium`, `high`, or `xhigh` (default: `off`). Thinking tokens are billed at the model output rate and are reflected in the `Review usage:` line and `review-usage.json`.
+- Make the review agent's `thinkingLevel` configurable. New `--thinking <level>` flag and `PI_REVIEWER_THINKING_LEVEL` env var accept `off`, `minimal`, `low`, `medium`, `high`, or `xhigh` (default: `off`). Thinking tokens are billed at the model output rate and are reflected in the `Review usage:` line and `review-usage.json` ([#13]).
 
 ## [0.1.3] - 2026-05-18
 
@@ -58,12 +60,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.3...HEAD
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.4...HEAD
+[0.1.4]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.4
 [0.1.3]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.3
 [0.1.2]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.2
 [0.1.1]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.1
 [#11]: https://github.com/ikko-dev/gitlab-review/pull/11
 [#12]: https://github.com/ikko-dev/gitlab-review/pull/12
+[#13]: https://github.com/ikko-dev/gitlab-review/pull/13
 [0.1.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.0
 [a6166f5]: https://github.com/ikko-dev/gitlab-review/commit/a6166f5
 [310dccf]: https://github.com/ikko-dev/gitlab-review/commit/310dccf
