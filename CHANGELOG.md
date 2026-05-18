@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-05-18
+
 ### Fixed
 
-- `formatUsageLine` now reports billable input as `input + cacheRead + cacheWrite` instead of the uncached delta alone, so the `Review usage:` line agrees with the cost figure when Anthropic prompt caching is active. Adds a `(N cached)` hint when `cacheRead > 0`.
+- `formatUsageLine` now reports billable input as `input + cacheRead + cacheWrite` instead of the uncached delta alone, so the `Review usage:` line agrees with the cost figure when Anthropic prompt caching is active. Adds a `(N cached)` hint when `cacheRead > 0` ([#12]).
 
 ## [0.1.2] - 2026-05-18
 
@@ -52,10 +54,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.2...HEAD
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.3...HEAD
+[0.1.3]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.3
 [0.1.2]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.2
 [0.1.1]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.1
 [#11]: https://github.com/ikko-dev/gitlab-review/pull/11
+[#12]: https://github.com/ikko-dev/gitlab-review/pull/12
 [0.1.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.0
 [a6166f5]: https://github.com/ikko-dev/gitlab-review/commit/a6166f5
 [310dccf]: https://github.com/ikko-dev/gitlab-review/commit/310dccf

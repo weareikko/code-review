@@ -1,6 +1,6 @@
 {
   "name": "@ikko-dev/gitlab-review",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Run pi-reviewer in GitLab CI and post deduplicated MR discussions.",
   "keywords": [
     "ci",
