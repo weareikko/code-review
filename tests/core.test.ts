@@ -397,33 +397,155 @@ describe('postGeneratedComments strategies', () => {
     expect(fetchImpl.mock.calls[0][1]?.method).toBe('POST');
   });
 
-  it('draft mode creates N drafts then bulk-publishes once', async () => {
-    const fetchImpl = vi
-      .fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 100, author_id: 1, note: 'x' })))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 101, author_id: 1, note: 'y' })))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+  const draftA: GeneratedComment = {
+    ...fresh,
+    fingerprints: { primary: 'aaaa', secondary: 'aabb' },
+  };
+  const draftB: GeneratedComment = {
+    ...fresh,
+    fingerprints: { primary: 'bbbb', secondary: 'bbcc' },
+  };
+
+  type RouteHandler = (init: RequestInit | undefined) => Response;
+
+  function routeFetch(routes: Record<string, RouteHandler>): ReturnType<typeof vi.fn> {
+    return vi.fn((url: string, init?: RequestInit) => {
+      for (const [pattern, handler] of Object.entries(routes)) {
+        const [method, path] = pattern.split(' ');
+        if ((init?.method ?? 'GET') === method && url.includes(path)) {
+          return Promise.resolve(handler(init));
+        }
+      }
+      throw new Error(`Unrouted: ${init?.method ?? 'GET'} ${url}`);
+    });
+  }
+
+  it('draft mode: cleans no orphans, creates N drafts, bulk-publishes once', async () => {
+    let createdId = 100;
+    const fetchImpl = routeFetch({
+      'GET /user': () => new Response(JSON.stringify({ id: 1 })),
+      'GET /draft_notes': () =>
+        new Response(JSON.stringify([]), { headers: { 'x-next-page': '' } }),
+      'GET /discussions': () =>
+        new Response(JSON.stringify([]), { headers: { 'x-next-page': '' } }),
+      'POST /draft_notes/bulk_publish': () => new Response(null, { status: 204 }),
+      'POST /draft_notes': () => {
+        const id = createdId++;
+        return new Response(JSON.stringify({ id, author_id: 1, note: 'x' }));
+      },
+    });
 
     const result = await postGeneratedComments(
       clientWith(fetchImpl),
       'p',
       '1',
-      [fresh, fresh, dup],
+      [draftA, draftB, dup],
       'draft',
     );
 
-    expect(result.posted).toBe(2);
-    expect(result.drafts).toEqual({
-      abandoned: 0,
-      created: 2,
-      deletedPrePublish: 0,
-      published: 2,
+    expect(result).toEqual({
+      posted: 2,
+      drafts: { abandoned: 0, created: 2, deletedPrePublish: 0, published: 2 },
     });
-    expect(fetchImpl).toHaveBeenCalledTimes(3);
-    expect(fetchImpl.mock.calls[0][0]).toContain('/draft_notes');
-    expect(fetchImpl.mock.calls[0][0]).not.toContain('bulk_publish');
-    expect(fetchImpl.mock.calls[2][0]).toContain('/draft_notes/bulk_publish');
-    expect(fetchImpl.mock.calls[2][1]?.method).toBe('POST');
+    const calls = fetchImpl.mock.calls.map(
+      (call) => `${call[1]?.method ?? 'GET'} ${call[0].replace(/.*\/api\/v4/, '')}`,
+    );
+    expect(calls.filter((c) => c.startsWith('POST') && c.includes('/draft_notes/bulk_publish')))
+      .toHaveLength(1);
+    expect(
+      calls.filter(
+        (c) => c.startsWith('POST') && c.includes('/draft_notes') && !c.includes('bulk_publish'),
+      ),
+    ).toHaveLength(2);
+  });
+
+  it('draft mode: deletes orphan drafts authored by the current user before creating new ones', async () => {
+    const fetchImpl = routeFetch({
+      'GET /user': () => new Response(JSON.stringify({ id: 1 })),
+      'GET /draft_notes': () =>
+        new Response(
+          JSON.stringify([
+            { id: 7, author_id: 1, note: 'orphan-mine' },
+            { id: 8, author_id: 2, note: 'orphan-others' },
+          ]),
+          { headers: { 'x-next-page': '' } },
+        ),
+      'DELETE /draft_notes': () => new Response(null, { status: 204 }),
+      'GET /discussions': () =>
+        new Response(JSON.stringify([]), { headers: { 'x-next-page': '' } }),
+      'POST /draft_notes/bulk_publish': () => new Response(null, { status: 204 }),
+      'POST /draft_notes': () => new Response(JSON.stringify({ id: 100, author_id: 1, note: 'x' })),
+    });
+
+    const result = await postGeneratedComments(
+      clientWith(fetchImpl),
+      'p',
+      '1',
+      [draftA],
+      'draft',
+    );
+
+    expect(result.drafts).toMatchObject({ abandoned: 1, created: 1, published: 1 });
+    const deletes = fetchImpl.mock.calls.filter((c) => c[1]?.method === 'DELETE');
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0][0]).toContain('/draft_notes/7');
+  });
+
+  it('draft mode: deletes drafts whose fingerprints collide with newly-published discussions', async () => {
+    let createdId = 100;
+    const createdToFp = new Map<number, string>();
+    const fetchImpl = routeFetch({
+      'GET /user': () => new Response(JSON.stringify({ id: 1 })),
+      'GET /draft_notes': () =>
+        new Response(JSON.stringify([]), { headers: { 'x-next-page': '' } }),
+      'POST /draft_notes/bulk_publish': () => new Response(null, { status: 204 }),
+      'POST /draft_notes': (init) => {
+        const body = JSON.parse(String(init?.body ?? '{}'));
+        const id = createdId++;
+        const fp = body.body.includes('aaaa') ? 'aaaa' : 'bbbb';
+        createdToFp.set(id, fp);
+        return new Response(JSON.stringify({ id, author_id: 1, note: body.body }));
+      },
+      'GET /discussions': () =>
+        new Response(
+          JSON.stringify([
+            {
+              notes: [
+                {
+                  body:
+                    'collision <!-- pi-reviewer:fingerprint-primary:aaaa --> <!-- pi-reviewer:fingerprint-secondary:aabb -->',
+                },
+              ],
+            },
+          ]),
+          { headers: { 'x-next-page': '' } },
+        ),
+      'DELETE /draft_notes': () => new Response(null, { status: 204 }),
+    });
+
+    const aWithFp: GeneratedComment = {
+      ...draftA,
+      payload: { ...draftA.payload, body: 'collision text aaaa' },
+    };
+    const bWithFp: GeneratedComment = {
+      ...draftB,
+      payload: { ...draftB.payload, body: 'unique text bbbb' },
+    };
+
+    const result = await postGeneratedComments(
+      clientWith(fetchImpl),
+      'p',
+      '1',
+      [aWithFp, bWithFp],
+      'draft',
+    );
+
+    expect(result.drafts).toMatchObject({ created: 2, deletedPrePublish: 1, published: 1 });
+    expect(result.posted).toBe(1);
+    const deletes = fetchImpl.mock.calls.filter((c) => c[1]?.method === 'DELETE');
+    expect(deletes).toHaveLength(1);
+    const deletedId = Number(deletes[0][0].match(/draft_notes\/(\d+)/)?.[1]);
+    expect(createdToFp.get(deletedId)).toBe('aaaa');
   });
 });
 
