@@ -2,6 +2,21 @@
   "name": "@studiometa/gitlab-review",
   "version": "0.1.0",
   "description": "Run pi-reviewer in GitLab CI and post deduplicated MR discussions.",
+  "keywords": [
+    "gitlab",
+    "merge-request",
+    "code-review",
+    "ci",
+    "pi-reviewer"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/ikko-dev/gitlab-review.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ikko-dev/gitlab-review/issues"
+  },
+  "homepage": "https://github.com/ikko-dev/gitlab-review#readme",
   "type": "module",
   "bin": {
     "gitlab-review": "./bin/gitlab-review.js"
