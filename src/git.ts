@@ -16,6 +16,8 @@ export interface PrepareGitHistoryOptions extends GitOptions {
   codeQualityArtifacts?: string[];
 }
 
+const DEFAULT_DIFF_CONTEXT = 20;
+
 const DEFAULT_CODEQUALITY_ARTIFACTS = [
   'gl-code-quality-report.json',
   'codequality.json',
@@ -45,6 +47,15 @@ export async function git(args: string[], options: GitOptions = {}): Promise<str
 
 function remoteRef(remote: string, branch: string): string {
   return `refs/remotes/${remote}/${branch}`;
+}
+
+export function getMergeDiffArguments(
+  targetBranch: string,
+  options: { remote?: string; context?: number } = {},
+): string[] {
+  const remote = options.remote ?? 'origin';
+  const context = options.context ?? DEFAULT_DIFF_CONTEXT;
+  return [`${remoteRef(remote, targetBranch)}...HEAD`, `--unified=${context}`, '--'];
 }
 
 async function fetchBranch(remote: string, branch: string, options: GitOptions): Promise<void> {
@@ -127,10 +138,5 @@ export async function getMergeDiff(
   targetBranch: string,
   options: GitOptions & { remote?: string; context?: number } = {},
 ): Promise<string> {
-  const remote = options.remote ?? 'origin';
-  const context = options.context ?? 20;
-  return git(
-    ['diff', `${remoteRef(remote, targetBranch)}...HEAD`, `--unified=${context}`, '--'],
-    options,
-  );
+  return git(['diff', ...getMergeDiffArguments(targetBranch, options)], options);
 }

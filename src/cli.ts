@@ -14,7 +14,7 @@ import {
 } from './diagnostics.js';
 import { formatError, RuntimeError } from './errors.js';
 import { extractExistingFingerprints } from './fingerprints.js';
-import { getMergeDiff, prepareGitHistory } from './git.js';
+import { getMergeDiff, getMergeDiffArguments, prepareGitHistory } from './git.js';
 import { GitLabClient } from './gitlab.js';
 import { parseReviewMarkdownWithWarnings } from './parser.js';
 import { buildGeneratedComments } from './payloads.js';
@@ -114,11 +114,12 @@ export async function run(config: Config): Promise<RunResult> {
     await traceDiagnosticPhase('git.prepare_history', config, runId, () =>
       prepareGitHistory(mr.source_branch, mr.target_branch, { cwd: config.cwd }),
     );
+    const diffArgs = getMergeDiffArguments(mr.target_branch);
     const diff = await traceDiagnosticPhase('git.get_merge_diff', config, runId, () =>
       getMergeDiff(mr.target_branch, { cwd: config.cwd }),
     );
     await traceDiagnosticPhase('reviewer.run', config, runId, () =>
-      runPiReviewer(config, { cwd: config.cwd, diff }),
+      runPiReviewer(config, { cwd: config.cwd, diffArgs }),
     );
 
     const reviewPath = resolve(config.cwd, config.reviewFile);

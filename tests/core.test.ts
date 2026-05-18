@@ -1,3 +1,6 @@
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -8,7 +11,9 @@ import {
   type Severity,
 } from '../src/config.js';
 import { ConfigError, GitLabApiError, ReviewerError, formatError } from '../src/errors.js';
+import { getMergeDiffArguments } from '../src/git.js';
 import { GitLabClient } from '../src/gitlab.js';
+import { runPiReviewer, shellJoin, type PiReviewOptions } from '../src/pi-reviewer.js';
 import {
   appendFingerprintMarkers,
   buildGeneratedComments,
@@ -223,6 +228,56 @@ describe('GitLab pagination with mocked fetch', () => {
     });
 
     await expect(client.paginate('/items')).rejects.toThrow('invalid x-next-page header: 1');
+  });
+});
+
+describe('pi-reviewer integration', () => {
+  const minimalConfig: Config = {
+    project: 'proj',
+    mr: '1',
+    gitlabUrl: 'https://gitlab.example.com',
+    gitlabToken: 'tok',
+    gitlabAuthHeader: 'PRIVATE-TOKEN',
+    model: 'anthropic/claude-sonnet-4-5',
+    minSeverity: 'info',
+    apiKey: 'key',
+    reviewFile: 'pi-review.md',
+    output: 'review-comments.json',
+    dryRun: false,
+    noPost: false,
+    cwd: '/tmp',
+  };
+
+  it('builds the same merge diff arguments used for review and comment positions', () => {
+    expect(getMergeDiffArguments('develop')).toEqual([
+      'refs/remotes/origin/develop...HEAD',
+      '--unified=20',
+      '--',
+    ]);
+  });
+
+  it('shell-quotes diff arguments before forwarding them to pi-reviewer', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    let forwardedDiff: string | undefined;
+    const review = vi.fn(async (options: PiReviewOptions) => {
+      forwardedDiff = options.diff;
+      await writeFile(join(cwd, 'pi-review.md'), 'ok', 'utf8');
+    });
+
+    await runPiReviewer(
+      { ...minimalConfig, cwd },
+      {
+        cwd,
+        diffArgs: getMergeDiffArguments('develop; echo pwned'),
+        review,
+      },
+    );
+
+    expect(review).toHaveBeenCalledTimes(1);
+    expect(forwardedDiff).toBe(
+      "'refs/remotes/origin/develop; echo pwned...HEAD' '--unified=20' '--'",
+    );
+    expect(shellJoin(["quote'test", '--'])).toBe("'quote'\\''test' '--'");
   });
 });
 

@@ -10,7 +10,10 @@ import { toPiReviewerSeverity, type PiReviewerSeverity } from './types.js';
 
 export interface PiReviewerOptions {
   cwd?: string;
+  /** Pre-formatted, shell-safe value forwarded to pi-reviewer's `diff` option. */
   diff?: string;
+  /** Git diff arguments to shell-quote before forwarding to pi-reviewer. */
+  diffArgs?: string[];
   review?: PiReviewFunction;
 }
 
@@ -40,6 +43,14 @@ async function resolvePiReviewer(): Promise<PiReviewFunction> {
   return imported.review as PiReviewFunction;
 }
 
+export function shellQuote(argument: string): string {
+  return `'${argument.replaceAll("'", "'\\''")}'`;
+}
+
+export function shellJoin(arguments_: string[]): string {
+  return arguments_.map(shellQuote).join(' ');
+}
+
 async function ensureReadableFile(path: string): Promise<void> {
   try {
     await access(path);
@@ -67,7 +78,7 @@ export async function runPiReviewer(
   try {
     await review({
       cwd,
-      diff: options.diff,
+      diff: options.diffArgs ? shellJoin(options.diffArgs) : options.diff,
       output: 'file',
       model: config.model,
       minSeverity: toPiReviewerSeverity(config.minSeverity),
