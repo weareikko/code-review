@@ -1,5 +1,5 @@
 import { ConfigError } from './errors.js';
-import { type Severity } from './types.js';
+import { THINKING_LEVELS, type Severity, type ThinkingLevel } from './types.js';
 
 export type GitLabAuthHeader = 'PRIVATE-TOKEN' | 'JOB-TOKEN';
 
@@ -11,6 +11,7 @@ export interface Config {
   gitlabAuthHeader: GitLabAuthHeader;
   model: string;
   minSeverity: Severity;
+  thinkingLevel: ThinkingLevel;
   apiKey: string;
   reviewFile: string;
   output: string;
@@ -75,6 +76,12 @@ function resolveMinSeverity(value: unknown): Severity | string {
     .toLowerCase();
 }
 
+function resolveThinkingLevel(value: unknown): ThinkingLevel | string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase();
+}
+
 function resolveGitLabToken(
   args: ParsedArgs,
   env: NodeJS.ProcessEnv,
@@ -110,6 +117,9 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     minSeverity: resolveMinSeverity(
       args.minSeverity ?? env.PI_REVIEWER_MIN_SEVERITY ?? 'info',
     ) as Severity,
+    thinkingLevel: resolveThinkingLevel(
+      args.thinking ?? env.PI_REVIEWER_THINKING_LEVEL ?? 'off',
+    ) as ThinkingLevel,
     apiKey: String(
       args.apiKey ?? first(env.PI_API_KEY, env.ANTHROPIC_API_KEY, env.CLAUDE_API_KEY) ?? '',
     ),
@@ -141,6 +151,10 @@ export function validateConfig(config: Config): void {
   if (!['info', 'warn', 'critical'].includes(config.minSeverity)) {
     throw new ConfigError('--min-severity must be one of: info, warn, critical');
   }
+
+  if (!THINKING_LEVELS.includes(config.thinkingLevel)) {
+    throw new ConfigError(`--thinking must be one of: ${THINKING_LEVELS.join(', ')}`);
+  }
 }
 
-export { type Severity };
+export { type Severity, type ThinkingLevel };

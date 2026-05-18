@@ -1,6 +1,16 @@
 export type Severity = 'info' | 'warn' | 'critical';
 export type PiReviewerSeverity = 'INFO' | 'WARN' | 'CRITICAL';
 export type Side = 'RIGHT' | 'LEFT';
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+
+export const THINKING_LEVELS: readonly ThinkingLevel[] = [
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+];
 
 export interface ReviewComment {
   file: string;

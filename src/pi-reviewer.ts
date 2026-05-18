@@ -10,7 +10,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { Config } from './config.js';
-import type { PiReviewerSeverity } from './types.js';
+import type { PiReviewerSeverity, ThinkingLevel } from './types.js';
 
 import { ReviewerError } from './errors.js';
 import { toPiReviewerSeverity } from './types.js';
@@ -38,6 +38,7 @@ export interface CreateAgentParams {
   systemPrompt: string;
   model: Model<string>;
   tools: AgentTool[];
+  thinkingLevel: ThinkingLevel;
   getApiKey: () => Promise<string>;
 }
 
@@ -96,7 +97,7 @@ function defaultCreateAgent(params: CreateAgentParams): AgentLike {
       systemPrompt: params.systemPrompt,
       model: params.model,
       tools: params.tools,
-      thinkingLevel: 'off',
+      thinkingLevel: params.thinkingLevel,
     },
     getApiKey: params.getApiKey,
   });
@@ -370,6 +371,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     systemPrompt,
     model,
     tools,
+    thinkingLevel: config.thinkingLevel,
     getApiKey: async () => config.apiKey,
   });
 
