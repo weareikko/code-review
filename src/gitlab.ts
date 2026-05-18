@@ -1,5 +1,7 @@
 import type { GitLabAuthHeader } from './config.js';
 
+import { GitLabApiError } from './errors.js';
+
 export interface GitLabClientOptions {
   gitlabUrl: string;
   token: string;
@@ -68,8 +70,16 @@ export class GitLabClient {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `GitLab API ${init.method ?? 'GET'} ${path} failed: ${response.status} ${response.statusText}\n${await response.text()}`,
+      const responseBody = await response.text();
+      throw new GitLabApiError(
+        `GitLab API ${init.method ?? 'GET'} ${path} failed: ${response.status} ${response.statusText}`,
+        {
+          method: init.method ?? 'GET',
+          path,
+          status: response.status,
+          responseBody,
+          hint: 'Check the GitLab URL, token permissions, project ID/path, and merge request IID.',
+        },
       );
     }
 
@@ -92,14 +102,26 @@ export class GitLabClient {
       });
 
       if (!response.ok) {
-        throw new Error(
-          `GitLab API GET ${path} failed: ${response.status} ${response.statusText}\n${await response.text()}`,
+        const responseBody = await response.text();
+        throw new GitLabApiError(
+          `GitLab API GET ${path} failed: ${response.status} ${response.statusText}`,
+          {
+            method: 'GET',
+            path,
+            status: response.status,
+            responseBody,
+            hint: 'Check the GitLab URL, token permissions, project ID/path, and merge request IID.',
+          },
         );
       }
 
       const body = (await response.json()) as unknown;
       if (!Array.isArray(body)) {
-        throw new Error(`GitLab API GET ${path} returned a non-array paginated response`);
+        throw new GitLabApiError(`GitLab API GET ${path} returned a non-array paginated response`, {
+          method: 'GET',
+          path,
+          hint: 'The GitLab API response shape was unexpected.',
+        });
       }
       items.push(...(body as T[]));
 
@@ -107,7 +129,14 @@ export class GitLabClient {
       if (!next) break;
       const nextPage = Number(next);
       if (!Number.isInteger(nextPage) || nextPage <= page) {
-        throw new Error(`GitLab API GET ${path} returned invalid x-next-page header: ${next}`);
+        throw new GitLabApiError(
+          `GitLab API GET ${path} returned invalid x-next-page header: ${next}`,
+          {
+            method: 'GET',
+            path,
+            hint: 'The GitLab API pagination headers were unexpected.',
+          },
+        );
       }
       page = nextPage;
     }
@@ -126,7 +155,11 @@ export class GitLabClient {
       `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/versions`,
     );
     if (!versions[0])
-      throw new Error('No GitLab MR version found. Ensure the merge request has a diff version.');
+      throw new GitLabApiError('No GitLab MR version found.', {
+        method: 'GET',
+        path: `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/versions`,
+        hint: 'Ensure the merge request has a diff version.',
+      });
     return versions[0];
   }
 

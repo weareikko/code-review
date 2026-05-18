@@ -1,3 +1,4 @@
+import { ConfigError } from './errors.js';
 import { type Severity } from './types.js';
 
 export type GitLabAuthHeader = 'PRIVATE-TOKEN' | 'JOB-TOKEN';
@@ -48,7 +49,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
     } else {
       const next = argv[i + 1];
       if (!next || next.startsWith('--')) {
-        throw new Error(`Missing value for --${rawKey}`);
+        throw new ConfigError(`Missing value for --${rawKey}`, {
+          hint: `Pass a value after --${rawKey} or use --${rawKey}=<value>.`,
+        });
       }
       args[key] = next;
       i += 1;
@@ -129,13 +132,13 @@ export function validateConfig(config: Config): void {
     .map(([name]) => `--${name}`);
 
   if (missing.length > 0) {
-    throw new Error(
-      `Missing required configuration: ${missing.join(', ')}. Provide CLI flags or GitLab CI environment variables.`,
-    );
+    throw new ConfigError(`Missing required configuration: ${missing.join(', ')}.`, {
+      hint: 'Provide CLI flags or the corresponding GitLab CI environment variables.',
+    });
   }
 
   if (!['info', 'warn', 'critical'].includes(config.minSeverity)) {
-    throw new Error('--min-severity must be one of: info, warn, critical');
+    throw new ConfigError('--min-severity must be one of: info, warn, critical');
   }
 }
 

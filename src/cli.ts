@@ -7,6 +7,7 @@ import type { Config } from './config.js';
 import type { DiffRefs, GeneratedComment } from './types.js';
 
 import { resolveConfig, validateConfig } from './config.js';
+import { formatError, RuntimeError } from './errors.js';
 import { extractExistingFingerprints } from './fingerprints.js';
 import { getMergeDiff, prepareGitHistory } from './git.js';
 import { GitLabClient } from './gitlab.js';
@@ -54,7 +55,12 @@ function readVersion(): string {
 function assertNodeVersion(): void {
   const major = Number(process.versions.node.split('.')[0]);
   if (!Number.isInteger(major) || major < 24) {
-    throw new Error(`Node.js >=24 is required; current version is ${process.versions.node}.`);
+    throw new RuntimeError(
+      `Node.js >=24 is required; current version is ${process.versions.node}.`,
+      {
+        hint: 'Use a Node 24 image/runtime in GitLab CI.',
+      },
+    );
   }
 }
 
@@ -139,7 +145,7 @@ function isDirectRun(): boolean {
 
 if (isDirectRun()) {
   main().catch((error) => {
-    console.error(error instanceof Error ? error.message : error);
+    console.error(formatError(error));
     process.exitCode = 1;
   });
 }

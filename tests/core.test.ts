@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { resolveConfig } from '../src/config.js';
+import { resolveConfig, validateConfig } from '../src/config.js';
+import { ConfigError, GitLabApiError, ReviewerError, formatError } from '../src/errors.js';
 import { GitLabClient } from '../src/gitlab.js';
 import {
   appendFingerprintMarkers,
@@ -91,6 +92,17 @@ describe('config env defaults', () => {
   });
 });
 
+describe('typed errors', () => {
+  it('throws ConfigError for invalid config', () => {
+    expect(() => validateConfig(resolveConfig([], {}))).toThrow(ConfigError);
+  });
+
+  it('formats typed errors with code and hint', () => {
+    const error = new ReviewerError('review failed', { hint: 'check logs' });
+    expect(formatError(error)).toBe('[REVIEWER_ERROR] review failed\nHint: check logs');
+  });
+});
+
 describe('GitLab client URL construction', () => {
   it('builds API v4 URLs and query strings from trimmed base URL', () => {
     const client = new GitLabClient({ gitlabUrl: 'https://gitlab.example.com/', token: 't' });
@@ -153,6 +165,22 @@ describe('GitLab pagination with mocked fetch', () => {
       'JOB-TOKEN': 'job-token',
       Accept: 'application/json',
     });
+  });
+
+  it('throws typed GitLabApiError on API failures', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response('denied', {
+        status: 403,
+        statusText: 'Forbidden',
+      }),
+    );
+    const client = new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+    });
+
+    await expect(client.request('/items')).rejects.toThrow(GitLabApiError);
   });
 
   it('fails when paginated payload is not an array', async () => {

@@ -3,6 +3,8 @@ import { unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
+import { GitError } from './errors.js';
+
 const exec = promisify(execFile);
 
 export interface GitOptions {
@@ -27,11 +29,18 @@ function gitErrorMessage(error: unknown): string {
 }
 
 export async function git(args: string[], options: GitOptions = {}): Promise<string> {
-  const { stdout } = await exec('git', args, {
-    cwd: options.cwd,
-    maxBuffer: 50 * 1024 * 1024,
-  });
-  return stdout;
+  try {
+    const { stdout } = await exec('git', args, {
+      cwd: options.cwd,
+      maxBuffer: 50 * 1024 * 1024,
+    });
+    return stdout;
+  } catch (error) {
+    throw new GitError(`git ${args.join(' ')} failed.`, {
+      cause: error,
+      hint: gitErrorMessage(error),
+    });
+  }
 }
 
 function remoteRef(remote: string, branch: string): string {
@@ -94,9 +103,9 @@ export async function prepareGitHistory(
   }
 
   if (fetchErrors.length === 2) {
-    throw new Error(
-      `Unable to fetch MR source/target branches from ${remote}.\n${fetchErrors.join('\n')}`,
-    );
+    throw new GitError(`Unable to fetch MR source/target branches from ${remote}.`, {
+      hint: fetchErrors.join('\n'),
+    });
   }
 
   try {
@@ -104,10 +113,12 @@ export async function prepareGitHistory(
   } catch (error) {
     const fetchDetail =
       fetchErrors.length > 0 ? `\nFetch warnings:\n${fetchErrors.join('\n')}` : '';
-    throw new Error(
-      `Unable to prepare Git history for MR review: merge-base ${remoteRef(remote, targetBranch)} HEAD failed. ` +
-        `Set GIT_DEPTH: 0 or ensure ${remote}/${targetBranch} is fetchable.${fetchDetail}\n${gitErrorMessage(error)}`,
-      { cause: error },
+    throw new GitError(
+      `Unable to prepare Git history for MR review: merge-base ${remoteRef(remote, targetBranch)} HEAD failed.`,
+      {
+        cause: error,
+        hint: `Set GIT_DEPTH: 0 or ensure ${remote}/${targetBranch} is fetchable.${fetchDetail}\n${gitErrorMessage(error)}`,
+      },
     );
   }
 }

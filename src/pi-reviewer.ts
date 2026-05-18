@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 
 import type { Config } from './config.js';
 
+import { ReviewerError } from './errors.js';
 import { toPiReviewerSeverity, type PiReviewerSeverity } from './types.js';
 
 export interface PiReviewerOptions {
@@ -32,7 +33,9 @@ async function resolvePiReviewer(): Promise<PiReviewFunction> {
   const reviewModule = pathToFileURL(join(dirname(pkg), 'dist/src/ci/review.js')).href;
   const imported = (await import(reviewModule)) as { review?: unknown };
   if (typeof imported.review !== 'function') {
-    throw new Error('Unable to load pi-reviewer review() from pinned dependency.');
+    throw new ReviewerError('Unable to load pi-reviewer review() from pinned dependency.', {
+      hint: 'Run npm install and ensure the pinned pi-reviewer dependency is available.',
+    });
   }
   return imported.review as PiReviewFunction;
 }
@@ -41,12 +44,14 @@ async function ensureReadableFile(path: string): Promise<void> {
   try {
     await access(path);
   } catch {
-    throw new Error(`pi-reviewer did not generate ${path}`);
+    throw new ReviewerError(`pi-reviewer did not generate ${path}`, {
+      hint: 'Check pi-reviewer logs and ensure the review command completed successfully.',
+    });
   }
 
   const content = await readFile(path, 'utf8');
   if (content.trim().length === 0) {
-    throw new Error(`pi-reviewer generated an empty review file at ${path}`);
+    throw new ReviewerError(`pi-reviewer generated an empty review file at ${path}`);
   }
 }
 
@@ -59,14 +64,21 @@ export async function runPiReviewer(
   const generatedPath = resolve(cwd, 'pi-review.md');
   const targetPath = resolve(cwd, config.reviewFile);
 
-  await review({
-    cwd,
-    diff: options.diff,
-    output: 'file',
-    model: config.model,
-    minSeverity: toPiReviewerSeverity(config.minSeverity),
-    piApiKey: config.apiKey,
-  });
+  try {
+    await review({
+      cwd,
+      diff: options.diff,
+      output: 'file',
+      model: config.model,
+      minSeverity: toPiReviewerSeverity(config.minSeverity),
+      piApiKey: config.apiKey,
+    });
+  } catch (error) {
+    throw new ReviewerError('pi-reviewer failed.', {
+      cause: error,
+      hint: error instanceof Error ? error.message : undefined,
+    });
+  }
 
   await ensureReadableFile(generatedPath);
 
