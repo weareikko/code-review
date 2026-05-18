@@ -18,6 +18,7 @@ import {
 import { ConfigError, GitLabApiError, ReviewerError, formatError } from '../src/errors.js';
 import { getMergeDiffArguments } from '../src/git.js';
 import { GitLabClient } from '../src/gitlab.js';
+import { postGeneratedComments } from '../src/posting.js';
 import { filterDiff, runReview, type AgentLike, type ReviewUsage } from '../src/pi-reviewer.js';
 import {
   appendFingerprintMarkers,
@@ -33,6 +34,7 @@ import {
   parseReviewMarkdownWithWarnings,
   traceDiagnostic,
   type DiagnosticContext,
+  type GeneratedComment,
 } from '../src/review.js';
 
 describe('config env defaults', () => {
@@ -333,6 +335,94 @@ describe('GitLab draft notes endpoints', () => {
       'https://gitlab.example.com/api/v4/projects/group%2Frepo/merge_requests/12/draft_notes/bulk_publish',
     );
     expect(fetchImpl.mock.calls[0][1]?.method).toBe('POST');
+  });
+});
+
+describe('postGeneratedComments strategies', () => {
+  const fresh: GeneratedComment = {
+    comment: { file: 'a.ts', line: 1, side: 'RIGHT', severity: 'info', body: 'fresh' },
+    fingerprints: { primary: 'p1', secondary: 's1' },
+    duplicate: false,
+    payload: {
+      body: 'fresh <!-- pi-reviewer:fingerprint-primary:p1 -->',
+      position: {
+        position_type: 'text',
+        base_sha: 'b',
+        start_sha: 's',
+        head_sha: 'h',
+        old_path: 'a.ts',
+        new_path: 'a.ts',
+        new_line: 1,
+      },
+    },
+  };
+  const dup: GeneratedComment = {
+    ...fresh,
+    comment: { ...fresh.comment, body: 'dup' },
+    duplicate: true,
+  };
+
+  function clientWith(fetchImpl: ReturnType<typeof vi.fn>) {
+    return new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+    });
+  }
+
+  it('returns zero with no API calls when every comment is a duplicate', async () => {
+    const fetchImpl = vi.fn();
+    const result = await postGeneratedComments(clientWith(fetchImpl), 'p', '1', [dup]);
+    expect(result).toEqual({ posted: 0 });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('direct mode posts one discussion per fresh comment', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify({ id: 'd1' }))),
+      );
+    const result = await postGeneratedComments(
+      clientWith(fetchImpl),
+      'p',
+      '1',
+      [fresh, dup, fresh],
+      'direct',
+    );
+    expect(result).toEqual({ posted: 2 });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls[0][0]).toContain('/merge_requests/1/discussions');
+    expect(fetchImpl.mock.calls[0][1]?.method).toBe('POST');
+  });
+
+  it('draft mode creates N drafts then bulk-publishes once', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 100, author_id: 1, note: 'x' })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 101, author_id: 1, note: 'y' })))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    const result = await postGeneratedComments(
+      clientWith(fetchImpl),
+      'p',
+      '1',
+      [fresh, fresh, dup],
+      'draft',
+    );
+
+    expect(result.posted).toBe(2);
+    expect(result.drafts).toEqual({
+      abandoned: 0,
+      created: 2,
+      deletedPrePublish: 0,
+      published: 2,
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl.mock.calls[0][0]).toContain('/draft_notes');
+    expect(fetchImpl.mock.calls[0][0]).not.toContain('bulk_publish');
+    expect(fetchImpl.mock.calls[2][0]).toContain('/draft_notes/bulk_publish');
+    expect(fetchImpl.mock.calls[2][1]?.method).toBe('POST');
   });
 });
 

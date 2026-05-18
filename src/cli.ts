@@ -184,10 +184,15 @@ export async function run(config: Config): Promise<RunResult> {
       config,
       runId,
       async (context) => {
-        const count = await postGeneratedComments(gitlab, config.project, config.mr, generated);
+        const result = await postGeneratedComments(
+          gitlab,
+          config.project,
+          config.mr,
+          generated,
+        );
         recordCommentCounts(context, generated);
-        context.posted = count;
-        return count;
+        context.posted = result.posted;
+        return result.posted;
       },
     );
     console.log(
