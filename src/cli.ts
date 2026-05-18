@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import type { Config } from './config.js';
+import type { ReviewUsage } from './pi-reviewer.js';
 import type { DiffRefs, GeneratedComment } from './types.js';
 
 import { resolveConfig, validateConfig } from './config.js';
@@ -14,11 +15,11 @@ import {
 } from './diagnostics.js';
 import { formatError, RuntimeError } from './errors.js';
 import { extractExistingFingerprints } from './fingerprints.js';
-import { getMergeDiff, getMergeDiffArguments, prepareGitHistory } from './git.js';
+import { getMergeDiff, prepareGitHistory } from './git.js';
 import { GitLabClient } from './gitlab.js';
 import { parseReviewMarkdownWithWarnings } from './parser.js';
 import { buildGeneratedComments } from './payloads.js';
-import { runPiReviewer } from './pi-reviewer.js';
+import { runReview } from './pi-reviewer.js';
 import { postGeneratedComments } from './posting.js';
 
 export type { DiagnosticContext, DiagnosticError, DiagnosticPhase } from './diagnostics.js';
@@ -56,6 +57,7 @@ Options:
 export interface RunResult {
   generated: GeneratedComment[];
   posted: number;
+  usage: ReviewUsage;
 }
 
 function readVersion(): string {
@@ -114,12 +116,11 @@ export async function run(config: Config): Promise<RunResult> {
     await traceDiagnosticPhase('git.prepare_history', config, runId, () =>
       prepareGitHistory(mr.source_branch, mr.target_branch, { cwd: config.cwd }),
     );
-    const diffArgs = getMergeDiffArguments(mr.target_branch);
     const diff = await traceDiagnosticPhase('git.get_merge_diff', config, runId, () =>
       getMergeDiff(mr.target_branch, { cwd: config.cwd }),
     );
-    await traceDiagnosticPhase('reviewer.run', config, runId, () =>
-      runPiReviewer(config, { cwd: config.cwd, diffArgs }),
+    const usage = await traceDiagnosticPhase('reviewer.run', config, runId, () =>
+      runReview(config, { cwd: config.cwd, diff }),
     );
 
     const reviewPath = resolve(config.cwd, config.reviewFile);
@@ -158,18 +159,22 @@ export async function run(config: Config): Promise<RunResult> {
     );
 
     const outputPath = resolve(config.cwd, config.output);
+    const usagePath = resolve(config.cwd, 'review-usage.json');
     await traceDiagnosticPhase('artifact.write_output', config, runId, async (context) => {
       await mkdir(dirname(outputPath), { recursive: true });
       await writeFile(outputPath, JSON.stringify(generated, null, 2), 'utf8');
+      await writeFile(usagePath, JSON.stringify(usage, null, 2), 'utf8');
       recordCommentCounts(context, generated);
     });
+
+    console.log(formatUsageLine(usage));
 
     const newCount = generated.filter((item) => !item.duplicate).length;
     recordCommentCounts(runContext, generated);
     if (config.dryRun || config.noPost) {
       console.log(`Generated ${generated.length} comments, ${newCount} new. Posting disabled.`);
       runContext.posted = 0;
-      return { generated, posted: 0 };
+      return { generated, posted: 0, usage };
     }
 
     const posted = await traceDiagnosticPhase(
@@ -187,8 +192,16 @@ export async function run(config: Config): Promise<RunResult> {
       `Posted ${posted} new GitLab MR discussions (${generated.length - posted} duplicates skipped).`,
     );
     runContext.posted = posted;
-    return { generated, posted };
+    return { generated, posted, usage };
   });
+}
+
+function formatUsageLine(usage: ReviewUsage): string {
+  const formatter = new Intl.NumberFormat('en-US');
+  const input = formatter.format(usage.tokens.input);
+  const output = formatter.format(usage.tokens.output);
+  const cost = usage.cost.total.toFixed(4);
+  return `Review usage: ${input} in / ${output} out tokens — $${cost} (${usage.model})`;
 }
 
 function recordCommentCounts(context: DiagnosticContext, generated: GeneratedComment[]): void {

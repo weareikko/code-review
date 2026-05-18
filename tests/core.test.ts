@@ -1,4 +1,7 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import type { AgentEvent } from '@earendil-works/pi-agent-core';
+import type { AssistantMessage } from '@earendil-works/pi-ai';
+
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -13,7 +16,7 @@ import {
 import { ConfigError, GitLabApiError, ReviewerError, formatError } from '../src/errors.js';
 import { getMergeDiffArguments } from '../src/git.js';
 import { GitLabClient } from '../src/gitlab.js';
-import { runPiReviewer, shellJoin, type PiReviewOptions } from '../src/pi-reviewer.js';
+import { filterDiff, runReview, type AgentLike } from '../src/pi-reviewer.js';
 import {
   appendFingerprintMarkers,
   buildGeneratedComments,
@@ -231,7 +234,7 @@ describe('GitLab pagination with mocked fetch', () => {
   });
 });
 
-describe('pi-reviewer integration', () => {
+describe('runReview pipeline', () => {
   const minimalConfig: Config = {
     project: 'proj',
     mr: '1',
@@ -248,6 +251,72 @@ describe('pi-reviewer integration', () => {
     cwd: '/tmp',
   };
 
+  const sampleDiff = [
+    'diff --git a/src/a.ts b/src/a.ts',
+    '--- a/src/a.ts',
+    '+++ b/src/a.ts',
+    '@@ -1,2 +1,3 @@',
+    ' line1',
+    '+added',
+    ' line2',
+    '',
+  ].join('\n');
+
+  function makeAssistant(
+    text: string,
+    usage: Partial<AssistantMessage['usage']> & {
+      cost?: Partial<AssistantMessage['usage']['cost']>;
+    } = {},
+  ): AssistantMessage {
+    return {
+      role: 'assistant',
+      content: text ? [{ type: 'text', text }] : [],
+      api: 'anthropic-messages',
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-5',
+      stopReason: 'stop',
+      timestamp: Date.now(),
+      usage: {
+        input: usage.input ?? 0,
+        output: usage.output ?? 0,
+        cacheRead: usage.cacheRead ?? 0,
+        cacheWrite: usage.cacheWrite ?? 0,
+        totalTokens:
+          usage.totalTokens ??
+          (usage.input ?? 0) +
+            (usage.output ?? 0) +
+            (usage.cacheRead ?? 0) +
+            (usage.cacheWrite ?? 0),
+        cost: {
+          input: usage.cost?.input ?? 0,
+          output: usage.cost?.output ?? 0,
+          cacheRead: usage.cost?.cacheRead ?? 0,
+          cacheWrite: usage.cost?.cacheWrite ?? 0,
+          total: usage.cost?.total ?? 0,
+        },
+      },
+    } as AssistantMessage;
+  }
+
+  function fakeAgent(messages: AssistantMessage[]): AgentLike {
+    let listener: ((event: AgentEvent) => void | Promise<void>) | undefined;
+    return {
+      subscribe(fn) {
+        listener = fn;
+        return () => {
+          listener = undefined;
+        };
+      },
+      async prompt() {
+        if (!listener) return;
+        for (const message of messages) {
+          await listener({ type: 'message_end', message });
+        }
+        await listener({ type: 'agent_end', messages });
+      },
+    };
+  }
+
   it('builds the same merge diff arguments used for review and comment positions', () => {
     expect(getMergeDiffArguments('develop')).toEqual([
       'refs/remotes/origin/develop...HEAD',
@@ -256,28 +325,113 @@ describe('pi-reviewer integration', () => {
     ]);
   });
 
-  it('shell-quotes diff arguments before forwarding them to pi-reviewer', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
-    let forwardedDiff: string | undefined;
-    const review = vi.fn(async (options: PiReviewOptions) => {
-      forwardedDiff = options.diff;
-      await writeFile(join(cwd, 'pi-review.md'), 'ok', 'utf8');
-    });
+  it('filterDiff drops noise files and reports them as skipped', () => {
+    const noisy = [
+      'diff --git a/package-lock.json b/package-lock.json',
+      '--- a/package-lock.json',
+      '+++ b/package-lock.json',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+      'diff --git a/src/a.ts b/src/a.ts',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -1 +1 @@',
+      '-a',
+      '+b',
+      '',
+    ].join('\n');
 
-    await runPiReviewer(
+    const result = filterDiff(noisy);
+    expect(result.skippedFiles).toEqual(['package-lock.json']);
+    expect(result.diff).toContain('src/a.ts');
+    expect(result.diff).not.toContain('package-lock.json');
+  });
+
+  it('accumulates usage across multiple assistant messages and writes pi-review.md', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const messages = [
+      makeAssistant('partial thought', {
+        input: 100,
+        output: 25,
+        cacheRead: 10,
+        cacheWrite: 5,
+        cost: { input: 0.001, output: 0.002, cacheRead: 0.0001, cacheWrite: 0.0002, total: 0.0033 },
+      }),
+      makeAssistant('Final review summary.', {
+        input: 50,
+        output: 40,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: { input: 0.0005, output: 0.003, cacheRead: 0, cacheWrite: 0, total: 0.0035 },
+      }),
+    ];
+
+    const usage = await runReview(
       { ...minimalConfig, cwd },
       {
         cwd,
-        diffArgs: getMergeDiffArguments('develop; echo pwned'),
-        review,
+        diff: sampleDiff,
+        createAgent: () => fakeAgent(messages),
       },
     );
 
-    expect(review).toHaveBeenCalledTimes(1);
-    expect(forwardedDiff).toBe(
-      "'refs/remotes/origin/develop; echo pwned...HEAD' '--unified=20' '--'",
+    expect(usage.model).toBe('anthropic/claude-sonnet-4-5');
+    expect(usage.tokens).toEqual({
+      input: 150,
+      output: 65,
+      cacheRead: 10,
+      cacheWrite: 5,
+      total: 230,
+    });
+    expect(usage.cost.input).toBeCloseTo(0.0015, 10);
+    expect(usage.cost.output).toBeCloseTo(0.005, 10);
+    expect(usage.cost.cacheRead).toBeCloseTo(0.0001, 10);
+    expect(usage.cost.cacheWrite).toBeCloseTo(0.0002, 10);
+    expect(usage.cost.total).toBeCloseTo(0.0068, 10);
+
+    const written = await readFile(join(cwd, 'pi-review.md'), 'utf8');
+    expect(written).toBe('Final review summary.');
+  });
+
+  it('passes the systemPrompt with minSeverity rule and tools scoped to cwd', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const captured = vi.fn();
+    const messages = [makeAssistant('ok', { input: 1, output: 1 })];
+
+    await runReview(
+      { ...minimalConfig, cwd, minSeverity: 'warn' },
+      {
+        cwd,
+        diff: sampleDiff,
+        createAgent: (params) => {
+          captured(params);
+          return fakeAgent(messages);
+        },
+      },
     );
-    expect(shellJoin(["quote'test", '--'])).toBe("'quote'\\''test' '--'");
+
+    expect(captured).toHaveBeenCalledTimes(1);
+    const params = captured.mock.calls[0][0];
+    expect(params.systemPrompt).toContain('Only report CRITICAL and WARN issues');
+    expect(Array.isArray(params.tools)).toBe(true);
+    expect(params.tools.length).toBeGreaterThan(0);
+  });
+
+  it('throws ReviewerError when the agent returns no text', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const messages = [makeAssistant('', { input: 1, output: 0 })];
+
+    await expect(
+      runReview(
+        { ...minimalConfig, cwd },
+        {
+          cwd,
+          diff: sampleDiff,
+          createAgent: () => fakeAgent(messages),
+        },
+      ),
+    ).rejects.toBeInstanceOf(ReviewerError);
   });
 });
 
