@@ -1,5 +1,5 @@
 {
-  "name": "@studiometa/gitlab-review",
+  "name": "@ikko-dev/gitlab-review",
   "version": "0.1.0",
   "description": "Run pi-reviewer in GitLab CI and post deduplicated MR discussions.",
   "keywords": [

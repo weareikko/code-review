@@ -1,4 +1,4 @@
-# @studiometa/gitlab-review
+# @ikko-dev/gitlab-review
 
 Run `pi-reviewer` in GitLab CI, parse inline comments, and post deduplicated merge request discussions.
 
@@ -13,13 +13,13 @@ Run `pi-reviewer` in GitLab CI, parse inline comments, and post deduplicated mer
 Run without installing:
 
 ```bash
-npx @studiometa/gitlab-review
+npx @ikko-dev/gitlab-review
 ```
 
 Or install in your project:
 
 ```bash
-npm i -D @studiometa/gitlab-review
+npm i -D @ikko-dev/gitlab-review
 npx gitlab-review --help
 ```
 
@@ -60,7 +60,7 @@ review:
     GIT_DEPTH: '0'
   script:
     - npm ci
-    - npx @studiometa/gitlab-review --min-severity warn
+    - npx @ikko-dev/gitlab-review --min-severity warn
   artifacts:
     when: always
     paths:
