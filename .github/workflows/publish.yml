@@ -82,6 +82,6 @@ jobs:
           tag: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           body: |
-            Release ${{ github.ref_name }} of @ikko-dev/gitlab-review.
+            Please refer to [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/CHANGELOG.md) for details.
           draft: false
           prerelease: ${{ env.IS_PRERELEASE }}
