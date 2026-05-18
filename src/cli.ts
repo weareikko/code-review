@@ -196,12 +196,16 @@ export async function run(config: Config): Promise<RunResult> {
   });
 }
 
-function formatUsageLine(usage: ReviewUsage): string {
+export function formatUsageLine(usage: ReviewUsage): string {
   const formatter = new Intl.NumberFormat('en-US');
-  const input = formatter.format(usage.tokens.input);
+  const billableInput = usage.tokens.input + usage.tokens.cacheRead + usage.tokens.cacheWrite;
+  const inputLabel =
+    usage.tokens.cacheRead > 0
+      ? `${formatter.format(billableInput)} in (${formatter.format(usage.tokens.cacheRead)} cached)`
+      : `${formatter.format(billableInput)} in`;
   const output = formatter.format(usage.tokens.output);
   const cost = usage.cost.total.toFixed(4);
-  return `Review usage: ${input} in / ${output} out tokens — $${cost} (${usage.model})`;
+  return `Review usage: ${inputLabel} / ${output} out tokens — $${cost} (${usage.model})`;
 }
 
 function recordCommentCounts(context: DiagnosticContext, generated: GeneratedComment[]): void {

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `formatUsageLine` now reports billable input as `input + cacheRead + cacheWrite` instead of the uncached delta alone, so the `Review usage:` line agrees with the cost figure when Anthropic prompt caching is active. Adds a `(N cached)` hint when `cacheRead > 0`.
+
 ## [0.1.2] - 2026-05-18
 
 ### Added
