@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { resolveConfig, validateConfig } from '../src/config.js';
+import {
+  parseArgs,
+  resolveConfig,
+  validateConfig,
+  type Config,
+  type Severity,
+} from '../src/config.js';
 import { ConfigError, GitLabApiError, ReviewerError, formatError } from '../src/errors.js';
 import { GitLabClient } from '../src/gitlab.js';
 import {
@@ -419,5 +425,95 @@ describe('payload generation', () => {
       old_line: 5,
     });
     expect(payload.position.new_line).toBeUndefined();
+  });
+});
+
+describe('validateConfig', () => {
+  const minimalConfig: Config = {
+    project: 'proj',
+    mr: '1',
+    gitlabUrl: 'https://gitlab.example.com',
+    gitlabToken: 'tok',
+    gitlabAuthHeader: 'PRIVATE-TOKEN',
+    model: 'anthropic/claude-sonnet-4-5',
+    minSeverity: 'info',
+    apiKey: 'key',
+    reviewFile: 'pi-review.md',
+    output: 'review-comments.json',
+    dryRun: false,
+    noPost: false,
+    cwd: '/tmp',
+  };
+
+  it('throws listing all missing required fields', () => {
+    expect(() => validateConfig({ ...minimalConfig, project: '', mr: '' })).toThrow(
+      '--project, --mr',
+    );
+  });
+
+  it('throws on invalid min-severity', () => {
+    expect(() => validateConfig({ ...minimalConfig, minSeverity: 'bad' as Severity })).toThrow(
+      '--min-severity must be one of',
+    );
+  });
+});
+
+describe('parseArgs', () => {
+  it('parses --key=value inline syntax', () => {
+    expect(parseArgs(['--project=123'])).toMatchObject({ project: '123' });
+  });
+
+  it('parses -h and -v short flags', () => {
+    expect(parseArgs(['-h'])).toMatchObject({ help: true });
+    expect(parseArgs(['-v'])).toMatchObject({ version: true });
+  });
+
+  it('throws on missing value for non-boolean flag', () => {
+    expect(() => parseArgs(['--project'])).toThrow('Missing value for --project');
+  });
+
+  it('parses --dry-run and --no-post as booleans', () => {
+    expect(parseArgs(['--dry-run', '--no-post'])).toMatchObject({
+      dryRun: true,
+      noPost: true,
+    });
+  });
+});
+
+describe('dry-run and no-post flags', () => {
+  it('resolveConfig sets dryRun from --dry-run', () => {
+    const cfg = resolveConfig([
+      '--dry-run',
+      '--project',
+      'p',
+      '--mr',
+      '1',
+      '--gitlab-url',
+      'https://gl.example.com',
+      '--gitlab-token',
+      't',
+      '--api-key',
+      'k',
+    ]);
+    expect(cfg.dryRun).toBe(true);
+    expect(cfg.noPost).toBe(false);
+  });
+
+  it('resolveConfig sets noPost from --no-post', () => {
+    const cfg = resolveConfig([
+      '--no-post',
+      '--project',
+      'p',
+      '--mr',
+      '1',
+      '--gitlab-url',
+      'https://gl.example.com',
+      '--gitlab-token',
+      't',
+      '--api-key',
+      'k',
+    ]);
+    expect(cfg.dryRun).toBe(false);
+    expect(cfg.noPost).toBe(true);
   });
 });
