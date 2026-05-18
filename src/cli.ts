@@ -195,6 +195,12 @@ export async function run(config: Config): Promise<RunResult> {
         );
         recordCommentCounts(context, generated);
         context.posted = result.posted;
+        if (result.drafts) {
+          context.draftsAbandoned = result.drafts.abandoned;
+          context.draftsCreated = result.drafts.created;
+          context.draftsDeletedPrePublish = result.drafts.deletedPrePublish;
+          context.draftsPublished = result.drafts.published;
+        }
         return result.posted;
       },
     );

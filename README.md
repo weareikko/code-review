@@ -153,6 +153,8 @@ Base tracing channel names:
 
 Node emits tracing subchannels as `tracing:<base>:start`, `:end`, `:asyncStart`, `:asyncEnd`, and `:error`. Payloads include safe run metadata (`runId`, phase, project, MR, GitLab URL, model, severity, timings, comment counts, and sanitized `errorInfo`) and intentionally exclude tokens/API keys.
 
+When `--posting-mode draft` is used, the `gitlab.post_comments` payload also exposes `draftsAbandoned`, `draftsCreated`, `draftsDeletedPrePublish`, and `draftsPublished` counters describing the draft lifecycle within the run.
+
 ```js
 import { diagnosticChannels, run } from '@ikko-dev/gitlab-review';
 
