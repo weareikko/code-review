@@ -237,6 +237,105 @@ describe('GitLab pagination with mocked fetch', () => {
   });
 });
 
+describe('GitLab draft notes endpoints', () => {
+  it('GETs /user with auth header', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ id: 42 })));
+    const client = new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+    });
+
+    await expect(client.getCurrentUser()).resolves.toEqual({ id: 42 });
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://gitlab.example.com/api/v4/user');
+    expect(fetchImpl.mock.calls[0][1]?.headers).toMatchObject({
+      'PRIVATE-TOKEN': 't',
+      Accept: 'application/json',
+    });
+  });
+
+  it('paginates draft notes with encoded project and MR IID', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify([{ id: 1, author_id: 7, note: 'a' }]), {
+          headers: { 'x-next-page': '' },
+        }),
+      );
+    const client = new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+    });
+
+    await expect(client.listDraftNotes('group/repo', '12')).resolves.toEqual([
+      { id: 1, author_id: 7, note: 'a' },
+    ]);
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'https://gitlab.example.com/api/v4/projects/group%2Frepo/merge_requests/12/draft_notes?per_page=100&page=1',
+    );
+  });
+
+  it('POSTs a draft note with a JSON body', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ id: 9, author_id: 7, note: 'x' })));
+    const client = new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+    });
+
+    const payload = { body: 'x', position: { position_type: 'text' } };
+    await expect(client.createDraftNote('group/repo', '12', payload)).resolves.toMatchObject({
+      id: 9,
+    });
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'https://gitlab.example.com/api/v4/projects/group%2Frepo/merge_requests/12/draft_notes',
+    );
+    const init = fetchImpl.mock.calls[0][1];
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe(JSON.stringify(payload));
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
+  });
+
+  it('DELETEs a draft note by id and tolerates 204 responses', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const client = new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+    });
+
+    await expect(client.deleteDraftNote('group/repo', '12', 9)).resolves.toBeUndefined();
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'https://gitlab.example.com/api/v4/projects/group%2Frepo/merge_requests/12/draft_notes/9',
+    );
+    expect(fetchImpl.mock.calls[0][1]?.method).toBe('DELETE');
+  });
+
+  it('POSTs to bulk_publish and tolerates 204 responses', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const client = new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+    });
+
+    await expect(client.bulkPublishDraftNotes('group/repo', '12')).resolves.toBeUndefined();
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'https://gitlab.example.com/api/v4/projects/group%2Frepo/merge_requests/12/draft_notes/bulk_publish',
+    );
+    expect(fetchImpl.mock.calls[0][1]?.method).toBe('POST');
+  });
+});
+
 describe('runReview pipeline', () => {
   const minimalConfig: Config = {
     project: 'proj',
