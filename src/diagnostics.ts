@@ -45,6 +45,10 @@ export interface DiagnosticContext {
   warnings?: number;
   reviewFile?: string;
   output?: string;
+  draftsAbandoned?: number;
+  draftsCreated?: number;
+  draftsDeletedPrePublish?: number;
+  draftsPublished?: number;
   errorInfo?: DiagnosticError;
 }
 

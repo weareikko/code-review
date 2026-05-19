@@ -27,6 +27,16 @@ export interface Discussion {
   notes: Array<{ body?: string | null }>;
 }
 
+export interface DraftNote {
+  id: number;
+  author_id: number;
+  note: string;
+}
+
+export interface CurrentUser {
+  id: number;
+}
+
 export class GitLabClient {
   private readonly base: string;
   private readonly token: string;
@@ -173,6 +183,37 @@ export class GitLabClient {
     return this.request(
       `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/discussions`,
       { method: 'POST', body: JSON.stringify(payload) },
+    );
+  }
+
+  getCurrentUser(): Promise<CurrentUser> {
+    return this.request('/user');
+  }
+
+  listDraftNotes(project: string, mr: string): Promise<DraftNote[]> {
+    return this.paginate(
+      `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/draft_notes`,
+    );
+  }
+
+  createDraftNote(project: string, mr: string, payload: unknown): Promise<DraftNote> {
+    return this.request(
+      `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/draft_notes`,
+      { method: 'POST', body: JSON.stringify(payload) },
+    );
+  }
+
+  async deleteDraftNote(project: string, mr: string, id: number): Promise<void> {
+    await this.request(
+      `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/draft_notes/${id}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  async bulkPublishDraftNotes(project: string, mr: string): Promise<void> {
+    await this.request(
+      `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/draft_notes/bulk_publish`,
+      { method: 'POST' },
     );
   }
 }
