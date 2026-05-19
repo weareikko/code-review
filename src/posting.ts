@@ -10,7 +10,7 @@ export const SUMMARY_HISTORY_ENTRY_START = '<!-- pi-reviewer:summary-history-ent
 export const SUMMARY_HISTORY_ENTRY_END = '<!-- pi-reviewer:summary-history-entry:end -->';
 export const SUMMARY_HISTORY_LIMIT = 10;
 export const REVIEWED_COMMIT_FOOTER_PATTERN =
-  /(?:Reviewed by \[@ikko-dev\/gitlab-review\]\(https:\/\/github\.com\/ikko-dev\/gitlab-review\) for commit|Reviewed commit:) `?([a-f0-9]{40})`?\.?/i;
+  /Reviewed by \[@ikko-dev\/gitlab-review\]\(https:\/\/github\.com\/ikko-dev\/gitlab-review\) for commit ([a-f0-9]{40})\./i;
 
 export type SummaryAction = 'created' | 'updated';
 

@@ -421,14 +421,6 @@ describe('summary note upsert', () => {
     expect(extractReviewedCommitSha(body)).toBe(commit);
   });
 
-  it('extracts the previous reviewed commit footer wording', () => {
-    expect(
-      extractReviewedCommitSha(
-        'Reviewed commit: `27dab603346bcb994190042029ce7368021ff21e` · [gitlab-review](https://github.com/ikko-dev/gitlab-review)',
-      ),
-    ).toBe('27dab603346bcb994190042029ce7368021ff21e');
-  });
-
   it('finds the reviewed commit from the current summary note', () => {
     const current = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     const older = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
