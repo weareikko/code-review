@@ -12,8 +12,10 @@ export interface SummaryResult {
   noteId?: number;
 }
 
-export function buildSummaryBody(summary: string): string {
-  return `${SUMMARY_MARKER}\n\n${summary.trim()}`;
+export function buildSummaryBody(summary: string, costFooter?: string): string {
+  const body = `${SUMMARY_MARKER}\n\n${summary.trim()}`;
+  if (!costFooter) return body;
+  return `${body}\n\n---\n\n${costFooter}`;
 }
 
 export function findExistingSummaryNoteId(discussions: Discussion[]): number | null {
@@ -35,8 +37,9 @@ export async function upsertSummaryNote(
   mr: string,
   summary: string,
   discussions: Discussion[],
+  costFooter?: string,
 ): Promise<SummaryResult> {
-  const body = buildSummaryBody(summary);
+  const body = buildSummaryBody(summary, costFooter);
   const existingId = findExistingSummaryNoteId(discussions);
   if (existingId !== null) {
     await gitlab.updateMergeRequestNote(project, mr, existingId, body);

@@ -200,6 +200,37 @@ export async function run(config: Config): Promise<RunResult> {
       return { generated, posted: 0, usage, summary: null };
     }
 
+    let summary: SummaryResult | null = null;
+    if (config.postSummary && parsed.summary) {
+      summary = await traceDiagnosticPhase(
+        'gitlab.upsert_summary',
+        config,
+        runId,
+        async (context) => {
+          const result = await upsertSummaryNote(
+            gitlab,
+            config.project,
+            config.mr,
+            parsed.summary as string,
+            discussions,
+            formatUsageLine(usage),
+          );
+          context.summaryAction = result.action;
+          context.summaryNoteId = result.noteId;
+          return result;
+        },
+      );
+      runContext.summaryAction = summary.action;
+      runContext.summaryNoteId = summary.noteId;
+      console.log(
+        summary.action === 'updated'
+          ? `Updated MR summary note (id ${summary.noteId}).`
+          : `Posted MR summary note (id ${summary.noteId}).`,
+      );
+    } else if (config.postSummary && !parsed.summary) {
+      console.log('No summary returned by the reviewer; skipping summary note.');
+    }
+
     const posted = await traceDiagnosticPhase(
       'gitlab.post_comments',
       config,
@@ -230,36 +261,6 @@ export async function run(config: Config): Promise<RunResult> {
       `Posted ${posted} new GitLab MR discussions (${duplicates} duplicates skipped${extra}).`,
     );
     runContext.posted = posted;
-
-    let summary: SummaryResult | null = null;
-    if (config.postSummary && parsed.summary) {
-      summary = await traceDiagnosticPhase(
-        'gitlab.upsert_summary',
-        config,
-        runId,
-        async (context) => {
-          const result = await upsertSummaryNote(
-            gitlab,
-            config.project,
-            config.mr,
-            parsed.summary as string,
-            discussions,
-          );
-          context.summaryAction = result.action;
-          context.summaryNoteId = result.noteId;
-          return result;
-        },
-      );
-      runContext.summaryAction = summary.action;
-      runContext.summaryNoteId = summary.noteId;
-      console.log(
-        summary.action === 'updated'
-          ? `Updated MR summary note (id ${summary.noteId}).`
-          : `Posted MR summary note (id ${summary.noteId}).`,
-      );
-    } else if (config.postSummary && !parsed.summary) {
-      console.log('No summary returned by the reviewer; skipping summary note.');
-    }
 
     return { generated, posted, usage, summary };
   });

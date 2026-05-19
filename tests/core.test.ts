@@ -395,6 +395,16 @@ describe('summary note upsert', () => {
     expect(body).toContain('Looks good. **Nice work.**');
   });
 
+  it('appends cost footer after a horizontal rule when provided', () => {
+    const body = buildSummaryBody('Great work.', 'Review usage: 100 in / 50 out — $0.0012 (model)');
+    expect(body).toContain('Great work.');
+    expect(body).toContain('---');
+    expect(body).toContain('Review usage: 100 in / 50 out — $0.0012 (model)');
+    const summaryIndex = body.indexOf('Great work.');
+    const footerIndex = body.indexOf('Review usage:');
+    expect(footerIndex).toBeGreaterThan(summaryIndex);
+  });
+
   it('finds the existing summary note by marker across discussions', () => {
     const discussions = [
       { notes: [{ id: 1, body: 'inline comment <!-- pi-reviewer:fingerprint-primary:abc -->' }] },
