@@ -3,11 +3,11 @@ import type { Fingerprints, GeneratedComment } from './types.js';
 
 import { extractExistingFingerprints } from './fingerprints.js';
 
-export const SUMMARY_MARKER = '<!-- pi-reviewer:summary -->';
-export const SUMMARY_HISTORY_START = '<!-- pi-reviewer:summary-history:start -->';
-export const SUMMARY_HISTORY_END = '<!-- pi-reviewer:summary-history:end -->';
-export const SUMMARY_HISTORY_ENTRY_START = '<!-- pi-reviewer:summary-history-entry:start -->';
-export const SUMMARY_HISTORY_ENTRY_END = '<!-- pi-reviewer:summary-history-entry:end -->';
+export const SUMMARY_MARKER = '<!-- gitlab-review:summary -->';
+export const SUMMARY_HISTORY_START = '<!-- gitlab-review:summary-history:start -->';
+export const SUMMARY_HISTORY_END = '<!-- gitlab-review:summary-history:end -->';
+export const SUMMARY_HISTORY_ENTRY_START = '<!-- gitlab-review:summary-history-entry:start -->';
+export const SUMMARY_HISTORY_ENTRY_END = '<!-- gitlab-review:summary-history-entry:end -->';
 export const SUMMARY_HISTORY_LIMIT = 10;
 export const REVIEWED_COMMIT_FOOTER_PATTERN =
   /Reviewed by \[@ikko-dev\/gitlab-review\]\(https:\/\/github\.com\/ikko-dev\/gitlab-review\) for commit ([a-f0-9]{40})\./i;

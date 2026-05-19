@@ -10,10 +10,10 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { Config } from './config.js';
-import type { PiReviewerSeverity, ThinkingLevel } from './types.js';
+import type { GitLabReviewSeverity, ThinkingLevel } from './types.js';
 
 import { ReviewerError } from './errors.js';
-import { toPiReviewerSeverity } from './types.js';
+import { toGitLabReviewSeverity } from './types.js';
 
 export interface UsageBreakdown {
   input: number;
@@ -66,7 +66,7 @@ const REVIEW_RULE_FILES = ['REVIEW.md'];
 const CONFIG_DIRS = ['.pi', '.claude', '.agents'];
 
 const NOISE_PATTERNS: RegExp[] = [
-  /^pi-review\.md$/,
+  /^gitlab-review\.md$/,
   /^package-lock\.json$/,
   /^yarn\.lock$/,
   /^pnpm-lock\.yaml$/,
@@ -83,7 +83,7 @@ const NOISE_PATTERNS: RegExp[] = [
   /\.d\.ts$/,
 ];
 
-const SEVERITY_RULE: Record<PiReviewerSeverity, string | null> = {
+const SEVERITY_RULE: Record<GitLabReviewSeverity, string | null> = {
   INFO: null,
   WARN: '- Only report CRITICAL and WARN issues — skip INFO',
   CRITICAL: '- Only report CRITICAL issues — skip WARN and INFO',
@@ -218,7 +218,7 @@ function mergeContent(files: ContextFile[]): string {
   return files.map((file) => file.content).join('\n\n');
 }
 
-function buildSharedBase(minSeverity: PiReviewerSeverity): string[] {
+function buildSharedBase(minSeverity: GitLabReviewSeverity): string[] {
   const rule = SEVERITY_RULE[minSeverity];
   return [
     'You are a code reviewer. Review the following PR diff carefully.',
@@ -239,7 +239,7 @@ function buildSharedBase(minSeverity: PiReviewerSeverity): string[] {
 
 export function buildJSONSystemPrompt(
   context: ReviewContext,
-  minSeverity: PiReviewerSeverity,
+  minSeverity: GitLabReviewSeverity,
 ): string {
   const base = [
     ...buildSharedBase(minSeverity),
@@ -350,7 +350,7 @@ function accumulateUsage(target: AggregatedUsage, message: AssistantMessage): vo
 
 export async function runReview(config: Config, options: RunReviewOptions): Promise<ReviewUsage> {
   const cwd = options.cwd ?? config.cwd;
-  const minSeverity = toPiReviewerSeverity(config.minSeverity);
+  const minSeverity = toGitLabReviewSeverity(config.minSeverity);
 
   const { diff, skippedFiles } = filterDiff(options.diff);
   if (!diff.trim()) {

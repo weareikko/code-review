@@ -1,13 +1,13 @@
 {
   "name": "@ikko-dev/gitlab-review",
   "version": "0.1.11",
-  "description": "Run pi-reviewer in GitLab CI and post deduplicated MR discussions.",
+  "description": "Run gitlab-review in GitLab CI and post deduplicated MR discussions.",
   "keywords": [
     "ci",
     "code-review",
     "gitlab",
-    "merge-request",
-    "pi-reviewer"
+    "gitlab-review",
+    "merge-request"
   ],
   "homepage": "https://github.com/ikko-dev/gitlab-review#readme",
   "bugs": {

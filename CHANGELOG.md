@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Skip reviewer execution when the current MR head commit already appears in the summary note's reviewed-commit footer, avoiding duplicate reviews for the same diff. Add the reviewed-commit footer to summary notes, link it to the `gitlab-review` GitHub repository, and provide a `--force-review` / `PI_REVIEWER_FORCE_REVIEW` override for intentional re-runs ([#25], [#26]).
+- Skip reviewer execution when the current MR head commit already appears in the summary note's reviewed-commit footer, avoiding duplicate reviews for the same diff. Add the reviewed-commit footer to summary notes, link it to the `gitlab-review` GitHub repository, and provide a `--force-review` / `GITLAB_REVIEW_FORCE_REVIEW` override for intentional re-runs ([#25], [#26]).
 
 ## [0.1.11] - 2026-05-19
 
@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Post the reviewer's overall `summary` as a non-positional merge request note — the same shape a human reviewer creates from the MR comment box. The note carries a hidden `<!-- pi-reviewer:summary -->` marker so subsequent runs find the existing note and update it in place via `PUT /merge_requests/:iid/notes/:id` instead of piling up duplicates. Default-on; disable with `--no-summary` or `PI_REVIEWER_POST_SUMMARY=false`. Skipped under `--dry-run` / `--no-post`. Runs in both `direct` and `draft` posting modes (always via the regular notes endpoints) ([#19]).
+- Post the reviewer's overall `summary` as a non-positional merge request note — the same shape a human reviewer creates from the MR comment box. The note carries a hidden `<!-- gitlab-review:summary -->` marker so subsequent runs find the existing note and update it in place via `PUT /merge_requests/:iid/notes/:id` instead of piling up duplicates. Default-on; disable with `--no-summary` or `GITLAB_REVIEW_POST_SUMMARY=false`. Skipped under `--dry-run` / `--no-post`. Runs in both `direct` and `draft` posting modes (always via the regular notes endpoints) ([#19]).
 - New `GitLabClient` methods: `createMergeRequestNote`, `updateMergeRequestNote` ([#19]).
 - New `gitlab.upsert_summary` diagnostics channel and OTel attributes (`gitlab_review.summary.action`, `gitlab_review.summary.note_id`) exposing whether the summary note was created or updated and its resolved id ([#19]).
 - Emit OpenTelemetry GenAI client metrics (`gen_ai.client.operation.duration`, `gen_ai.client.token.usage`) alongside spans so Grafana Application Observability / AI Observability surfaces — and any OTel-compliant LLM observability consumer driven off these metric names — discover the service from its metrics without dashboard import.
@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Opt-in OpenTelemetry bridge: set `GITLAB_REVIEW_OTEL=1` to emit spans tagged with the OpenTelemetry GenAI semantic conventions (`gen_ai.*`), including per-run token usage and USD cost on the `invoke_agent pi-reviewer` span. Exporter selection follows the standard `OTEL_*` env vars, so the same run reports into Tempo, Datadog, Honeycomb, SigNoz, or Grafana Cloud AI Observability (Sigil) ([#17]).
+- Opt-in OpenTelemetry bridge: set `GITLAB_REVIEW_OTEL=1` to emit spans tagged with the OpenTelemetry GenAI semantic conventions (`gen_ai.*`), including per-run token usage and USD cost on the `invoke_agent gitlab-review` span. Exporter selection follows the standard `OTEL_*` env vars, so the same run reports into Tempo, Datadog, Honeycomb, SigNoz, or Grafana Cloud AI Observability (Sigil) ([#17]).
 
 ## [0.1.6] - 2026-05-19
 
@@ -70,7 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `--posting-mode draft` (env: `PI_REVIEWER_POSTING_MODE`) creates GitLab draft notes for every fresh comment and publishes them atomically via `POST /draft_notes/bulk_publish` so the MR never shows a half-posted review. Hardened with orphan cleanup at run start, bounded-concurrency (cap 10) draft creation, a pre-publish fingerprint re-check that drops drafts colliding with discussions posted between dedupe and publish, and same-run self-heal that sweeps partial drafts if a creation fails mid-flight. Default stays `direct` for one release ([#14]).
+- `--posting-mode draft` (env: `GITLAB_REVIEW_POSTING_MODE`) creates GitLab draft notes for every fresh comment and publishes them atomically via `POST /draft_notes/bulk_publish` so the MR never shows a half-posted review. Hardened with orphan cleanup at run start, bounded-concurrency (cap 10) draft creation, a pre-publish fingerprint re-check that drops drafts colliding with discussions posted between dedupe and publish, and same-run self-heal that sweeps partial drafts if a creation fails mid-flight. Default stays `direct` for one release ([#14]).
 - New `GitLabClient` methods: `getCurrentUser`, `listDraftNotes`, `createDraftNote`, `deleteDraftNote`, `bulkPublishDraftNotes` ([#14]).
 - `gitlab.post_comments` diagnostic payload now exposes `draftsAbandoned`, `draftsCreated`, `draftsDeletedPrePublish`, and `draftsPublished` when draft mode is used ([#14]).
 
@@ -82,7 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Make the review agent's `thinkingLevel` configurable. New `--thinking <level>` flag and `PI_REVIEWER_THINKING_LEVEL` env var accept `off`, `minimal`, `low`, `medium`, `high`, or `xhigh` (default: `off`). Thinking tokens are billed at the model output rate and are reflected in the `Review usage:` line and `review-usage.json` ([#13]).
+- Make the review agent's `thinkingLevel` configurable. New `--thinking <level>` flag and `GITLAB_REVIEW_THINKING_LEVEL` env var accept `off`, `minimal`, `low`, `medium`, `high`, or `xhigh` (default: `off`). Thinking tokens are billed at the model output rate and are reflected in the `Review usage:` line and `review-usage.json` ([#13]).
 
 ## [0.1.3] - 2026-05-18
 
@@ -98,13 +98,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Replace the bundled `pi-reviewer` dependency with direct pinned dependencies on `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and `@earendil-works/pi-coding-agent`. Conventions loading (`AGENTS.md` / `CLAUDE.md` / `REVIEW.md`), prompt building, and diff noise filtering now live in this package ([#11]).
+- Replace the bundled `gitlab-review` dependency with direct pinned dependencies on `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and `@earendil-works/pi-coding-agent`. Conventions loading (`AGENTS.md` / `CLAUDE.md` / `REVIEW.md`), prompt building, and diff noise filtering now live in this package ([#11]).
 
 ## [0.1.1] - 2026-05-18
 
 ### Fixed
 
-- Forward shell-quoted Git diff arguments to `pi-reviewer` instead of raw diff content.
+- Forward shell-quoted Git diff arguments to `gitlab-review` instead of raw diff content.
 
 ## [0.1.0] - 2026-05-18
 

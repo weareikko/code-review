@@ -21,8 +21,8 @@ import {
 } from '../src/config.js';
 import { ConfigError, GitLabApiError, ReviewerError, formatError } from '../src/errors.js';
 import { getMergeDiffArguments } from '../src/git.js';
+import { filterDiff, runReview, type AgentLike, type ReviewUsage } from '../src/gitlab-review.js';
 import { GitLabClient } from '../src/gitlab.js';
-import { filterDiff, runReview, type AgentLike, type ReviewUsage } from '../src/pi-reviewer.js';
 import {
   buildSummaryBody,
   buildSummaryHistoryEntries,
@@ -60,7 +60,7 @@ describe('config env defaults', () => {
       CI_MERGE_REQUEST_IID: '45',
       CI_SERVER_HOST: 'gitlab.example.com',
       GITLAB_TOKEN: 'private-token',
-      PI_API_KEY: 'api-key',
+      GITLAB_REVIEW_API_KEY: 'api-key',
     });
 
     expect(cfg).toMatchObject({
@@ -73,7 +73,7 @@ describe('config env defaults', () => {
       minSeverity: 'info',
       thinkingLevel: 'off',
       postingMode: 'direct',
-      reviewFile: 'pi-review.md',
+      reviewFile: 'gitlab-review.md',
       output: 'review-comments.json',
       dryRun: false,
       noPost: false,
@@ -101,7 +101,7 @@ describe('config env defaults', () => {
         CI_MERGE_REQUEST_IID: '8',
         CI_SERVER_URL: 'https://env.example.com',
         GITLAB_TOKEN: 'env-token',
-        PI_API_KEY: 'env-key',
+        GITLAB_REVIEW_API_KEY: 'env-key',
       },
     );
 
@@ -122,7 +122,7 @@ describe('config env defaults', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gitlab.example.com',
       CI_JOB_TOKEN: 'job-token',
-      PI_API_KEY: 'key',
+      GITLAB_REVIEW_API_KEY: 'key',
     });
 
     expect(cfg).toMatchObject({
@@ -461,7 +461,7 @@ describe('summary note upsert', () => {
 
   it('finds the existing summary note by marker across discussions', () => {
     const discussions = [
-      { notes: [{ id: 1, body: 'inline comment <!-- pi-reviewer:fingerprint-primary:abc -->' }] },
+      { notes: [{ id: 1, body: 'inline comment <!-- gitlab-review:fingerprint-primary:abc -->' }] },
       {
         notes: [
           { id: 12, body: `${SUMMARY_MARKER}\n\nprevious summary` },
@@ -589,7 +589,7 @@ describe('postGeneratedComments strategies', () => {
     fingerprints: { primary: 'p1', secondary: 's1' },
     duplicate: false,
     payload: {
-      body: 'fresh <!-- pi-reviewer:fingerprint-primary:p1 -->',
+      body: 'fresh <!-- gitlab-review:fingerprint-primary:p1 -->',
       position: {
         position_type: 'text',
         base_sha: 'b',
@@ -753,10 +753,10 @@ describe('postGeneratedComments strategies', () => {
             {
               notes: [
                 {
-                  body: 'collide <!-- pi-reviewer:fingerprint-primary:aaaa --> <!-- pi-reviewer:fingerprint-secondary:aabb -->',
+                  body: 'collide <!-- gitlab-review:fingerprint-primary:aaaa --> <!-- gitlab-review:fingerprint-secondary:aabb -->',
                 },
                 {
-                  body: 'collide <!-- pi-reviewer:fingerprint-primary:bbbb --> <!-- pi-reviewer:fingerprint-secondary:bbcc -->',
+                  body: 'collide <!-- gitlab-review:fingerprint-primary:bbbb --> <!-- gitlab-review:fingerprint-secondary:bbcc -->',
                 },
               ],
             },
@@ -838,7 +838,7 @@ describe('postGeneratedComments strategies', () => {
             {
               notes: [
                 {
-                  body: 'collision <!-- pi-reviewer:fingerprint-primary:aaaa --> <!-- pi-reviewer:fingerprint-secondary:aabb -->',
+                  body: 'collision <!-- gitlab-review:fingerprint-primary:aaaa --> <!-- gitlab-review:fingerprint-secondary:aabb -->',
                 },
               ],
             },
@@ -886,7 +886,7 @@ describe('runReview pipeline', () => {
     thinkingLevel: 'off',
     postingMode: 'direct',
     apiKey: 'key',
-    reviewFile: 'pi-review.md',
+    reviewFile: 'gitlab-review.md',
     output: 'review-comments.json',
     dryRun: false,
     noPost: false,
@@ -990,7 +990,7 @@ describe('runReview pipeline', () => {
     expect(result.diff).not.toContain('package-lock.json');
   });
 
-  it('accumulates usage across multiple assistant messages and writes pi-review.md', async () => {
+  it('accumulates usage across multiple assistant messages and writes gitlab-review.md', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
     const messages = [
       makeAssistant('partial thought', {
@@ -1032,7 +1032,7 @@ describe('runReview pipeline', () => {
     expect(usage.cost.cacheWrite).toBeCloseTo(0.0002, 10);
     expect(usage.cost.total).toBeCloseTo(0.0068, 10);
 
-    const written = await readFile(join(cwd, 'pi-review.md'), 'utf8');
+    const written = await readFile(join(cwd, 'gitlab-review.md'), 'utf8');
     expect(written).toBe('Final review summary.');
   });
 
@@ -1098,7 +1098,7 @@ describe('runReview pipeline', () => {
   });
 });
 
-describe('pi-review parsing', () => {
+describe('gitlab-review parsing', () => {
   it('parses inline comment blocks with severity and body normalization', () => {
     const markdown = [
       'Review summary',
@@ -1107,7 +1107,7 @@ describe('pi-review parsing', () => {
       'Please simplify this branch.',
       '',
       '🔴 `src/legacy.ts:5` - LEFT',
-      'remove dead code <!-- pi-reviewer:fingerprint-primary:abcd -->',
+      'remove dead code <!-- gitlab-review:fingerprint-primary:abcd -->',
     ].join('\n');
 
     expect(parseReviewMarkdown(markdown)).toEqual([
@@ -1133,7 +1133,7 @@ describe('pi-review parsing', () => {
       '```json',
       '{"comments":[{"file":"src/a.ts","line":3,"side":"RIGHT","body":"Fix this"}]}',
       '```',
-      '<!-- pi-reviewer-comment {"file":"src/b.ts","old_line":9,"body":"Old side"} -->',
+      '<!-- gitlab-review-comment {"file":"src/b.ts","old_line":9,"body":"Old side"} -->',
     ].join('\n');
 
     expect(parseReviewMarkdown(markdown)).toEqual([
@@ -1253,7 +1253,7 @@ describe('diff hunk context', () => {
 
 describe('fingerprints and duplicate detection', () => {
   it('normalizes comment bodies consistently', () => {
-    const a = 'Fix   this\n\n<!-- pi-reviewer:fingerprint-primary:abcd -->';
+    const a = 'Fix   this\n\n<!-- gitlab-review:fingerprint-primary:abcd -->';
     const b = 'Fix this';
 
     expect(normalizeBody(a)).toBe(normalizeBody(b));
@@ -1368,7 +1368,7 @@ describe('validateConfig', () => {
     thinkingLevel: 'off',
     postingMode: 'direct',
     apiKey: 'key',
-    reviewFile: 'pi-review.md',
+    reviewFile: 'gitlab-review.md',
     output: 'review-comments.json',
     dryRun: false,
     noPost: false,
@@ -1410,19 +1410,19 @@ describe('thinking level resolution', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      PI_API_KEY: 'k',
+      GITLAB_REVIEW_API_KEY: 'k',
     });
     expect(cfg.thinkingLevel).toBe('off');
   });
 
-  it('reads from PI_REVIEWER_THINKING_LEVEL env var', () => {
+  it('reads from GITLAB_REVIEW_THINKING_LEVEL env var', () => {
     const cfg = resolveConfig([], {
       CI_PROJECT_ID: '1',
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      PI_API_KEY: 'k',
-      PI_REVIEWER_THINKING_LEVEL: 'medium',
+      GITLAB_REVIEW_API_KEY: 'k',
+      GITLAB_REVIEW_THINKING_LEVEL: 'medium',
     });
     expect(cfg.thinkingLevel).toBe('medium');
   });
@@ -1433,20 +1433,20 @@ describe('thinking level resolution', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      PI_API_KEY: 'k',
-      PI_REVIEWER_THINKING_LEVEL: '  HIGH  ',
+      GITLAB_REVIEW_API_KEY: 'k',
+      GITLAB_REVIEW_THINKING_LEVEL: '  HIGH  ',
     });
     expect(cfg.thinkingLevel).toBe('high');
   });
 
-  it('lets --thinking override PI_REVIEWER_THINKING_LEVEL', () => {
+  it('lets --thinking override GITLAB_REVIEW_THINKING_LEVEL', () => {
     const cfg = resolveConfig(['--thinking', 'xhigh'], {
       CI_PROJECT_ID: '1',
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      PI_API_KEY: 'k',
-      PI_REVIEWER_THINKING_LEVEL: 'low',
+      GITLAB_REVIEW_API_KEY: 'k',
+      GITLAB_REVIEW_THINKING_LEVEL: 'low',
     });
     expect(cfg.thinkingLevel).toBe('xhigh');
   });
@@ -1457,7 +1457,7 @@ describe('thinking level resolution', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      PI_API_KEY: 'k',
+      GITLAB_REVIEW_API_KEY: 'k',
     });
     expect(() => validateConfig(cfg)).toThrow('--thinking must be one of');
   });
@@ -1470,19 +1470,19 @@ describe('posting mode resolution', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      PI_API_KEY: 'k',
+      GITLAB_REVIEW_API_KEY: 'k',
     });
     expect(cfg.postingMode).toBe('direct');
   });
 
-  it('reads from PI_REVIEWER_POSTING_MODE env var and trims case', () => {
+  it('reads from GITLAB_REVIEW_POSTING_MODE env var and trims case', () => {
     const cfg = resolveConfig([], {
       CI_PROJECT_ID: '1',
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      PI_API_KEY: 'k',
-      PI_REVIEWER_POSTING_MODE: '  DRAFT  ',
+      GITLAB_REVIEW_API_KEY: 'k',
+      GITLAB_REVIEW_POSTING_MODE: '  DRAFT  ',
     });
     expect(cfg.postingMode).toBe('draft');
   });
@@ -1493,8 +1493,8 @@ describe('posting mode resolution', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      PI_API_KEY: 'k',
-      PI_REVIEWER_POSTING_MODE: 'draft',
+      GITLAB_REVIEW_API_KEY: 'k',
+      GITLAB_REVIEW_POSTING_MODE: 'draft',
     });
     expect(cfg.postingMode).toBe('direct');
   });
@@ -1505,7 +1505,7 @@ describe('posting mode resolution', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      PI_API_KEY: 'k',
+      GITLAB_REVIEW_API_KEY: 'k',
     });
     expect(() => validateConfig(cfg)).toThrow('--posting-mode must be one of');
   });
@@ -1545,7 +1545,7 @@ describe('diagnostics_channel instrumentation', () => {
     thinkingLevel: 'off',
     postingMode: 'direct',
     apiKey: 'key',
-    reviewFile: 'pi-review.md',
+    reviewFile: 'gitlab-review.md',
     output: 'review-comments.json',
     dryRun: true,
     noPost: false,
@@ -1724,7 +1724,7 @@ describe('OpenTelemetry bridge', () => {
       thinkingLevel: 'off',
       postingMode: 'direct',
       apiKey: 'k',
-      reviewFile: 'pi-review.md',
+      reviewFile: 'gitlab-review.md',
       output: 'review-comments.json',
       dryRun: false,
       noPost: false,
@@ -1776,7 +1776,7 @@ describe('OpenTelemetry bridge', () => {
 
     expect(spans.map((s) => s.name)).toEqual([
       'invoke_workflow gitlab-review',
-      'invoke_agent pi-reviewer',
+      'invoke_agent gitlab-review',
     ]);
     const [root, reviewer] = spans;
     expect(reviewer.parent).toBe(root);
@@ -1792,14 +1792,14 @@ describe('OpenTelemetry bridge', () => {
         cost: { input: 0.012, output: 0.034, cacheRead: 0.001, cacheWrite: 0.002, total: 0.049 },
       };
     });
-    const reviewer = spans.find((s) => s.name === 'invoke_agent pi-reviewer');
+    const reviewer = spans.find((s) => s.name === 'invoke_agent gitlab-review');
     const attrs = Object.fromEntries(reviewer!.attributes.map((a) => [a.key, a.value]));
     expect(attrs).toMatchObject({
       'gen_ai.provider.name': 'anthropic',
       'gen_ai.request.model': 'claude-sonnet-4-5',
       'gen_ai.response.model': 'claude-sonnet-4-5',
       'gen_ai.operation.name': 'invoke_agent',
-      'gen_ai.agent.name': 'pi-reviewer',
+      'gen_ai.agent.name': 'gitlab-review',
       'gen_ai.usage.input_tokens': 1200,
       'gen_ai.usage.output_tokens': 340,
       'gen_ai.usage.cache_read.input_tokens': 50,
@@ -1859,7 +1859,7 @@ describe('OpenTelemetry bridge', () => {
       thinkingLevel: 'off',
       postingMode: 'direct',
       apiKey: 'k',
-      reviewFile: 'pi-review.md',
+      reviewFile: 'gitlab-review.md',
       output: 'review-comments.json',
       dryRun: false,
       noPost: false,
@@ -1873,7 +1873,7 @@ describe('OpenTelemetry bridge', () => {
     ).rejects.toThrow('boom');
     await bridge?.shutdown();
 
-    const reviewer = fake.spans.find((s) => s.name === 'invoke_agent pi-reviewer');
+    const reviewer = fake.spans.find((s) => s.name === 'invoke_agent gitlab-review');
     expect(reviewer?.exceptions).toEqual([
       expect.objectContaining({ name: 'ReviewerError', message: 'boom' }),
     ]);
@@ -1911,7 +1911,7 @@ describe('OpenTelemetry bridge', () => {
       ctx.draftsCreated = 6;
       ctx.draftsPublished = 6;
     });
-    const reviewer = spans.find((s) => s.name === 'invoke_agent pi-reviewer');
+    const reviewer = spans.find((s) => s.name === 'invoke_agent gitlab-review');
     const attrs = Object.fromEntries(reviewer!.attributes.map((a) => [a.key, a.value]));
     // `durationMs` is stamped by `traceDiagnostic` from real elapsed time — we
     // only assert the branch fired, not its value.
@@ -1992,7 +1992,7 @@ describe('summary posting configuration', () => {
     CI_MERGE_REQUEST_IID: '2',
     CI_SERVER_URL: 'https://gl.example.com',
     GITLAB_TOKEN: 't',
-    PI_API_KEY: 'k',
+    GITLAB_REVIEW_API_KEY: 'k',
   };
 
   it('defaults postSummary to true', () => {
@@ -2003,15 +2003,16 @@ describe('summary posting configuration', () => {
     expect(resolveConfig(['--no-summary'], baseEnv).postSummary).toBe(false);
   });
 
-  it('flips postSummary off via PI_REVIEWER_POST_SUMMARY=false', () => {
-    expect(resolveConfig([], { ...baseEnv, PI_REVIEWER_POST_SUMMARY: 'false' }).postSummary).toBe(
+  it('flips postSummary off via GITLAB_REVIEW_POST_SUMMARY=false', () => {
+    expect(resolveConfig([], { ...baseEnv, GITLAB_REVIEW_POST_SUMMARY: 'false' }).postSummary).toBe(
       false,
     );
   });
 
-  it('--no-summary overrides PI_REVIEWER_POST_SUMMARY=true', () => {
+  it('--no-summary overrides GITLAB_REVIEW_POST_SUMMARY=true', () => {
     expect(
-      resolveConfig(['--no-summary'], { ...baseEnv, PI_REVIEWER_POST_SUMMARY: 'true' }).postSummary,
+      resolveConfig(['--no-summary'], { ...baseEnv, GITLAB_REVIEW_POST_SUMMARY: 'true' })
+        .postSummary,
     ).toBe(false);
   });
 
@@ -2019,8 +2020,8 @@ describe('summary posting configuration', () => {
     expect(resolveConfig(['--force-review'], baseEnv).forceReview).toBe(true);
   });
 
-  it('enables forceReview via PI_REVIEWER_FORCE_REVIEW=true', () => {
-    expect(resolveConfig([], { ...baseEnv, PI_REVIEWER_FORCE_REVIEW: 'true' }).forceReview).toBe(
+  it('enables forceReview via GITLAB_REVIEW_FORCE_REVIEW=true', () => {
+    expect(resolveConfig([], { ...baseEnv, GITLAB_REVIEW_FORCE_REVIEW: 'true' }).forceReview).toBe(
       true,
     );
   });

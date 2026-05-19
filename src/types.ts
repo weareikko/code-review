@@ -1,5 +1,5 @@
 export type Severity = 'info' | 'warn' | 'critical';
-export type PiReviewerSeverity = 'INFO' | 'WARN' | 'CRITICAL';
+export type GitLabReviewSeverity = 'INFO' | 'WARN' | 'CRITICAL';
 export type Side = 'RIGHT' | 'LEFT';
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
@@ -52,7 +52,7 @@ export interface GitLabDiscussionPayload {
   };
 }
 
-export function toPiReviewerSeverity(severity: Severity): PiReviewerSeverity {
+export function toGitLabReviewSeverity(severity: Severity): GitLabReviewSeverity {
   return severity === 'critical' ? 'CRITICAL' : severity === 'warn' ? 'WARN' : 'INFO';
 }
 

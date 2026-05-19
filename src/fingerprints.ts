@@ -4,9 +4,9 @@ import type { Discussion } from './gitlab.js';
 import type { Fingerprints, ReviewComment, Side } from './types.js';
 
 const FINGERPRINT_MARKER_RE =
-  /<!--\s*pi-reviewer:fingerprint-(?:primary|secondary):([a-f0-9]+)\s*-->/gi;
+  /<!--\s*gitlab-review:fingerprint-(?:primary|secondary):([a-f0-9]+)\s*-->/gi;
 const STRIP_FINGERPRINT_MARKER_RE =
-  /<!--\s*pi-reviewer:fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->/gi;
+  /<!--\s*gitlab-review:fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->/gi;
 
 export function sha256(input: string): string {
   return createHash('sha256').update(input).digest('hex');
@@ -110,7 +110,7 @@ export function fingerprints(comment: ReviewComment, hunkContext: string): Finge
 }
 
 export function appendFingerprintMarkers(body: string, fp: Fingerprints): string {
-  return `${body.trim()}\n\n<!-- pi-reviewer:fingerprint-primary:${fp.primary} -->\n<!-- pi-reviewer:fingerprint-secondary:${fp.secondary} -->`;
+  return `${body.trim()}\n\n<!-- gitlab-review:fingerprint-primary:${fp.primary} -->\n<!-- gitlab-review:fingerprint-secondary:${fp.secondary} -->`;
 }
 
 export function extractExistingFingerprints(discussions: Discussion[]): Set<string> {

@@ -237,7 +237,7 @@ function spanNameFor(phase: DiagnosticPhase): string {
   // OTel GenAI semconv reserves invoke_workflow / invoke_agent / execute_tool
   // as well-known operation names; other phases stay namespaced.
   if (phase === ROOT_PHASE) return 'invoke_workflow gitlab-review';
-  if (phase === GEN_AI_PHASE) return 'invoke_agent pi-reviewer';
+  if (phase === GEN_AI_PHASE) return 'invoke_agent gitlab-review';
   return `gitlab-review.${phase}`;
 }
 
@@ -295,7 +295,7 @@ function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
     span.setAttribute('gen_ai.response.model', modelId);
   }
   span.setAttribute('gen_ai.operation.name', 'invoke_agent');
-  span.setAttribute('gen_ai.agent.name', 'pi-reviewer');
+  span.setAttribute('gen_ai.agent.name', 'gitlab-review');
 
   const usage = ctx.usage;
   if (!usage) return;

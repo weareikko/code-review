@@ -4,7 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import type { Config } from './config.js';
-import type { ReviewUsage } from './pi-reviewer.js';
+import type { ReviewUsage } from './gitlab-review.js';
 import type { SummaryResult } from './posting.js';
 import type { DiffRefs, GeneratedComment } from './types.js';
 
@@ -17,11 +17,11 @@ import {
 import { formatError, RuntimeError } from './errors.js';
 import { extractExistingFingerprints } from './fingerprints.js';
 import { getMergeDiff, prepareGitHistory } from './git.js';
+import { runReview } from './gitlab-review.js';
 import { GitLabClient } from './gitlab.js';
 import { startOtelBridge } from './otel.js';
 import { parseReviewMarkdownWithWarnings } from './parser.js';
 import { buildGeneratedComments } from './payloads.js';
-import { runReview } from './pi-reviewer.js';
 import {
   findExistingReviewedCommitSha,
   postGeneratedComments,
@@ -49,29 +49,29 @@ export { isOtelEnabled, startOtelBridge } from './otel.js';
 
 const HELP = `Usage: gitlab-review [options]
 
-Run pi-reviewer in GitLab CI and post deduplicated merge request discussions.
+Run gitlab-review in GitLab CI and post deduplicated merge request discussions.
 
 Options:
   --project <id>          GitLab project ID/path (default: CI_PROJECT_ID)
   --mr <iid>              Merge request IID (default: CI_MERGE_REQUEST_IID)
   --gitlab-url <url>      GitLab URL (default: CI_SERVER_URL or CI_SERVER_HOST)
   --gitlab-token <token>  GitLab token (default: GITLAB_TOKEN, GLAB_CLI_TOKEN, CI_JOB_TOKEN, GITLAB_PRIVATE_TOKEN)
-  --api-key <key>         pi/AI API key (default: PI_API_KEY, ANTHROPIC_API_KEY, CLAUDE_API_KEY)
-  --model <provider/id>   pi-reviewer model (default: anthropic/claude-sonnet-4-5)
+  --api-key <key>         AI API key (default: GITLAB_REVIEW_API_KEY, ANTHROPIC_API_KEY, CLAUDE_API_KEY)
+  --model <provider/id>   gitlab-review model (default: anthropic/claude-sonnet-4-5)
   --min-severity <level>  info, warn, or critical (default: info)
   --thinking <level>      off, minimal, low, medium, high, or xhigh (default: off).
                           Higher levels add billable thinking tokens at the model output rate.
   --posting-mode <mode>   direct (sequential discussions) or draft (atomic bulk publish)
                           (default: direct)
-  --review-file <path>    Raw pi-reviewer output file (default: pi-review.md)
+  --review-file <path>    Raw gitlab-review output file (default: gitlab-review.md)
   --output <path>         Generated payload artifact (default: review-comments.json)
   --cwd <path>            Working directory (default: process.cwd())
   --dry-run               Generate artifacts and skip posting
   --no-post               Generate artifacts and skip posting
   --no-summary            Skip posting/updating the MR-level summary note
-                          (env: PI_REVIEWER_POST_SUMMARY=false)
+                          (env: GITLAB_REVIEW_POST_SUMMARY=false)
   --force-review          Run even when the current commit was already reviewed
-                          (env: PI_REVIEWER_FORCE_REVIEW=true)
+                          (env: GITLAB_REVIEW_FORCE_REVIEW=true)
   --help, -h              Show help
   --version, -v           Show version
 `;
