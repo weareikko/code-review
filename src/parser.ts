@@ -49,7 +49,7 @@ function addJsonComment(out: ReviewComment[], item: unknown): void {
 }
 
 function parseJsonComments(markdown: string, out: ReviewComment[]): void {
-  const fence = /```json\s*([\s\S]*?)```/gi;
+  const fence = /^```json[^\S\r\n]*(?:\r?\n)([\s\S]*?)^```[^\S\r\n]*$/gim;
   for (const match of markdown.matchAll(fence)) {
     try {
       const parsed = JSON.parse(match[1] ?? '');
