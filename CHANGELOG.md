@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Post the reviewer's overall `summary` as a non-positional merge request note — the same shape a human reviewer creates from the MR comment box. The note carries a hidden `<!-- pi-reviewer:summary -->` marker so subsequent runs find the existing note and update it in place via `PUT /merge_requests/:iid/notes/:id` instead of piling up duplicates. Default-on; disable with `--no-summary` or `PI_REVIEWER_POST_SUMMARY=false`. Skipped under `--dry-run` / `--no-post`. Runs in both `direct` and `draft` posting modes (always via the regular notes endpoints) ([#19]).
+- New `GitLabClient` methods: `createMergeRequestNote`, `updateMergeRequestNote` ([#19]).
+- New `gitlab.upsert_summary` diagnostics channel and OTel attributes (`gitlab_review.summary.action`, `gitlab_review.summary.note_id`) exposing whether the summary note was created or updated and its resolved id ([#19]).
+
 ## [0.1.8] - 2026-05-19
 
 ### Fixed
@@ -110,6 +116,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#15]: https://github.com/ikko-dev/gitlab-review/pull/15
 [#17]: https://github.com/ikko-dev/gitlab-review/pull/17
 [#18]: https://github.com/ikko-dev/gitlab-review/pull/18
+[#19]: https://github.com/ikko-dev/gitlab-review/pull/19
 [0.1.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.0
 [a6166f5]: https://github.com/ikko-dev/gitlab-review/commit/a6166f5
 [310dccf]: https://github.com/ikko-dev/gitlab-review/commit/310dccf
