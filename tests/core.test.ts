@@ -348,9 +348,9 @@ describe('GitLab merge request notes endpoints', () => {
       fetchImpl,
     });
 
-    await expect(
-      client.createMergeRequestNote('group/repo', '12', 'hello'),
-    ).resolves.toMatchObject({ id: 77 });
+    await expect(client.createMergeRequestNote('group/repo', '12', 'hello')).resolves.toMatchObject(
+      { id: 77 },
+    );
 
     expect(fetchImpl.mock.calls[0][0]).toBe(
       'https://gitlab.example.com/api/v4/projects/group%2Frepo/merge_requests/12/notes',
@@ -426,9 +426,7 @@ describe('summary note upsert', () => {
     const updateMergeRequestNote = vi.fn().mockResolvedValue({ id: 12, body: 'x' });
     const gitlab = { createMergeRequestNote, updateMergeRequestNote } as unknown as GitLabClient;
 
-    const discussions = [
-      { notes: [{ id: 12, body: `${SUMMARY_MARKER}\n\nprior summary` }] },
-    ];
+    const discussions = [{ notes: [{ id: 12, body: `${SUMMARY_MARKER}\n\nprior summary` }] }];
     const result = await upsertSummaryNote(
       gitlab,
       'group/repo',
@@ -1069,11 +1067,9 @@ describe('pi-review parsing', () => {
   });
 
   it('returns null summary when the summary is an empty string', () => {
-    const markdown = [
-      '```json',
-      JSON.stringify({ summary: '   ', comments: [] }),
-      '```',
-    ].join('\n');
+    const markdown = ['```json', JSON.stringify({ summary: '   ', comments: [] }), '```'].join(
+      '\n',
+    );
     expect(parseReviewMarkdownWithWarnings(markdown).summary).toBeNull();
   });
 });
