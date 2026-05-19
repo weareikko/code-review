@@ -234,7 +234,7 @@ The summary is upserted **before** inline comments are posted so it appears at t
 
 Review usage: 12,345 in / 678 out tokens — $0.0421 (anthropic/claude-sonnet-4-5)
 
-Reviewed commit: `<sha>`
+Reviewed commit: `<sha>` · [gitlab-review](https://github.com/ikko-dev/gitlab-review)
 ```
 
 If a later CI job sees that the current MR head commit already appears in that footer, it skips the agent run to avoid producing a different review for the same diff. Use `--force-review` or `PI_REVIEWER_FORCE_REVIEW=true` to bypass the guard. The summary upsert runs in both `direct` and `draft` posting modes (it always uses the regular notes endpoints — the atomic bulk-publish flow is reserved for inline comments).

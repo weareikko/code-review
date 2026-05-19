@@ -51,7 +51,7 @@ export function buildSummaryBody(
 }
 
 export function buildReviewedCommitFooter(commitSha: string): string {
-  return `Reviewed commit: \`${commitSha}\``;
+  return `Reviewed commit: \`${commitSha}\` · [gitlab-review](https://github.com/ikko-dev/gitlab-review)`;
 }
 
 export function extractReviewedCommitSha(body: string): string | null {
