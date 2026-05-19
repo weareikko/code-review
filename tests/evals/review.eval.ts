@@ -1,3 +1,4 @@
+// oxlint-disable eslint-plugin-jest/no-standalone-expect -- describeEval uses its own `it` wrapper that oxlint doesn't recognise
 import { createHarness, createJudge, describeEval } from 'vitest-evals';
 import type { JudgeContext } from 'vitest-evals';
 
