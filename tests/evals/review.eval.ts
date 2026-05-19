@@ -210,6 +210,114 @@ describeEval(
   },
 );
 
+// Judge: review identifies the missing deps / stale closure in useEffect
+const StaleClosureJudge = createJudge(
+  'StaleClosureJudge',
+  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
+    const keywords = [
+      'stale',
+      'closure',
+      'dependency',
+      'dependencies',
+      'dep',
+      'useeffect',
+      'missing',
+      'debounce',
+      'initial',
+    ];
+    const allText = [output.summary, ...output.comments.map((c) => c.body)]
+      .join(' ')
+      .toLowerCase();
+    const hit = keywords.filter((k) => allText.includes(k));
+    // Require at least 2 distinct keywords to avoid accidental matches
+    const score = hit.length >= 2 ? 1 : 0;
+    return {
+      score,
+      metadata: {
+        rationale:
+          score === 1
+            ? `Detected stale closure/missing dep issue (matched: ${hit.join(', ')})`
+            : `Did not identify stale closure — only matched: ${hit.join(', ') || 'none'}`,
+        commentCount: output.comments.length,
+      },
+    };
+  },
+);
+
+// Judge: review identifies the race condition in the PHP promo code handler
+const RaceConditionJudge = createJudge(
+  'RaceConditionJudge',
+  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
+    const keywords = ['race', 'concurrent', 'atomic', 'lock', 'transaction', 'updateorcreate'];
+    const allText = [output.summary, ...output.comments.map((c) => c.body)]
+      .join(' ')
+      .toLowerCase();
+    const hit = keywords.filter((k) => allText.includes(k));
+    const score = hit.length >= 1 ? 1 : 0;
+    return {
+      score,
+      metadata: {
+        rationale:
+          score === 1
+            ? `Detected race condition issue (matched: ${hit.join(', ')})`
+            : 'Did not identify the race condition or non-atomic update',
+        commentCount: output.comments.length,
+      },
+    };
+  },
+);
+
+describeEval(
+  'code-review skill — React stale closure detection',
+  {
+    harness: reviewHarness,
+    judges: [StaleClosureJudge, HasSevereFindingJudge],
+    judgeThreshold: 1,
+    skipIf: hasApiKey,
+  },
+  (it) => {
+    it('detects missing useEffect deps / stale closure with skill', async ({ run }) => {
+      const diff = await readFile(join(FIXTURES, 'react-stale-deps.diff'), 'utf8');
+      const result = await run({ diff, skills: ['code-review'] });
+
+      expect(result.output.comments.length).toBeGreaterThan(0);
+    });
+
+    it('detects missing useEffect deps / stale closure without skill (baseline)', async ({ run }) => {
+      const diff = await readFile(join(FIXTURES, 'react-stale-deps.diff'), 'utf8');
+      const result = await run({ diff, skills: [] });
+
+      // Baseline: record scores but do not hard-assert pass
+      expect(result.output).toBeDefined();
+    });
+  },
+);
+
+describeEval(
+  'code-review skill — PHP race condition detection',
+  {
+    harness: reviewHarness,
+    judges: [RaceConditionJudge, HasSevereFindingJudge],
+    judgeThreshold: 1,
+    skipIf: hasApiKey,
+  },
+  (it) => {
+    it('detects non-atomic promo code claim with skill', async ({ run }) => {
+      const diff = await readFile(join(FIXTURES, 'php-promo-race.diff'), 'utf8');
+      const result = await run({ diff, skills: ['code-review'] });
+
+      expect(result.output.comments.length).toBeGreaterThan(0);
+    });
+
+    it('detects non-atomic promo code claim without skill (baseline)', async ({ run }) => {
+      const diff = await readFile(join(FIXTURES, 'php-promo-race.diff'), 'utf8');
+      const result = await run({ diff, skills: [] });
+
+      expect(result.output).toBeDefined();
+    });
+  },
+);
+
 describeEval(
   'code-review skill — false positive rate',
   {
