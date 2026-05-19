@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-19
+
 ### Added
 
 - Skip reviewer execution when the current MR head commit already appears in the summary note's reviewed-commit footer, avoiding duplicate reviews for the same diff. Add the reviewed-commit footer to summary notes, link it to the `gitlab-review` GitHub repository, and provide a `--force-review` / `GITLAB_REVIEW_FORCE_REVIEW` override for intentional re-runs ([#25], [#26]).
+
+### Changed
+
+- Align project naming to `gitlab-review` across code, docs, tests, generated markers, OpenTelemetry agent/span naming, the default review artifact (`gitlab-review.md`), and project-specific `GITLAB_REVIEW_*` environment variables. Existing legacy hidden MR markers remain readable to avoid duplicate comments and summaries during migration ([#27]).
 
 ## [0.1.11] - 2026-05-19
 
@@ -131,7 +137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.11...HEAD
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.2.0...HEAD
+[0.2.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.2.0
 [0.1.11]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.11
 [0.1.10]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.10
 [0.1.9]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.9
@@ -155,6 +162,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#24]: https://github.com/ikko-dev/gitlab-review/pull/24
 [#25]: https://github.com/ikko-dev/gitlab-review/pull/25
 [#26]: https://github.com/ikko-dev/gitlab-review/pull/26
+[#27]: https://github.com/ikko-dev/gitlab-review/pull/27
 [0.1.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.0
 [a6166f5]: https://github.com/ikko-dev/gitlab-review/commit/a6166f5
 [310dccf]: https://github.com/ikko-dev/gitlab-review/commit/310dccf

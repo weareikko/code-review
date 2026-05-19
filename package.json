@@ -1,6 +1,6 @@
 {
   "name": "@ikko-dev/gitlab-review",
-  "version": "0.1.11",
+  "version": "0.2.0",
   "description": "Run gitlab-review in GitLab CI and post deduplicated MR discussions.",
   "keywords": [
     "ci",
