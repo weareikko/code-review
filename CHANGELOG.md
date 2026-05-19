@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-05-19
+
 ### Added
 
 - Opt-in OpenTelemetry bridge: set `GITLAB_REVIEW_OTEL=1` to emit spans tagged with the OpenTelemetry GenAI semantic conventions (`gen_ai.*`), including per-run token usage and USD cost on the `invoke_agent pi-reviewer` span. Exporter selection follows the standard `OTEL_*` env vars, so the same run reports into Tempo, Datadog, Honeycomb, SigNoz, or Grafana Cloud AI Observability (Sigil) ([#17]).
@@ -86,7 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.6...HEAD
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.7...HEAD
+[0.1.7]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.7
 [0.1.6]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.6
 [0.1.5]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.5
 [0.1.4]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.4
