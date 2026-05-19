@@ -96,6 +96,7 @@ The CLI auto-resolves values from CI variables and common token/key names.
 | `GITLAB_REVIEW_POSTING_MODE`   | Default for `--posting-mode`                                        |
 | `GITLAB_REVIEW_POST_SUMMARY`   | Set to `false`/`0` to skip the MR-level summary note                |
 | `GITLAB_REVIEW_FORCE_REVIEW`   | Set to `true`/`1` to review even if the commit was already reviewed |
+| `GITLAB_REVIEW_SKILLS`         | Comma-separated list of built-in skill names to enable (e.g. `code-review`) |
 
 ## Flags
 
@@ -115,6 +116,7 @@ The CLI auto-resolves values from CI variables and common token/key names.
 | `--review-file <path>`   | Raw `gitlab-review` output file                        | `gitlab-review.md`                                                       |
 | `--output <path>`        | Generated payload artifact file                        | `review-comments.json`                                                   |
 | `--cwd <path>`           | Working directory                                      | `process.cwd()`                                                          |
+| `--skill <name>`         | Enable a built-in skill by name (repeatable)           | `GITLAB_REVIEW_SKILLS` or none                                           |
 | `--dry-run`              | Generate artifacts and skip posting                    | `false`                                                                  |
 | `--no-post`              | Same behavior as `--dry-run`                           | `false`                                                                  |
 | `--help`, `-h`           | Show help                                              | -                                                                        |
@@ -123,6 +125,67 @@ The CLI auto-resolves values from CI variables and common token/key names.
 `--thinking` controls extended thinking on the underlying agent. Thinking tokens are billed at the model's output token rate, so higher levels cost more — the `Review usage:` line and `review-usage.json` reflect that cost.
 
 `--posting-mode draft` creates GitLab draft notes for every fresh comment and publishes them atomically via `POST /draft_notes/bulk_publish`. The reviewer either appears fully on the MR or not at all, instead of leaking partial state if the job is interrupted. If a draft creation fails mid-flight, the run sweeps the partial drafts before reporting the failure; if the job is killed before that, the next run's orphan cleanup picks them up. Requires a GitLab version that exposes the `draft_notes` and `bulk_publish` endpoints (≥ 15.10) and a token whose user can own draft notes — keep `direct` for older self-hosted instances or restricted tokens. `bulk_publish` publishes _all_ of the current user's drafts on the MR, so use a dedicated bot account if multiple processes may share the token.
+
+## Skills
+
+Skills are domain-specific review modules that sharpen the agent's focus on a particular class of bug or pattern. Each skill injects a focused instruction block and optional reference files into the system prompt.
+
+### Built-in skills
+
+| Name | What it does |
+| --- | --- |
+| `code-review` | Adversarial correctness review: finds real, demonstrable bugs only. Reports nothing without a concrete proof path (specific input → failure → observable symptom). Includes per-language reference files for JavaScript/TypeScript and PHP/Laravel. |
+
+Enable a built-in skill with `--skill`:
+
+```bash
+gitlab-review --skill code-review
+```
+
+Or set it permanently via the environment variable:
+
+```yml
+variables:
+  GITLAB_REVIEW_SKILLS: code-review
+```
+
+Multiple skills can be specified by repeating `--skill` or comma-separating values in `GITLAB_REVIEW_SKILLS`:
+
+```bash
+gitlab-review --skill code-review --skill my-custom-skill
+```
+
+### Project skills (auto-discovery)
+
+Drop a skill directory anywhere between the git root and `cwd`. The reviewer walks up the tree and loads every skill it finds:
+
+```
+.agents/skills/<name>/SKILL.md      # preferred location
+.claude/skills/<name>/SKILL.md      # alternative location
+```
+
+`SKILL.md` follows the [agentskills.io](https://agentskills.io) format — a YAML frontmatter block followed by the skill body:
+
+```md
+---
+name: my-skill
+description: One-line description shown in the summary footer.
+---
+
+Your skill instructions here. The reviewer reads these as part of its system prompt.
+```
+
+A `references/` subdirectory alongside `SKILL.md` is optional. Any files placed there are made available to the reviewer by path — the agent can read them on demand using its file-reading tool.
+
+Project skills take precedence over built-in skills with the same name. A skill closer to `cwd` overrides one closer to the git root.
+
+### Skills footer
+
+When skills are active, their names appear in the MR summary note footer:
+
+```md
+Skills: `code-review`
+```
 
 ## Artifacts
 
@@ -239,8 +302,12 @@ The summary is upserted **before** inline comments are posted so it appears at t
 
 Review usage: 12,345 in / 678 out tokens — $0.0421 (anthropic/claude-sonnet-4-5)
 
+Skills: `code-review`
+
 Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) for commit <sha>.
 ```
+
+The `Skills:` line is only present when one or more skills were active for the run.
 
 If a later CI job sees that the current MR head commit already appears in that footer, it skips the agent run to avoid producing a different review for the same diff. Use `--force-review` or `GITLAB_REVIEW_FORCE_REVIEW=true` to bypass the guard. The summary upsert runs in both `direct` and `draft` posting modes (it always uses the regular notes endpoints — the atomic bulk-publish flow is reserved for inline comments).
 
@@ -282,6 +349,18 @@ npm run typecheck
 npm test
 npm run build
 npm pack --dry-run
+```
+
+Eval tests call the real LLM and require `ANTHROPIC_API_KEY` (or `GITLAB_REVIEW_API_KEY`) in a local `.env` file:
+
+```bash
+npm run test:evals
+```
+
+Override the model for cheaper/faster eval runs:
+
+```bash
+GITLAB_REVIEW_EVAL_MODEL=anthropic/claude-haiku-4-5-20251001 npm run test:evals
 ```
 
 The review agent runs against pinned `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and `@earendil-works/pi-coding-agent` versions, so published builds keep a deterministic reviewer runtime.
