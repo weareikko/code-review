@@ -890,6 +890,31 @@ describe('pi-review parsing', () => {
     ]);
   });
 
+  it('parses JSON comment fences whose bodies contain fenced code blocks', () => {
+    const payload = {
+      comments: [
+        {
+          file: 'config/bot/review.yml',
+          line: 8,
+          side: 'RIGHT',
+          severity: 'CRITICAL',
+          body: 'Use this syntax:\n\n```yaml\n- if: $CI_PIPELINE_SOURCE == "web"\n```',
+        },
+      ],
+    };
+    const markdown = ['```json', JSON.stringify(payload, null, 2), '```'].join('\n');
+
+    expect(parseReviewMarkdown(markdown)).toEqual([
+      {
+        file: 'config/bot/review.yml',
+        line: 8,
+        side: 'RIGHT',
+        severity: 'critical',
+        body: 'Use this syntax:\n\n```yaml\n- if: $CI_PIPELINE_SOURCE == "web"\n```',
+      },
+    ]);
+  });
+
   it('emits warnings for text before the first parseable inline header', () => {
     const markdown = [
       '== Inline Comments ==',
