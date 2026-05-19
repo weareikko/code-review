@@ -24,6 +24,7 @@
   "files": [
     "bin/",
     "dist/",
+    "skills/",
     "LICENSE",
     "README.md"
   ],
