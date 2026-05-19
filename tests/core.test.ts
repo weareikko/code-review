@@ -26,6 +26,8 @@ import { filterDiff, runReview, type AgentLike, type ReviewUsage } from '../src/
 import {
   buildSummaryBody,
   buildSummaryHistoryEntries,
+  extractReviewedCommitSha,
+  findExistingReviewedCommitSha,
   findExistingSummaryNoteId,
   postGeneratedComments,
   SUMMARY_HISTORY_ENTRY_START,
@@ -407,6 +409,54 @@ describe('summary note upsert', () => {
     const summaryIndex = body.indexOf('Great work.');
     const footerIndex = body.indexOf('Review usage:');
     expect(footerIndex).toBeGreaterThan(summaryIndex);
+  });
+
+  it('appends and extracts the reviewed commit footer', () => {
+    const commit = '27dab603346bcb994190042029ce7368021ff21e';
+    const body = buildSummaryBody('Great work.', undefined, { reviewedCommitSha: commit });
+
+    expect(body).toContain(
+      '<sup>Reviewed by [Pi Reviewer](https://github.com/ikko-dev/gitlab-review) for commit 27dab603346bcb994190042029ce7368021ff21e.</sup>',
+    );
+    expect(extractReviewedCommitSha(body)).toBe(commit);
+  });
+
+  it('finds the reviewed commit from the current summary note', () => {
+    const current = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const older = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const discussions = [
+      {
+        notes: [
+          {
+            id: 12,
+            body: buildSummaryBody('current', undefined, {
+              reviewedCommitSha: current,
+              historyEntries: [buildSummaryBody('older', undefined, { reviewedCommitSha: older })],
+            }),
+          },
+        ],
+      },
+    ];
+
+    expect(findExistingReviewedCommitSha(discussions)).toBe(current);
+  });
+
+  it('ignores reviewed commit footers from archived summary history', () => {
+    const older = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const discussions = [
+      {
+        notes: [
+          {
+            id: 12,
+            body: buildSummaryBody('current without footer', undefined, {
+              historyEntries: [buildSummaryBody('older', undefined, { reviewedCommitSha: older })],
+            }),
+          },
+        ],
+      },
+    ];
+
+    expect(findExistingReviewedCommitSha(discussions)).toBeNull();
   });
 
   it('finds the existing summary note by marker across discussions', () => {
@@ -1963,6 +2013,16 @@ describe('summary posting configuration', () => {
     expect(
       resolveConfig(['--no-summary'], { ...baseEnv, PI_REVIEWER_POST_SUMMARY: 'true' }).postSummary,
     ).toBe(false);
+  });
+
+  it('enables forceReview via --force-review', () => {
+    expect(resolveConfig(['--force-review'], baseEnv).forceReview).toBe(true);
+  });
+
+  it('enables forceReview via PI_REVIEWER_FORCE_REVIEW=true', () => {
+    expect(resolveConfig([], { ...baseEnv, PI_REVIEWER_FORCE_REVIEW: 'true' }).forceReview).toBe(
+      true,
+    );
   });
 });
 
