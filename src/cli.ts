@@ -17,6 +17,7 @@ import { formatError, RuntimeError } from './errors.js';
 import { extractExistingFingerprints } from './fingerprints.js';
 import { getMergeDiff, prepareGitHistory } from './git.js';
 import { GitLabClient } from './gitlab.js';
+import { startOtelBridge } from './otel.js';
 import { parseReviewMarkdownWithWarnings } from './parser.js';
 import { buildGeneratedComments } from './payloads.js';
 import { runReview } from './pi-reviewer.js';
@@ -123,9 +124,12 @@ export async function run(config: Config): Promise<RunResult> {
     const diff = await traceDiagnosticPhase('git.get_merge_diff', config, runId, () =>
       getMergeDiff(mr.target_branch, { cwd: config.cwd }),
     );
-    const usage = await traceDiagnosticPhase('reviewer.run', config, runId, () =>
-      runReview(config, { cwd: config.cwd, diff }),
-    );
+    const usage = await traceDiagnosticPhase('reviewer.run', config, runId, async (context) => {
+      const result = await runReview(config, { cwd: config.cwd, diff });
+      context.usage = result;
+      return result;
+    });
+    runContext.usage = usage;
 
     const reviewPath = resolve(config.cwd, config.reviewFile);
     const { parsed } = await traceDiagnosticPhase(
@@ -245,7 +249,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
   assertNodeVersion();
   const config = resolveConfig(argv);
-  await run(config);
+  const otel = await startOtelBridge();
+  try {
+    await run(config);
+  } finally {
+    await otel?.shutdown();
+  }
 }
 
 function isDirectRun(): boolean {

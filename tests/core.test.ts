@@ -1336,6 +1336,29 @@ describe('diagnostics_channel instrumentation', () => {
   });
 });
 
+describe('OpenTelemetry bridge gating', () => {
+  it('isOtelEnabled is false unless GITLAB_REVIEW_OTEL is explicitly opted in', async () => {
+    const { isOtelEnabled } = await import('../src/otel.js');
+    expect(isOtelEnabled({})).toBe(false);
+    expect(isOtelEnabled({ GITLAB_REVIEW_OTEL: '0' })).toBe(false);
+    expect(isOtelEnabled({ GITLAB_REVIEW_OTEL: 'yes' })).toBe(false);
+    expect(isOtelEnabled({ GITLAB_REVIEW_OTEL: '1' })).toBe(true);
+    expect(isOtelEnabled({ GITLAB_REVIEW_OTEL: 'true' })).toBe(true);
+  });
+
+  it('startOtelBridge returns null when disabled, without importing @opentelemetry/*', async () => {
+    const previous = process.env.GITLAB_REVIEW_OTEL;
+    delete process.env.GITLAB_REVIEW_OTEL;
+    try {
+      const { startOtelBridge } = await import('../src/otel.js');
+      await expect(startOtelBridge()).resolves.toBeNull();
+    } finally {
+      if (previous === undefined) delete process.env.GITLAB_REVIEW_OTEL;
+      else process.env.GITLAB_REVIEW_OTEL = previous;
+    }
+  });
+});
+
 describe('dry-run and no-post flags', () => {
   it('resolveConfig sets dryRun from --dry-run', () => {
     const cfg = resolveConfig([

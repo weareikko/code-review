@@ -155,6 +155,8 @@ Node emits tracing subchannels as `tracing:<base>:start`, `:end`, `:asyncStart`,
 
 When `--posting-mode draft` is used, the `gitlab.post_comments` payload also exposes `draftsAbandoned`, `draftsCreated`, `draftsDeletedPrePublish`, and `draftsPublished` counters describing the draft lifecycle within the run.
 
+The `reviewer.run` payload exposes a `usage` field (`{ model, tokens, cost }`) once the agent has returned. The same `usage` is forwarded onto the top-level `run` payload so a subscriber on `run:asyncEnd` sees the final token and cost totals for the review.
+
 ```js
 import { diagnosticChannels, run } from '@ikko-dev/gitlab-review';
 
@@ -168,6 +170,38 @@ diagnosticChannels.run.error.subscribe(onError);
 
 await run(config);
 ```
+
+### OpenTelemetry bridge
+
+The CLI ships an optional, opt-in bridge that subscribes to the same diagnostics channels and emits OpenTelemetry spans tagged with the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (`gen_ai.*`). Set `GITLAB_REVIEW_OTEL=1` to enable it and install the OTel runtime alongside this package:
+
+```bash
+npm i -D \
+  @opentelemetry/api \
+  @opentelemetry/sdk-node \
+  @opentelemetry/resources \
+  @opentelemetry/semantic-conventions
+```
+
+Exporter selection follows the standard `OTEL_*` env vars (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_PROTOCOL`, …). Anything that ingests OTLP works: Tempo, Mimir, Jaeger, Datadog, Honeycomb, SigNoz, or [Grafana Cloud AI Observability (Sigil)](https://grafana.com/docs/grafana-cloud/machine-learning/ai-observability/).
+
+Example pointing at Grafana Sigil:
+
+```yml
+variables:
+  GITLAB_REVIEW_OTEL: '1'
+  OTEL_EXPORTER_OTLP_ENDPOINT: '$SIGIL_ENDPOINT'
+  OTEL_EXPORTER_OTLP_HEADERS: 'Authorization=Bearer $SIGIL_TOKEN'
+  OTEL_SEMCONV_STABILITY_OPT_IN: 'gen_ai_latest_experimental'
+```
+
+Span shape:
+
+- `invoke_workflow gitlab-review` — root span per run, carrying `gitlab.project_id`, `gitlab.mr_iid`, comment counters, and `gen_ai.*` totals once the reviewer has finished.
+- `invoke_agent pi-reviewer` — wraps the agent call. Tagged with `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.operation.name=invoke_agent`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_creation.input_tokens`, and `gen_ai.usage.cost.*_usd` (cost is not yet standardized in the GenAI semconv, so it sits under a clearly namespaced custom attribute).
+- `gitlab-review.<phase>` — one span per remaining phase (`gitlab.get_merge_request`, `git.get_merge_diff`, `gitlab.post_comments`, …) so latency and error rates per phase show up in Tempo / Grafana.
+
+When the env var is not set, the bridge is a no-op and `@opentelemetry/*` is never imported. If `GITLAB_REVIEW_OTEL=1` is set without the peer deps installed, the CLI fails fast with a clear error.
 
 ## Duplicate prevention
 
