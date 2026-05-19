@@ -1336,6 +1336,238 @@ describe('diagnostics_channel instrumentation', () => {
   });
 });
 
+describe('OpenTelemetry bridge', () => {
+  interface RecordedAttribute {
+    key: string;
+    value: string | number | boolean;
+  }
+  interface RecordedSpan {
+    name: string;
+    attributes: RecordedAttribute[];
+    status?: { code: number; message?: string };
+    exceptions: Array<{ name?: string; message: string }>;
+    ended: boolean;
+    parent?: RecordedSpan;
+  }
+
+  function createFakeRuntime() {
+    const spans: RecordedSpan[] = [];
+    const shutdown = vi.fn(async () => undefined);
+
+    const makeSpan = (name: string, parent: RecordedSpan | undefined): RecordedSpan => {
+      const span: RecordedSpan = {
+        name,
+        attributes: [],
+        exceptions: [],
+        ended: false,
+        parent,
+      };
+      spans.push(span);
+      return span;
+    };
+
+    const SPAN_KEY = Symbol('parent-span');
+    const tracer = {
+      startSpan(name: string, _opts?: unknown, ctx?: unknown): RecordedSpan {
+        const parent =
+          ctx && typeof ctx === 'object' && SPAN_KEY in (ctx as Record<symbol, unknown>)
+            ? ((ctx as Record<symbol, unknown>)[SPAN_KEY] as RecordedSpan)
+            : undefined;
+        const span = makeSpan(name, parent);
+        return Object.assign(span, {
+          setAttribute(key: string, value: string | number | boolean) {
+            span.attributes.push({ key, value });
+          },
+          setStatus(status: { code: number; message?: string }) {
+            span.status = status;
+          },
+          recordException(exception: { name?: string; message: string }) {
+            span.exceptions.push(exception);
+          },
+          end() {
+            span.ended = true;
+          },
+        });
+      },
+    };
+
+    const api = {
+      trace: {
+        getTracer: () => tracer,
+        setSpan: (_ctx: unknown, span: RecordedSpan) => ({ [SPAN_KEY]: span }),
+      },
+      context: { active: () => ({}) },
+      SpanKind: { INTERNAL: 1 },
+      SpanStatusCode: { ERROR: 2 },
+    };
+
+    return { runtime: { api, shutdown }, spans, shutdown };
+  }
+
+  async function runWithBridge(
+    work: (ctx: DiagnosticContext) => Promise<void>,
+    runId = 'run-otel',
+  ): Promise<ReturnType<typeof createFakeRuntime>> {
+    const { startOtelBridge } = await import('../src/otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime as unknown as Parameters<typeof startOtelBridge>[0] extends infer T
+        ? T extends { runtime?: infer R }
+          ? R
+          : never
+        : never,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+    expect(bridge).not.toBeNull();
+
+    const config: Config = {
+      project: 'proj',
+      mr: '1',
+      gitlabUrl: 'https://gitlab.example.com',
+      gitlabToken: 't',
+      gitlabAuthHeader: 'PRIVATE-TOKEN',
+      model: 'anthropic/claude-sonnet-4-5',
+      minSeverity: 'info',
+      thinkingLevel: 'off',
+      postingMode: 'direct',
+      apiKey: 'k',
+      reviewFile: 'pi-review.md',
+      output: 'review-comments.json',
+      dryRun: false,
+      noPost: false,
+      cwd: '/tmp',
+    };
+
+    const runContext = createDiagnosticContext('run', config, runId);
+    try {
+      await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+        const reviewerContext = createDiagnosticContext('reviewer.run', config, runId);
+        await traceDiagnostic(diagnosticChannels.runReviewer, reviewerContext, async (ctx) => {
+          await work(ctx);
+        });
+      });
+    } catch {
+      // Swallow — error-path tests assert on captured spans instead.
+    } finally {
+      await bridge?.shutdown();
+    }
+    return fake;
+  }
+
+  it('is false unless GITLAB_REVIEW_OTEL is explicitly opted in', async () => {
+    const { isOtelEnabled } = await import('../src/otel.js');
+    expect(isOtelEnabled({})).toBe(false);
+    expect(isOtelEnabled({ GITLAB_REVIEW_OTEL: '0' })).toBe(false);
+    expect(isOtelEnabled({ GITLAB_REVIEW_OTEL: 'yes' })).toBe(false);
+    expect(isOtelEnabled({ GITLAB_REVIEW_OTEL: '1' })).toBe(true);
+    expect(isOtelEnabled({ GITLAB_REVIEW_OTEL: 'true' })).toBe(true);
+  });
+
+  it('returns null when disabled without touching the runtime', async () => {
+    const { startOtelBridge } = await import('../src/otel.js');
+    const fake = createFakeRuntime();
+    const result = await startOtelBridge({ runtime: fake.runtime, env: {} });
+    expect(result).toBeNull();
+    expect(fake.spans).toHaveLength(0);
+    expect(fake.shutdown).not.toHaveBeenCalled();
+  });
+
+  it('opens an invoke_workflow span per run and parents phase spans under it', async () => {
+    const { spans } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-sonnet-4-5',
+        tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+        cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+      };
+    });
+
+    expect(spans.map((s) => s.name)).toEqual([
+      'invoke_workflow gitlab-review',
+      'invoke_agent pi-reviewer',
+    ]);
+    const [root, reviewer] = spans;
+    expect(reviewer.parent).toBe(root);
+    expect(root.ended).toBe(true);
+    expect(reviewer.ended).toBe(true);
+  });
+
+  it('stamps gen_ai.* attributes on reviewer.run from DiagnosticUsage', async () => {
+    const { spans } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-sonnet-4-5',
+        tokens: { input: 1200, output: 340, cacheRead: 50, cacheWrite: 10, total: 1600 },
+        cost: { input: 0.012, output: 0.034, cacheRead: 0.001, cacheWrite: 0.002, total: 0.049 },
+      };
+    });
+    const reviewer = spans.find((s) => s.name === 'invoke_agent pi-reviewer');
+    const attrs = Object.fromEntries(reviewer!.attributes.map((a) => [a.key, a.value]));
+    expect(attrs).toMatchObject({
+      'gen_ai.provider.name': 'anthropic',
+      'gen_ai.request.model': 'claude-sonnet-4-5',
+      'gen_ai.response.model': 'claude-sonnet-4-5',
+      'gen_ai.operation.name': 'invoke_agent',
+      'gen_ai.agent.name': 'pi-reviewer',
+      'gen_ai.usage.input_tokens': 1200,
+      'gen_ai.usage.output_tokens': 340,
+      'gen_ai.usage.cache_read.input_tokens': 50,
+      'gen_ai.usage.cache_creation.input_tokens': 10,
+      'gen_ai.usage.cost.total_usd': 0.049,
+    });
+  });
+
+  it('records exceptions and ERROR status on rejected phases', async () => {
+    const { startOtelBridge } = await import('../src/otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config: Config = {
+      project: 'proj',
+      mr: '1',
+      gitlabUrl: 'https://gitlab.example.com',
+      gitlabToken: 't',
+      gitlabAuthHeader: 'PRIVATE-TOKEN',
+      model: 'anthropic/claude-sonnet-4-5',
+      minSeverity: 'info',
+      thinkingLevel: 'off',
+      postingMode: 'direct',
+      apiKey: 'k',
+      reviewFile: 'pi-review.md',
+      output: 'review-comments.json',
+      dryRun: false,
+      noPost: false,
+      cwd: '/tmp',
+    };
+    const ctx = createDiagnosticContext('reviewer.run', config, 'run-error');
+    await expect(
+      traceDiagnostic(diagnosticChannels.runReviewer, ctx, async () => {
+        throw new ReviewerError('boom');
+      }),
+    ).rejects.toThrow('boom');
+    await bridge?.shutdown();
+
+    const reviewer = fake.spans.find((s) => s.name === 'invoke_agent pi-reviewer');
+    expect(reviewer?.exceptions).toEqual([
+      expect.objectContaining({ name: 'ReviewerError', message: 'boom' }),
+    ]);
+    expect(reviewer?.status).toEqual({ code: 2, message: 'boom' });
+    expect(reviewer?.ended).toBe(true);
+  });
+
+  it('awaits runtime.shutdown when the bridge stops', async () => {
+    const { startOtelBridge } = await import('../src/otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+    await bridge?.shutdown();
+    expect(fake.shutdown).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('dry-run and no-post flags', () => {
   it('resolveConfig sets dryRun from --dry-run', () => {
     const cfg = resolveConfig([

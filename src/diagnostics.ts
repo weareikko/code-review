@@ -23,6 +23,20 @@ export interface DiagnosticError {
   code?: string;
 }
 
+export interface DiagnosticUsageBreakdown {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+}
+
+export interface DiagnosticUsage {
+  model: string;
+  tokens: DiagnosticUsageBreakdown;
+  cost: DiagnosticUsageBreakdown;
+}
+
 export interface DiagnosticContext {
   version: 1;
   runId: string;
@@ -49,6 +63,7 @@ export interface DiagnosticContext {
   draftsCreated?: number;
   draftsDeletedPrePublish?: number;
   draftsPublished?: number;
+  usage?: DiagnosticUsage;
   errorInfo?: DiagnosticError;
 }
 
