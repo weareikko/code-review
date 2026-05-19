@@ -22,7 +22,11 @@ import { startOtelBridge } from './otel.js';
 import { parseReviewMarkdownWithWarnings } from './parser.js';
 import { buildGeneratedComments } from './payloads.js';
 import { runReview } from './pi-reviewer.js';
-import { postGeneratedComments, upsertSummaryNote } from './posting.js';
+import {
+  findExistingReviewedCommitSha,
+  postGeneratedComments,
+  upsertSummaryNote,
+} from './posting.js';
 
 export type {
   DiagnosticContext,
@@ -66,6 +70,8 @@ Options:
   --no-post               Generate artifacts and skip posting
   --no-summary            Skip posting/updating the MR-level summary note
                           (env: PI_REVIEWER_POST_SUMMARY=false)
+  --force-review          Run even when the current commit was already reviewed
+                          (env: PI_REVIEWER_FORCE_REVIEW=true)
   --help, -h              Show help
   --version, -v           Show version
 `;
@@ -75,6 +81,7 @@ export interface RunResult {
   posted: number;
   usage: ReviewUsage;
   summary: SummaryResult | null;
+  skipped?: boolean;
 }
 
 function readVersion(): string {
@@ -129,6 +136,52 @@ export async function run(config: Config): Promise<RunResult> {
     const version = await traceDiagnosticPhase('gitlab.get_latest_version', config, runId, () =>
       gitlab.getLatestVersion(config.project, config.mr),
     );
+    const initialDiscussions = await traceDiagnosticPhase(
+      'gitlab.get_discussions',
+      config,
+      runId,
+      () => gitlab.getDiscussions(config.project, config.mr),
+    );
+
+    const reviewedCommitSha = findExistingReviewedCommitSha(initialDiscussions);
+    if (
+      !config.forceReview &&
+      !config.dryRun &&
+      !config.noPost &&
+      reviewedCommitSha === version.head_commit_sha
+    ) {
+      const usage = zeroReviewUsage(config.model);
+      runContext.usage = usage;
+      runContext.generated = 0;
+      runContext.newComments = 0;
+      runContext.duplicateComments = 0;
+      runContext.posted = 0;
+      runContext.summaryAction = 'skipped';
+
+      await traceDiagnosticPhase('artifact.write_output', config, runId, async (context) => {
+        const outputPath = resolve(config.cwd, config.output);
+        const usagePath = resolve(config.cwd, 'review-usage.json');
+        const reviewPath = resolve(config.cwd, config.reviewFile);
+        await mkdir(dirname(outputPath), { recursive: true });
+        await mkdir(dirname(reviewPath), { recursive: true });
+        await writeFile(outputPath, JSON.stringify([], null, 2), 'utf8');
+        await writeFile(usagePath, JSON.stringify(usage, null, 2), 'utf8');
+        await writeFile(
+          reviewPath,
+          `Skipped review: commit ${version.head_commit_sha} was already reviewed.\n`,
+          'utf8',
+        );
+        context.generated = 0;
+        context.newComments = 0;
+        context.duplicateComments = 0;
+        context.posted = 0;
+      });
+
+      console.log(
+        `Skipping review: commit ${version.head_commit_sha} was already reviewed. Use --force-review to run again.`,
+      );
+      return { generated: [], posted: 0, usage, summary: null, skipped: true };
+    }
 
     await traceDiagnosticPhase('git.prepare_history', config, runId, () =>
       prepareGitHistory(mr.source_branch, mr.target_branch, { cwd: config.cwd }),
@@ -213,7 +266,10 @@ export async function run(config: Config): Promise<RunResult> {
             config.mr,
             parsed.summary as string,
             discussions,
-            formatUsageLine(usage),
+            {
+              costFooter: formatUsageLine(usage),
+              reviewedCommitSha: version.head_commit_sha,
+            },
           );
           context.summaryAction = result.action;
           context.summaryNoteId = result.noteId;
@@ -264,6 +320,14 @@ export async function run(config: Config): Promise<RunResult> {
 
     return { generated, posted, usage, summary };
   });
+}
+
+function zeroReviewUsage(model: string): ReviewUsage {
+  return {
+    model,
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
 }
 
 export function formatUsageLine(usage: ReviewUsage): string {

@@ -20,12 +20,20 @@ export interface Config {
   dryRun: boolean;
   noPost: boolean;
   postSummary: boolean;
+  forceReview: boolean;
   cwd: string;
 }
 
 export type ParsedArgs = Record<string, string | boolean>;
 
-const BOOLEAN_FLAGS = new Set(['dry-run', 'no-post', 'no-summary', 'help', 'version']);
+const BOOLEAN_FLAGS = new Set([
+  'dry-run',
+  'no-post',
+  'no-summary',
+  'force-review',
+  'help',
+  'version',
+]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const args: ParsedArgs = {};
@@ -151,6 +159,7 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     dryRun: toBoolean(args.dryRun),
     noPost: toBoolean(args.noPost),
     postSummary: resolvePostSummary(args, env),
+    forceReview: toBoolean(args.forceReview) || toBoolean(env.PI_REVIEWER_FORCE_REVIEW),
     cwd: String(args.cwd ?? process.cwd()),
   };
 }

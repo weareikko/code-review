@@ -9,6 +9,7 @@ export const SUMMARY_HISTORY_END = '<!-- pi-reviewer:summary-history:end -->';
 export const SUMMARY_HISTORY_ENTRY_START = '<!-- pi-reviewer:summary-history-entry:start -->';
 export const SUMMARY_HISTORY_ENTRY_END = '<!-- pi-reviewer:summary-history-entry:end -->';
 export const SUMMARY_HISTORY_LIMIT = 10;
+export const REVIEWED_COMMIT_FOOTER_PATTERN = /Reviewed commit: `?([a-f0-9]{40})`?/i;
 
 export type SummaryAction = 'created' | 'updated';
 
@@ -24,6 +25,7 @@ export interface SummaryNote {
 
 export interface SummaryBodyOptions {
   historyEntries?: string[];
+  reviewedCommitSha?: string;
 }
 
 export interface UpsertSummaryOptions extends SummaryBodyOptions {
@@ -37,10 +39,28 @@ export function buildSummaryBody(
   options: SummaryBodyOptions = {},
 ): string {
   const body = `${SUMMARY_MARKER}\n\n${summary.trim()}`;
-  const withFooter = costFooter ? `${body}\n\n---\n\n${costFooter}` : body;
+  const footerLines = [
+    costFooter?.trim(),
+    options.reviewedCommitSha ? buildReviewedCommitFooter(options.reviewedCommitSha) : undefined,
+  ].filter((line): line is string => Boolean(line));
+  const withFooter =
+    footerLines.length > 0 ? `${body}\n\n---\n\n${footerLines.join('\n\n')}` : body;
   const historyEntries = options.historyEntries?.filter((entry) => entry.trim().length > 0) ?? [];
   if (historyEntries.length === 0) return withFooter;
   return `${withFooter}\n\n${buildSummaryHistoryBlock(historyEntries)}`;
+}
+
+export function buildReviewedCommitFooter(commitSha: string): string {
+  return `Reviewed commit: \`${commitSha}\``;
+}
+
+export function extractReviewedCommitSha(body: string): string | null {
+  return REVIEWED_COMMIT_FOOTER_PATTERN.exec(body)?.[1] ?? null;
+}
+
+export function findExistingReviewedCommitSha(discussions: Discussion[]): string | null {
+  const body = findExistingSummaryNote(discussions)?.body;
+  return body ? extractReviewedCommitSha(stripSummaryHistory(body)) : null;
 }
 
 export function findExistingSummaryNote(discussions: Discussion[]): SummaryNote | null {
@@ -134,7 +154,10 @@ export async function upsertSummaryNote(
   const historyEntries = existing
     ? buildSummaryHistoryEntries(existing.body, options.archivedAt)
     : (options.historyEntries ?? []);
-  const body = buildSummaryBody(summary, options.costFooter, { historyEntries });
+  const body = buildSummaryBody(summary, options.costFooter, {
+    historyEntries,
+    reviewedCommitSha: options.reviewedCommitSha,
+  });
   if (existing) {
     await gitlab.updateMergeRequestNote(project, mr, existing.id, body);
     return { action: 'updated', noteId: existing.id };
