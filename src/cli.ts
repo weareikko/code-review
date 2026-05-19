@@ -23,7 +23,13 @@ import { buildGeneratedComments } from './payloads.js';
 import { runReview } from './pi-reviewer.js';
 import { postGeneratedComments } from './posting.js';
 
-export type { DiagnosticContext, DiagnosticError, DiagnosticPhase } from './diagnostics.js';
+export type {
+  DiagnosticContext,
+  DiagnosticError,
+  DiagnosticPhase,
+  DiagnosticUsage,
+  DiagnosticUsageBreakdown,
+} from './diagnostics.js';
 export {
   DIAGNOSTIC_CHANNEL_NAMES,
   DIAGNOSTIC_CHANNEL_PREFIX,
@@ -33,6 +39,15 @@ export {
   traceDiagnostic,
   traceDiagnosticPhase,
 } from './diagnostics.js';
+export type {
+  OtelApi,
+  OtelBridge,
+  OtelBridgeOptions,
+  OtelRuntime,
+  OtelSpan,
+  OtelTracer,
+} from './otel.js';
+export { isOtelEnabled, startOtelBridge } from './otel.js';
 
 const HELP = `Usage: gitlab-review [options]
 
