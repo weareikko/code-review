@@ -46,3 +46,11 @@ export {
   sha256,
 } from './fingerprints.js';
 export { buildGeneratedComments, buildPayload } from './payloads.js';
+export {
+  SUMMARY_MARKER,
+  buildSummaryBody,
+  findExistingSummaryNoteId,
+  upsertSummaryNote,
+  type SummaryAction,
+  type SummaryResult,
+} from './posting.js';

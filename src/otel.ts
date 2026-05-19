@@ -252,6 +252,12 @@ function applyResultAttributes(span: OtelSpan, ctx: DiagnosticContext): void {
   if (typeof ctx.draftsCreated === 'number') {
     span.setAttribute('gitlab_review.drafts.created', ctx.draftsCreated);
   }
+  if (typeof ctx.summaryAction === 'string') {
+    span.setAttribute('gitlab_review.summary.action', ctx.summaryAction);
+  }
+  if (typeof ctx.summaryNoteId === 'number') {
+    span.setAttribute('gitlab_review.summary.note_id', ctx.summaryNoteId);
+  }
 }
 
 function applyGenAiAttributes(span: OtelSpan, ctx: DiagnosticContext): void {

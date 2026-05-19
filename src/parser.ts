@@ -2,6 +2,7 @@ import { normalizeSeverity, type ReviewComment, type Severity, type Side } from 
 
 export interface ParseResult {
   comments: ReviewComment[];
+  summary: string | null;
   warnings: string[];
 }
 
@@ -48,7 +49,14 @@ function addJsonComment(out: ReviewComment[], item: unknown): void {
   }
 }
 
-function parseJsonComments(markdown: string, out: ReviewComment[]): void {
+function normalizeSummary(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function parseJsonComments(markdown: string, out: ReviewComment[]): string | null {
+  let summary: string | null = null;
   const fence = /^```json[^\S\r\n]*(?:\r?\n)([\s\S]*?)^```[^\S\r\n]*$/gim;
   for (const match of markdown.matchAll(fence)) {
     try {
@@ -59,6 +67,9 @@ function parseJsonComments(markdown: string, out: ReviewComment[]): void {
           ? parsed.comments
           : [];
       for (const item of list) addJsonComment(out, item);
+      if (summary === null && parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        summary = normalizeSummary((parsed as Record<string, unknown>).summary);
+      }
     } catch {
       // Ignore unrelated JSON fences; terminal parsing below will still run.
     }
@@ -72,6 +83,8 @@ function parseJsonComments(markdown: string, out: ReviewComment[]): void {
       // Ignore malformed legacy comment markers.
     }
   }
+
+  return summary;
 }
 
 function matchHeader(
@@ -145,10 +158,10 @@ function parseInlineSection(markdown: string, out: ReviewComment[], warnings: st
 export function parseReviewMarkdownWithWarnings(markdown: string): ParseResult {
   const comments: ReviewComment[] = [];
   const warnings: string[] = [];
-  parseJsonComments(markdown, comments);
+  const summary = parseJsonComments(markdown, comments);
   parseInlineSection(markdown, comments, warnings);
 
-  return { comments, warnings };
+  return { comments, summary, warnings };
 }
 
 export function parseReviewMarkdown(markdown: string): ReviewComment[] {
