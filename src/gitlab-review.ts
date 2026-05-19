@@ -29,6 +29,7 @@ export interface ReviewUsage {
   model: string;
   tokens: UsageBreakdown;
   cost: UsageBreakdown;
+  skills: string[];
 }
 
 export interface AgentLike {
@@ -466,5 +467,6 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     model: config.model,
     tokens: aggregated.tokens,
     cost: aggregated.cost,
+    skills: context.skills.map((s) => s.name),
   };
 }
