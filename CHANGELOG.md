@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-05-19
+
 ### Fixed
 
 - Parse JSON review fences whose comment bodies contain nested fenced code blocks by only treating backticks at the beginning of a line as the closing fence ([#15]).
@@ -80,7 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.5...HEAD
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.6...HEAD
+[0.1.6]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.6
 [0.1.5]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.5
 [0.1.4]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.4
 [0.1.3]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.3
