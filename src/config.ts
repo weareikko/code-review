@@ -83,7 +83,7 @@ function toBoolean(value: unknown): boolean {
 
 function resolvePostSummary(args: ParsedArgs, env: NodeJS.ProcessEnv): boolean {
   if (args.noSummary === true) return false;
-  const raw = env.PI_REVIEWER_POST_SUMMARY;
+  const raw = env.GITLAB_REVIEW_POST_SUMMARY;
   if (typeof raw === 'string') {
     const normalized = raw.trim().toLowerCase();
     if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
@@ -141,25 +141,27 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     gitlabUrl,
     gitlabToken: token.token,
     gitlabAuthHeader: token.header,
-    model: String(args.model ?? env.PI_REVIEWER_MODEL ?? 'anthropic/claude-sonnet-4-5'),
+    model: String(args.model ?? env.GITLAB_REVIEW_MODEL ?? 'anthropic/claude-sonnet-4-5'),
     minSeverity: resolveMinSeverity(
-      args.minSeverity ?? env.PI_REVIEWER_MIN_SEVERITY ?? 'info',
+      args.minSeverity ?? env.GITLAB_REVIEW_MIN_SEVERITY ?? 'info',
     ) as Severity,
     thinkingLevel: resolveThinkingLevel(
-      args.thinking ?? env.PI_REVIEWER_THINKING_LEVEL ?? 'off',
+      args.thinking ?? env.GITLAB_REVIEW_THINKING_LEVEL ?? 'off',
     ) as ThinkingLevel,
     postingMode: resolvePostingMode(
-      args.postingMode ?? env.PI_REVIEWER_POSTING_MODE ?? 'direct',
+      args.postingMode ?? env.GITLAB_REVIEW_POSTING_MODE ?? 'direct',
     ) as PostingMode,
     apiKey: String(
-      args.apiKey ?? first(env.PI_API_KEY, env.ANTHROPIC_API_KEY, env.CLAUDE_API_KEY) ?? '',
+      args.apiKey ??
+        first(env.GITLAB_REVIEW_API_KEY, env.ANTHROPIC_API_KEY, env.CLAUDE_API_KEY) ??
+        '',
     ),
-    reviewFile: String(args.reviewFile ?? 'pi-review.md'),
+    reviewFile: String(args.reviewFile ?? 'gitlab-review.md'),
     output: String(args.output ?? 'review-comments.json'),
     dryRun: toBoolean(args.dryRun),
     noPost: toBoolean(args.noPost),
     postSummary: resolvePostSummary(args, env),
-    forceReview: toBoolean(args.forceReview) || toBoolean(env.PI_REVIEWER_FORCE_REVIEW),
+    forceReview: toBoolean(args.forceReview) || toBoolean(env.GITLAB_REVIEW_FORCE_REVIEW),
     cwd: String(args.cwd ?? process.cwd()),
   };
 }

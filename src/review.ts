@@ -24,7 +24,7 @@ export type {
   ReviewComment,
   Side,
 } from './types.js';
-export { normalizeSeverity, toPiReviewerSeverity } from './types.js';
+export { normalizeSeverity, toGitLabReviewSeverity } from './types.js';
 export {
   parseReviewMarkdown,
   parseReviewMarkdownWithWarnings,

@@ -9,8 +9,16 @@ export interface ParseResult {
 const HEADER_RE = /^\s*(?<emoji>[🔴🟡🔵])?\s*(?<file>.+):(\d+)\s+\((?<side>LEFT|RIGHT)\)\s*$/u;
 const GITHUB_STYLE_HEADER_RE =
   /^\s*(?<emoji>[🔴🟡🔵])?\s*(?:\*\*)?`?(?<file>.+):(\d+)`?(?:\*\*)?\s*(?:[·-]|\()\s*(?<side>LEFT|RIGHT)\)?\s*$/u;
-const FINGERPRINT_MARKER_RE =
-  /<!--\s*pi-reviewer:fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->/gi;
+const LEGACY_PROJECT_MARKER = ['pi', 'reviewer'].join('-');
+const PROJECT_MARKER_RE = String.raw`(?:gitlab-review|${LEGACY_PROJECT_MARKER})`;
+const FINGERPRINT_MARKER_RE = new RegExp(
+  String.raw`<!--\s*${PROJECT_MARKER_RE}:fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->`,
+  'gi',
+);
+const JSON_COMMENT_MARKER_RE = new RegExp(
+  String.raw`<!--\s*(?:gitlab-review|${LEGACY_PROJECT_MARKER})-comment\s*([\s\S]*?)-->`,
+  'gi',
+);
 
 function severityFromEmoji(emoji: string | undefined): Severity {
   if (emoji === '🔴') return 'critical';
@@ -75,8 +83,7 @@ function parseJsonComments(markdown: string, out: ReviewComment[]): string | nul
     }
   }
 
-  const marker = /<!--\s*pi-reviewer-comment\s*([\s\S]*?)-->/gi;
-  for (const match of markdown.matchAll(marker)) {
+  for (const match of markdown.matchAll(JSON_COMMENT_MARKER_RE)) {
     try {
       addJsonComment(out, JSON.parse(match[1] ?? ''));
     } catch {

@@ -44,7 +44,7 @@ gitlab-review \
   --mr 42 \
   --gitlab-url https://gitlab.example.com \
   --gitlab-token "$GITLAB_TOKEN" \
-  --api-key "$PI_API_KEY" \
+  --api-key "$GITLAB_REVIEW_API_KEY" \
   --dry-run
 ```
 
@@ -59,11 +59,11 @@ review:
   variables:
     GIT_DEPTH: '0'
   script:
-    - npx @studiometa/gitlab-review
+    - npx @ikko-dev/gitlab-review
   artifacts:
     when: always
     paths:
-      - pi-review.md
+      - gitlab-review.md
       - review-comments.json
       - review-usage.json
 ```
@@ -72,25 +72,25 @@ review:
 
 The CLI auto-resolves values from CI variables and common token/key names.
 
-| Variable                     | Purpose                                                             |
-| ---------------------------- | ------------------------------------------------------------------- |
-| `CI_PROJECT_ID`              | Default for `--project`                                             |
-| `CI_MERGE_REQUEST_IID`       | Default for `--mr`                                                  |
-| `CI_SERVER_URL`              | Default for `--gitlab-url`                                          |
-| `CI_SERVER_HOST`             | Fallback for `--gitlab-url` as `https://$CI_SERVER_HOST`            |
-| `GITLAB_TOKEN`               | Preferred GitLab API token (`PRIVATE-TOKEN`)                        |
-| `GLAB_CLI_TOKEN`             | Fallback GitLab API token (`PRIVATE-TOKEN`)                         |
-| `CI_JOB_TOKEN`               | Fallback token (`JOB-TOKEN`)                                        |
-| `GITLAB_PRIVATE_TOKEN`       | Fallback token (`PRIVATE-TOKEN`)                                    |
-| `PI_API_KEY`                 | Preferred AI API key                                                |
-| `ANTHROPIC_API_KEY`          | Fallback AI API key                                                 |
-| `CLAUDE_API_KEY`             | Fallback AI API key                                                 |
-| `PI_REVIEWER_MODEL`          | Default for `--model`                                               |
-| `PI_REVIEWER_MIN_SEVERITY`   | Default for `--min-severity`                                        |
-| `PI_REVIEWER_THINKING_LEVEL` | Default for `--thinking`                                            |
-| `PI_REVIEWER_POSTING_MODE`   | Default for `--posting-mode`                                        |
-| `PI_REVIEWER_POST_SUMMARY`   | Set to `false`/`0` to skip the MR-level summary note                |
-| `PI_REVIEWER_FORCE_REVIEW`   | Set to `true`/`1` to review even if the commit was already reviewed |
+| Variable                       | Purpose                                                             |
+| ------------------------------ | ------------------------------------------------------------------- |
+| `CI_PROJECT_ID`                | Default for `--project`                                             |
+| `CI_MERGE_REQUEST_IID`         | Default for `--mr`                                                  |
+| `CI_SERVER_URL`                | Default for `--gitlab-url`                                          |
+| `CI_SERVER_HOST`               | Fallback for `--gitlab-url` as `https://$CI_SERVER_HOST`            |
+| `GITLAB_TOKEN`                 | Preferred GitLab API token (`PRIVATE-TOKEN`)                        |
+| `GLAB_CLI_TOKEN`               | Fallback GitLab API token (`PRIVATE-TOKEN`)                         |
+| `CI_JOB_TOKEN`                 | Fallback token (`JOB-TOKEN`)                                        |
+| `GITLAB_PRIVATE_TOKEN`         | Fallback token (`PRIVATE-TOKEN`)                                    |
+| `GITLAB_REVIEW_API_KEY`        | Preferred AI API key                                                |
+| `ANTHROPIC_API_KEY`            | Fallback AI API key                                                 |
+| `CLAUDE_API_KEY`               | Fallback AI API key                                                 |
+| `GITLAB_REVIEW_MODEL`          | Default for `--model`                                               |
+| `GITLAB_REVIEW_MIN_SEVERITY`   | Default for `--min-severity`                                        |
+| `GITLAB_REVIEW_THINKING_LEVEL` | Default for `--thinking`                                            |
+| `GITLAB_REVIEW_POSTING_MODE`   | Default for `--posting-mode`                                        |
+| `GITLAB_REVIEW_POST_SUMMARY`   | Set to `false`/`0` to skip the MR-level summary note                |
+| `GITLAB_REVIEW_FORCE_REVIEW`   | Set to `true`/`1` to review even if the commit was already reviewed |
 
 ## Flags
 
@@ -100,14 +100,14 @@ The CLI auto-resolves values from CI variables and common token/key names.
 | `--mr <iid>`             | Merge request IID                                      | `CI_MERGE_REQUEST_IID`                                                   |
 | `--gitlab-url <url>`     | GitLab URL                                             | `CI_SERVER_URL` or `https://${CI_SERVER_HOST}`                           |
 | `--gitlab-token <token>` | GitLab token                                           | `GITLAB_TOKEN`, `GLAB_CLI_TOKEN`, `CI_JOB_TOKEN`, `GITLAB_PRIVATE_TOKEN` |
-| `--api-key <key>`        | API key passed to the review agent                     | `PI_API_KEY`, `ANTHROPIC_API_KEY`, `CLAUDE_API_KEY`                      |
-| `--model <provider/id>`  | Model passed to the review agent                       | `PI_REVIEWER_MODEL` or `anthropic/claude-sonnet-4-5`                     |
-| `--min-severity <level>` | `info`, `warn`, `critical`                             | `PI_REVIEWER_MIN_SEVERITY` or `info`                                     |
-| `--thinking <level>`     | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`     | `PI_REVIEWER_THINKING_LEVEL` or `off`                                    |
-| `--posting-mode <mode>`  | `direct` or `draft` (atomic bulk publish)              | `PI_REVIEWER_POSTING_MODE` or `direct`                                   |
+| `--api-key <key>`        | API key passed to the review agent                     | `GITLAB_REVIEW_API_KEY`, `ANTHROPIC_API_KEY`, `CLAUDE_API_KEY`           |
+| `--model <provider/id>`  | Model passed to the review agent                       | `GITLAB_REVIEW_MODEL` or `anthropic/claude-sonnet-4-5`                   |
+| `--min-severity <level>` | `info`, `warn`, `critical`                             | `GITLAB_REVIEW_MIN_SEVERITY` or `info`                                   |
+| `--thinking <level>`     | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`     | `GITLAB_REVIEW_THINKING_LEVEL` or `off`                                  |
+| `--posting-mode <mode>`  | `direct` or `draft` (atomic bulk publish)              | `GITLAB_REVIEW_POSTING_MODE` or `direct`                                 |
 | `--no-summary`           | Skip posting/updating the MR-level summary note        | summary posting is on by default                                         |
-| `--force-review`         | Review even if the current commit was already reviewed | `PI_REVIEWER_FORCE_REVIEW` or `false`                                    |
-| `--review-file <path>`   | Raw `pi-reviewer` output file                          | `pi-review.md`                                                           |
+| `--force-review`         | Review even if the current commit was already reviewed | `GITLAB_REVIEW_FORCE_REVIEW` or `false`                                  |
+| `--review-file <path>`   | Raw `gitlab-review` output file                        | `gitlab-review.md`                                                       |
 | `--output <path>`        | Generated payload artifact file                        | `review-comments.json`                                                   |
 | `--cwd <path>`           | Working directory                                      | `process.cwd()`                                                          |
 | `--dry-run`              | Generate artifacts and skip posting                    | `false`                                                                  |
@@ -121,7 +121,7 @@ The CLI auto-resolves values from CI variables and common token/key names.
 
 ## Artifacts
 
-- `pi-review.md`: raw review text returned by the agent
+- `gitlab-review.md`: raw review text returned by the agent
 - `review-comments.json`: generated comment objects including:
   - parsed comment payload
   - computed fingerprints
@@ -197,7 +197,7 @@ variables:
 Span shape:
 
 - `invoke_workflow gitlab-review` — root span per run, carrying `gitlab.project_id`, `gitlab.mr_iid`, comment counters, and `gen_ai.*` totals once the reviewer has finished.
-- `invoke_agent pi-reviewer` — wraps the agent call. Tagged with `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.operation.name=invoke_agent`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_creation.input_tokens`, and `gen_ai.usage.cost.*_usd` (cost is not yet standardized in the GenAI semconv, so it sits under a clearly namespaced custom attribute).
+- `invoke_agent gitlab-review` — wraps the agent call. Tagged with `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.operation.name=invoke_agent`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_creation.input_tokens`, and `gen_ai.usage.cost.*_usd` (cost is not yet standardized in the GenAI semconv, so it sits under a clearly namespaced custom attribute).
 - `gitlab-review.<phase>` — one span per remaining phase (`gitlab.get_merge_request`, `git.get_merge_diff`, `gitlab.post_comments`, …) so latency and error rates per phase show up in Tempo / Grafana.
 
 When the env var is not set, the bridge is a no-op and `@opentelemetry/*` is never imported (the modules are dynamic-loaded behind the env check, so unsetting the flag pays no startup cost).
@@ -222,7 +222,7 @@ await startOtelBridge({
 In addition to inline discussions, the reviewer returns an overall `summary` (Markdown). The CLI posts it as a non-positional MR note — the same shape a human reviewer creates when typing in the MR comment box. The note carries a hidden marker:
 
 ```md
-<!-- pi-reviewer:summary -->
+<!-- gitlab-review:summary -->
 ```
 
 On subsequent runs the CLI finds the existing note by that marker and **updates it in place** via `PUT /merge_requests/:iid/notes/:id`, so the summary always reflects the latest review without piling up duplicates. The latest summary stays at the top of the note. When a note is updated, the previous latest summary is moved into a collapsed `<details>` section labeled `Previous review runs` instead of being erased; existing history is retained with a bounded limit of 10 previous runs.
@@ -237,17 +237,17 @@ Review usage: 12,345 in / 678 out tokens — $0.0421 (anthropic/claude-sonnet-4-
 Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) for commit <sha>.
 ```
 
-If a later CI job sees that the current MR head commit already appears in that footer, it skips the agent run to avoid producing a different review for the same diff. Use `--force-review` or `PI_REVIEWER_FORCE_REVIEW=true` to bypass the guard. The summary upsert runs in both `direct` and `draft` posting modes (it always uses the regular notes endpoints — the atomic bulk-publish flow is reserved for inline comments).
+If a later CI job sees that the current MR head commit already appears in that footer, it skips the agent run to avoid producing a different review for the same diff. Use `--force-review` or `GITLAB_REVIEW_FORCE_REVIEW=true` to bypass the guard. The summary upsert runs in both `direct` and `draft` posting modes (it always uses the regular notes endpoints — the atomic bulk-publish flow is reserved for inline comments).
 
-Disable with `--no-summary` or `PI_REVIEWER_POST_SUMMARY=false`. With `--dry-run`/`--no-post`, the summary is parsed but not posted, and the reviewed-commit skip guard is not applied.
+Disable with `--no-summary` or `GITLAB_REVIEW_POST_SUMMARY=false`. With `--dry-run`/`--no-post`, the summary is parsed but not posted, and the reviewed-commit skip guard is not applied.
 
 ## Duplicate prevention
 
 Each generated comment body includes hidden markers:
 
 ```md
-<!-- pi-reviewer:fingerprint-primary:<hash> -->
-<!-- pi-reviewer:fingerprint-secondary:<hash> -->
+<!-- gitlab-review:fingerprint-primary:<hash> -->
+<!-- gitlab-review:fingerprint-secondary:<hash> -->
 ```
 
 Before posting, the CLI fetches existing MR discussions and skips comments where either fingerprint is already present. This prevents reposting across reruns and also prevents duplicates generated in the same run.
@@ -259,7 +259,7 @@ Before posting, the CLI fetches existing MR discussions and skips comments where
 - **`Missing required configuration`**
   - Provide required flags or ensure CI vars are available (`CI_PROJECT_ID`, `CI_MERGE_REQUEST_IID`, token, API key).
 - **`--min-severity must be one of: info, warn, critical`**
-  - Fix `--min-severity` or `PI_REVIEWER_MIN_SEVERITY`.
+  - Fix `--min-severity` or `GITLAB_REVIEW_MIN_SEVERITY`.
 - **Git history errors / merge-base failures**
   - Set `GIT_DEPTH: 0`.
   - Ensure source and target branches are fetchable from `origin`.
@@ -268,7 +268,7 @@ Before posting, the CLI fetches existing MR discussions and skips comments where
   - If using `CI_JOB_TOKEN`, ensure your GitLab project settings allow required API access.
 - **No comments posted**
   - Check `review-comments.json` for `duplicate: true` or empty parsed comments.
-  - Run with `--dry-run` and inspect `pi-review.md` formatting (`== Inline Comments ==`).
+  - Run with `--dry-run` and inspect `gitlab-review.md` formatting (`== Inline Comments ==`).
 
 ## Development / release
 
