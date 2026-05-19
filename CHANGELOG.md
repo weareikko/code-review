@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Preserve previous MR-level summary runs in a collapsed `Previous review runs` history section when updating the summary note, instead of erasing them; the latest summary remains at the top and history retention is bounded to 10 previous runs ([#24]).
+
 ## [0.1.10] - 2026-05-19
 
 ### Added
@@ -141,6 +145,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#18]: https://github.com/ikko-dev/gitlab-review/pull/18
 [#19]: https://github.com/ikko-dev/gitlab-review/pull/19
 [#22]: https://github.com/ikko-dev/gitlab-review/pull/22
+[#24]: https://github.com/ikko-dev/gitlab-review/pull/24
 [0.1.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.0
 [a6166f5]: https://github.com/ikko-dev/gitlab-review/commit/a6166f5
 [310dccf]: https://github.com/ikko-dev/gitlab-review/commit/310dccf

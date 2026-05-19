@@ -40,10 +40,24 @@ export {
 } from './fingerprints.js';
 export { buildGeneratedComments, buildPayload } from './payloads.js';
 export {
+  SUMMARY_HISTORY_END,
+  SUMMARY_HISTORY_ENTRY_END,
+  SUMMARY_HISTORY_ENTRY_START,
+  SUMMARY_HISTORY_LIMIT,
+  SUMMARY_HISTORY_START,
   SUMMARY_MARKER,
+  buildArchivedSummaryEntry,
   buildSummaryBody,
+  buildSummaryHistoryEntries,
+  extractSummaryHistoryEntries,
+  findExistingSummaryNote,
   findExistingSummaryNoteId,
+  stripSummaryHistory,
+  stripSummaryMarker,
   upsertSummaryNote,
   type SummaryAction,
+  type SummaryBodyOptions,
+  type SummaryNote,
   type SummaryResult,
+  type UpsertSummaryOptions,
 } from './posting.js';

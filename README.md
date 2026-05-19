@@ -223,7 +223,9 @@ In addition to inline discussions, the reviewer returns an overall `summary` (Ma
 <!-- pi-reviewer:summary -->
 ```
 
-On subsequent runs the CLI finds the existing note by that marker and **updates it in place** via `PUT /merge_requests/:iid/notes/:id`, so the summary always reflects the latest review without piling up duplicates. The summary is upserted **before** inline comments are posted so it appears at the top of the MR activity feed. It appends a cost footer (token counts and USD total) after a horizontal rule so reviewers can see the run cost at a glance. The summary upsert runs in both `direct` and `draft` posting modes (it always uses the regular notes endpoints — the atomic bulk-publish flow is reserved for inline comments).
+On subsequent runs the CLI finds the existing note by that marker and **updates it in place** via `PUT /merge_requests/:iid/notes/:id`, so the summary always reflects the latest review without piling up duplicates. The latest summary stays at the top of the note. When a note is updated, the previous latest summary is moved into a collapsed `<details>` section labeled `Previous review runs` instead of being erased; existing history is retained with a bounded limit of 10 previous runs.
+
+The summary is upserted **before** inline comments are posted so it appears at the top of the MR activity feed. It appends a cost footer (token counts and USD total) after a horizontal rule so reviewers can see the run cost at a glance. The summary upsert runs in both `direct` and `draft` posting modes (it always uses the regular notes endpoints — the atomic bulk-publish flow is reserved for inline comments).
 
 Disable with `--no-summary` or `PI_REVIEWER_POST_SUMMARY=false`. With `--dry-run`/`--no-post`, the summary is parsed but not posted.
 
