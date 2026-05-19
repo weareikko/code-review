@@ -89,6 +89,7 @@ The CLI auto-resolves values from CI variables and common token/key names.
 | `PI_REVIEWER_MIN_SEVERITY`   | Default for `--min-severity`                             |
 | `PI_REVIEWER_THINKING_LEVEL` | Default for `--thinking`                                 |
 | `PI_REVIEWER_POSTING_MODE`   | Default for `--posting-mode`                             |
+| `PI_REVIEWER_POST_SUMMARY`   | Set to `false`/`0` to skip the MR-level summary note     |
 
 ## Flags
 
@@ -103,6 +104,7 @@ The CLI auto-resolves values from CI variables and common token/key names.
 | `--min-severity <level>` | `info`, `warn`, `critical`                         | `PI_REVIEWER_MIN_SEVERITY` or `info`                                     |
 | `--thinking <level>`     | `off`, `minimal`, `low`, `medium`, `high`, `xhigh` | `PI_REVIEWER_THINKING_LEVEL` or `off`                                    |
 | `--posting-mode <mode>`  | `direct` or `draft` (atomic bulk publish)          | `PI_REVIEWER_POSTING_MODE` or `direct`                                   |
+| `--no-summary`           | Skip posting/updating the MR-level summary note    | summary posting is on by default                                         |
 | `--review-file <path>`   | Raw `pi-reviewer` output file                      | `pi-review.md`                                                           |
 | `--output <path>`        | Generated payload artifact file                    | `review-comments.json`                                                   |
 | `--cwd <path>`           | Working directory                                  | `process.cwd()`                                                          |
@@ -150,6 +152,7 @@ Base tracing channel names:
 - `@ikko-dev/gitlab-review:comments.build`
 - `@ikko-dev/gitlab-review:artifact.write_output`
 - `@ikko-dev/gitlab-review:gitlab.post_comments`
+- `@ikko-dev/gitlab-review:gitlab.upsert_summary`
 
 Node emits tracing subchannels as `tracing:<base>:start`, `:end`, `:asyncStart`, `:asyncEnd`, and `:error`. Payloads include safe run metadata (`runId`, phase, project, MR, GitLab URL, model, severity, timings, comment counts, and sanitized `errorInfo`) and intentionally exclude tokens/API keys.
 
@@ -205,6 +208,18 @@ await startOtelBridge({
   runtime: { api: otelApi, shutdown: async () => {} },
 });
 ```
+
+## MR-level summary note
+
+In addition to inline discussions, the reviewer returns an overall `summary` (Markdown). The CLI posts it as a non-positional MR note — the same shape a human reviewer creates when typing in the MR comment box. The note carries a hidden marker:
+
+```md
+<!-- pi-reviewer:summary -->
+```
+
+On subsequent runs the CLI finds the existing note by that marker and **updates it in place** via `PUT /merge_requests/:iid/notes/:id`, so the summary always reflects the latest review without piling up duplicates. The summary upsert runs after the inline comments are posted, in both `direct` and `draft` posting modes (it always uses the regular notes endpoints — the atomic bulk-publish flow is reserved for inline comments).
+
+Disable with `--no-summary` or `PI_REVIEWER_POST_SUMMARY=false`. With `--dry-run`/`--no-post`, the summary is parsed but not posted.
 
 ## Duplicate prevention
 

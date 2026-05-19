@@ -23,8 +23,18 @@ export interface Version {
   head_commit_sha: string;
 }
 
+export interface DiscussionNote {
+  id?: number;
+  body?: string | null;
+}
+
 export interface Discussion {
-  notes: Array<{ body?: string | null }>;
+  notes: DiscussionNote[];
+}
+
+export interface MergeRequestNote {
+  id: number;
+  body: string;
 }
 
 export interface DraftNote {
@@ -183,6 +193,25 @@ export class GitLabClient {
     return this.request(
       `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/discussions`,
       { method: 'POST', body: JSON.stringify(payload) },
+    );
+  }
+
+  createMergeRequestNote(project: string, mr: string, body: string): Promise<MergeRequestNote> {
+    return this.request(
+      `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/notes`,
+      { method: 'POST', body: JSON.stringify({ body }) },
+    );
+  }
+
+  updateMergeRequestNote(
+    project: string,
+    mr: string,
+    noteId: number,
+    body: string,
+  ): Promise<MergeRequestNote> {
+    return this.request(
+      `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/notes/${noteId}`,
+      { method: 'PUT', body: JSON.stringify({ body }) },
     );
   }
 

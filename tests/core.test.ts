@@ -19,7 +19,13 @@ import { ConfigError, GitLabApiError, ReviewerError, formatError } from '../src/
 import { getMergeDiffArguments } from '../src/git.js';
 import { GitLabClient } from '../src/gitlab.js';
 import { filterDiff, runReview, type AgentLike, type ReviewUsage } from '../src/pi-reviewer.js';
-import { postGeneratedComments } from '../src/posting.js';
+import {
+  buildSummaryBody,
+  findExistingSummaryNoteId,
+  postGeneratedComments,
+  SUMMARY_MARKER,
+  upsertSummaryNote,
+} from '../src/posting.js';
 import {
   appendFingerprintMarkers,
   buildGeneratedComments,
@@ -328,6 +334,118 @@ describe('GitLab draft notes endpoints', () => {
       'https://gitlab.example.com/api/v4/projects/group%2Frepo/merge_requests/12/draft_notes/bulk_publish',
     );
     expect(fetchImpl.mock.calls[0][1]?.method).toBe('POST');
+  });
+});
+
+describe('GitLab merge request notes endpoints', () => {
+  it('POSTs a non-positional MR note with a JSON body', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ id: 77, body: 'hello' })));
+    const client = new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+    });
+
+    await expect(
+      client.createMergeRequestNote('group/repo', '12', 'hello'),
+    ).resolves.toMatchObject({ id: 77 });
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'https://gitlab.example.com/api/v4/projects/group%2Frepo/merge_requests/12/notes',
+    );
+    const init = fetchImpl.mock.calls[0][1];
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe(JSON.stringify({ body: 'hello' }));
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
+  });
+
+  it('PUTs an MR note update at the note ID', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ id: 77, body: 'updated' })));
+    const client = new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+    });
+
+    await expect(
+      client.updateMergeRequestNote('group/repo', '12', 77, 'updated'),
+    ).resolves.toMatchObject({ id: 77, body: 'updated' });
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'https://gitlab.example.com/api/v4/projects/group%2Frepo/merge_requests/12/notes/77',
+    );
+    const init = fetchImpl.mock.calls[0][1];
+    expect(init.method).toBe('PUT');
+    expect(init.body).toBe(JSON.stringify({ body: 'updated' }));
+  });
+});
+
+describe('summary note upsert', () => {
+  it('wraps the summary with the hidden marker on its own line', () => {
+    const body = buildSummaryBody('Looks good. **Nice work.**');
+    expect(body.startsWith(SUMMARY_MARKER)).toBe(true);
+    expect(body).toContain('Looks good. **Nice work.**');
+  });
+
+  it('finds the existing summary note by marker across discussions', () => {
+    const discussions = [
+      { notes: [{ id: 1, body: 'inline comment <!-- pi-reviewer:fingerprint-primary:abc -->' }] },
+      {
+        notes: [
+          { id: 12, body: `${SUMMARY_MARKER}\n\nprevious summary` },
+          { id: 13, body: 'reply' },
+        ],
+      },
+    ];
+    expect(findExistingSummaryNoteId(discussions)).toBe(12);
+  });
+
+  it('returns null when no existing summary note is present', () => {
+    expect(findExistingSummaryNoteId([{ notes: [{ id: 1, body: 'unrelated' }] }])).toBeNull();
+  });
+
+  it('creates a new MR note when no existing summary marker is found', async () => {
+    const createMergeRequestNote = vi.fn().mockResolvedValue({ id: 99, body: 'x' });
+    const updateMergeRequestNote = vi.fn();
+    const gitlab = { createMergeRequestNote, updateMergeRequestNote } as unknown as GitLabClient;
+
+    const result = await upsertSummaryNote(gitlab, 'group/repo', '12', 'fresh summary', []);
+    expect(result).toEqual({ action: 'created', noteId: 99 });
+    expect(createMergeRequestNote).toHaveBeenCalledTimes(1);
+    expect(createMergeRequestNote.mock.calls[0][2]).toContain(SUMMARY_MARKER);
+    expect(createMergeRequestNote.mock.calls[0][2]).toContain('fresh summary');
+    expect(updateMergeRequestNote).not.toHaveBeenCalled();
+  });
+
+  it('updates the existing summary note in place on subsequent runs', async () => {
+    const createMergeRequestNote = vi.fn();
+    const updateMergeRequestNote = vi.fn().mockResolvedValue({ id: 12, body: 'x' });
+    const gitlab = { createMergeRequestNote, updateMergeRequestNote } as unknown as GitLabClient;
+
+    const discussions = [
+      { notes: [{ id: 12, body: `${SUMMARY_MARKER}\n\nprior summary` }] },
+    ];
+    const result = await upsertSummaryNote(
+      gitlab,
+      'group/repo',
+      '12',
+      'latest summary',
+      discussions,
+    );
+
+    expect(result).toEqual({ action: 'updated', noteId: 12 });
+    expect(updateMergeRequestNote).toHaveBeenCalledWith(
+      'group/repo',
+      '12',
+      12,
+      expect.stringContaining('latest summary'),
+    );
+    expect(updateMergeRequestNote.mock.calls[0][3]).toContain(SUMMARY_MARKER);
+    expect(createMergeRequestNote).not.toHaveBeenCalled();
   });
 });
 
@@ -928,6 +1046,35 @@ describe('pi-review parsing', () => {
     expect(result.warnings).toEqual([
       'Ignored text in the inline comments section before the first parseable comment header.',
     ]);
+  });
+
+  it('extracts the top-level summary field from JSON fences', () => {
+    const markdown = [
+      '```json',
+      JSON.stringify({
+        summary: '**Overall:** looks good, minor nits inline.',
+        comments: [{ file: 'src/a.ts', line: 1, side: 'RIGHT', body: 'nit' }],
+      }),
+      '```',
+    ].join('\n');
+
+    const result = parseReviewMarkdownWithWarnings(markdown);
+    expect(result.summary).toBe('**Overall:** looks good, minor nits inline.');
+    expect(result.comments).toHaveLength(1);
+  });
+
+  it('returns null summary when the JSON object has no summary field', () => {
+    const markdown = ['```json', '{"comments":[]}', '```'].join('\n');
+    expect(parseReviewMarkdownWithWarnings(markdown).summary).toBeNull();
+  });
+
+  it('returns null summary when the summary is an empty string', () => {
+    const markdown = [
+      '```json',
+      JSON.stringify({ summary: '   ', comments: [] }),
+      '```',
+    ].join('\n');
+    expect(parseReviewMarkdownWithWarnings(markdown).summary).toBeNull();
   });
 });
 
@@ -1648,6 +1795,36 @@ describe('dry-run and no-post flags', () => {
     ]);
     expect(cfg.dryRun).toBe(false);
     expect(cfg.noPost).toBe(true);
+  });
+});
+
+describe('summary posting configuration', () => {
+  const baseEnv = {
+    CI_PROJECT_ID: '1',
+    CI_MERGE_REQUEST_IID: '2',
+    CI_SERVER_URL: 'https://gl.example.com',
+    GITLAB_TOKEN: 't',
+    PI_API_KEY: 'k',
+  };
+
+  it('defaults postSummary to true', () => {
+    expect(resolveConfig([], baseEnv).postSummary).toBe(true);
+  });
+
+  it('flips postSummary off via --no-summary', () => {
+    expect(resolveConfig(['--no-summary'], baseEnv).postSummary).toBe(false);
+  });
+
+  it('flips postSummary off via PI_REVIEWER_POST_SUMMARY=false', () => {
+    expect(resolveConfig([], { ...baseEnv, PI_REVIEWER_POST_SUMMARY: 'false' }).postSummary).toBe(
+      false,
+    );
+  });
+
+  it('--no-summary overrides PI_REVIEWER_POST_SUMMARY=true', () => {
+    expect(
+      resolveConfig(['--no-summary'], { ...baseEnv, PI_REVIEWER_POST_SUMMARY: 'true' }).postSummary,
+    ).toBe(false);
   });
 });
 

@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 
 import type { Config } from './config.js';
 import type { ReviewUsage } from './pi-reviewer.js';
+import type { SummaryResult } from './posting.js';
 import type { DiffRefs, GeneratedComment } from './types.js';
 
 import { resolveConfig, validateConfig } from './config.js';
@@ -21,7 +22,7 @@ import { startOtelBridge } from './otel.js';
 import { parseReviewMarkdownWithWarnings } from './parser.js';
 import { buildGeneratedComments } from './payloads.js';
 import { runReview } from './pi-reviewer.js';
-import { postGeneratedComments } from './posting.js';
+import { postGeneratedComments, upsertSummaryNote } from './posting.js';
 
 export type {
   DiagnosticContext,
@@ -70,6 +71,8 @@ Options:
   --cwd <path>            Working directory (default: process.cwd())
   --dry-run               Generate artifacts and skip posting
   --no-post               Generate artifacts and skip posting
+  --no-summary            Skip posting/updating the MR-level summary note
+                          (env: PI_REVIEWER_POST_SUMMARY=false)
   --help, -h              Show help
   --version, -v           Show version
 `;
@@ -78,6 +81,7 @@ export interface RunResult {
   generated: GeneratedComment[];
   posted: number;
   usage: ReviewUsage;
+  summary: SummaryResult | null;
 }
 
 function readVersion(): string {
@@ -196,8 +200,11 @@ export async function run(config: Config): Promise<RunResult> {
     recordCommentCounts(runContext, generated);
     if (config.dryRun || config.noPost) {
       console.log(`Generated ${generated.length} comments, ${newCount} new. Posting disabled.`);
+      if (config.postSummary && parsed.summary) {
+        console.log('Summary note generated but not posted (posting disabled).');
+      }
       runContext.posted = 0;
-      return { generated, posted: 0, usage };
+      return { generated, posted: 0, usage, summary: null };
     }
 
     const posted = await traceDiagnosticPhase(
@@ -230,7 +237,38 @@ export async function run(config: Config): Promise<RunResult> {
       `Posted ${posted} new GitLab MR discussions (${duplicates} duplicates skipped${extra}).`,
     );
     runContext.posted = posted;
-    return { generated, posted, usage };
+
+    let summary: SummaryResult | null = null;
+    if (config.postSummary && parsed.summary) {
+      summary = await traceDiagnosticPhase(
+        'gitlab.upsert_summary',
+        config,
+        runId,
+        async (context) => {
+          const result = await upsertSummaryNote(
+            gitlab,
+            config.project,
+            config.mr,
+            parsed.summary as string,
+            discussions,
+          );
+          context.summaryAction = result.action;
+          context.summaryNoteId = result.noteId;
+          return result;
+        },
+      );
+      runContext.summaryAction = summary.action;
+      runContext.summaryNoteId = summary.noteId;
+      console.log(
+        summary.action === 'updated'
+          ? `Updated MR summary note (id ${summary.noteId}).`
+          : `Posted MR summary note (id ${summary.noteId}).`,
+      );
+    } else if (config.postSummary && !parsed.summary) {
+      console.log('No summary returned by the reviewer; skipping summary note.');
+    }
+
+    return { generated, posted, usage, summary };
   });
 }
 

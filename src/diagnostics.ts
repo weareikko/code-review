@@ -15,7 +15,8 @@ export type DiagnosticPhase =
   | 'gitlab.get_discussions'
   | 'comments.build'
   | 'artifact.write_output'
-  | 'gitlab.post_comments';
+  | 'gitlab.post_comments'
+  | 'gitlab.upsert_summary';
 
 export interface DiagnosticError {
   name?: string;
@@ -63,6 +64,8 @@ export interface DiagnosticContext {
   draftsCreated?: number;
   draftsDeletedPrePublish?: number;
   draftsPublished?: number;
+  summaryAction?: 'created' | 'updated' | 'skipped';
+  summaryNoteId?: number;
   usage?: DiagnosticUsage;
   errorInfo?: DiagnosticError;
 }
@@ -81,6 +84,7 @@ export const DIAGNOSTIC_CHANNEL_NAMES = {
   buildComments: `${DIAGNOSTIC_CHANNEL_PREFIX}:comments.build`,
   writeOutput: `${DIAGNOSTIC_CHANNEL_PREFIX}:artifact.write_output`,
   postComments: `${DIAGNOSTIC_CHANNEL_PREFIX}:gitlab.post_comments`,
+  upsertSummary: `${DIAGNOSTIC_CHANNEL_PREFIX}:gitlab.upsert_summary`,
 } as const;
 
 export const diagnosticChannels = {
@@ -95,6 +99,7 @@ export const diagnosticChannels = {
   buildComments: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.buildComments),
   writeOutput: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.writeOutput),
   postComments: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.postComments),
+  upsertSummary: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.upsertSummary),
 } as const;
 
 const channelsByPhase: Record<DiagnosticPhase, TracingChannel<DiagnosticContext>> = {
@@ -109,6 +114,7 @@ const channelsByPhase: Record<DiagnosticPhase, TracingChannel<DiagnosticContext>
   'comments.build': diagnosticChannels.buildComments,
   'artifact.write_output': diagnosticChannels.writeOutput,
   'gitlab.post_comments': diagnosticChannels.postComments,
+  'gitlab.upsert_summary': diagnosticChannels.upsertSummary,
 };
 
 export function createDiagnosticRunId(): string {

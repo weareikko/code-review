@@ -1,7 +1,50 @@
-import type { GitLabClient } from './gitlab.js';
+import type { Discussion, GitLabClient } from './gitlab.js';
 import type { Fingerprints, GeneratedComment } from './types.js';
 
 import { extractExistingFingerprints } from './fingerprints.js';
+
+export const SUMMARY_MARKER = '<!-- pi-reviewer:summary -->';
+
+export type SummaryAction = 'created' | 'updated';
+
+export interface SummaryResult {
+  action: SummaryAction;
+  noteId?: number;
+}
+
+export function buildSummaryBody(summary: string): string {
+  return `${SUMMARY_MARKER}\n\n${summary.trim()}`;
+}
+
+export function findExistingSummaryNoteId(discussions: Discussion[]): number | null {
+  for (const discussion of discussions) {
+    for (const note of discussion.notes ?? []) {
+      const id = note.id;
+      if (typeof id !== 'number') continue;
+      if (typeof note.body === 'string' && note.body.includes(SUMMARY_MARKER)) {
+        return id;
+      }
+    }
+  }
+  return null;
+}
+
+export async function upsertSummaryNote(
+  gitlab: GitLabClient,
+  project: string,
+  mr: string,
+  summary: string,
+  discussions: Discussion[],
+): Promise<SummaryResult> {
+  const body = buildSummaryBody(summary);
+  const existingId = findExistingSummaryNoteId(discussions);
+  if (existingId !== null) {
+    await gitlab.updateMergeRequestNote(project, mr, existingId, body);
+    return { action: 'updated', noteId: existingId };
+  }
+  const created = await gitlab.createMergeRequestNote(project, mr, body);
+  return { action: 'created', noteId: created.id };
+}
 
 export type PostingMode = 'direct' | 'draft';
 

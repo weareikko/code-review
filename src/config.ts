@@ -19,12 +19,13 @@ export interface Config {
   output: string;
   dryRun: boolean;
   noPost: boolean;
+  postSummary: boolean;
   cwd: string;
 }
 
 export type ParsedArgs = Record<string, string | boolean>;
 
-const BOOLEAN_FLAGS = new Set(['dry-run', 'no-post', 'help', 'version']);
+const BOOLEAN_FLAGS = new Set(['dry-run', 'no-post', 'no-summary', 'help', 'version']);
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const args: ParsedArgs = {};
@@ -70,6 +71,17 @@ function first(...values: Array<string | undefined>): string | undefined {
 
 function toBoolean(value: unknown): boolean {
   return value === true || value === 'true' || value === '1';
+}
+
+function resolvePostSummary(args: ParsedArgs, env: NodeJS.ProcessEnv): boolean {
+  if (args.noSummary === true) return false;
+  const raw = env.PI_REVIEWER_POST_SUMMARY;
+  if (typeof raw === 'string') {
+    const normalized = raw.trim().toLowerCase();
+    if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+    if (normalized.length > 0) return true;
+  }
+  return true;
 }
 
 function resolveMinSeverity(value: unknown): Severity | string {
@@ -138,6 +150,7 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     output: String(args.output ?? 'review-comments.json'),
     dryRun: toBoolean(args.dryRun),
     noPost: toBoolean(args.noPost),
+    postSummary: resolvePostSummary(args, env),
     cwd: String(args.cwd ?? process.cwd()),
   };
 }
