@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-05-19
+
 ### Changed
 
 - Preserve previous MR-level summary runs in a collapsed `Previous review runs` history section when updating the summary note, instead of erasing them; the latest summary remains at the top and history retention is bounded to 10 previous runs ([#24]).
@@ -125,7 +127,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.10...HEAD
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.11...HEAD
+[0.1.11]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.11
 [0.1.10]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.10
 [0.1.9]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.9
 [0.1.8]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.8
