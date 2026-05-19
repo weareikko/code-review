@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-05-19
+
 ### Added
 
 - Post the reviewer's overall `summary` as a non-positional merge request note — the same shape a human reviewer creates from the MR comment box. The note carries a hidden `<!-- pi-reviewer:summary -->` marker so subsequent runs find the existing note and update it in place via `PUT /merge_requests/:iid/notes/:id` instead of piling up duplicates. Default-on; disable with `--no-summary` or `PI_REVIEWER_POST_SUMMARY=false`. Skipped under `--dry-run` / `--no-post`. Runs in both `direct` and `draft` posting modes (always via the regular notes endpoints) ([#19]).
@@ -109,7 +111,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.8...HEAD
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.9...HEAD
+[0.1.9]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.9
 [0.1.8]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.8
 [0.1.7]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.7
 [0.1.6]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.6
