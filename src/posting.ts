@@ -9,7 +9,8 @@ export const SUMMARY_HISTORY_END = '<!-- pi-reviewer:summary-history:end -->';
 export const SUMMARY_HISTORY_ENTRY_START = '<!-- pi-reviewer:summary-history-entry:start -->';
 export const SUMMARY_HISTORY_ENTRY_END = '<!-- pi-reviewer:summary-history-entry:end -->';
 export const SUMMARY_HISTORY_LIMIT = 10;
-export const REVIEWED_COMMIT_FOOTER_PATTERN = /Reviewed commit: `?([a-f0-9]{40})`?/i;
+export const REVIEWED_COMMIT_FOOTER_PATTERN =
+  /Reviewed by \[@ikko-dev\/gitlab-review\]\(https:\/\/github\.com\/ikko-dev\/gitlab-review\) for commit ([a-f0-9]{40})\./i;
 
 export type SummaryAction = 'created' | 'updated';
 
@@ -51,7 +52,7 @@ export function buildSummaryBody(
 }
 
 export function buildReviewedCommitFooter(commitSha: string): string {
-  return `Reviewed commit: \`${commitSha}\``;
+  return `Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) for commit ${commitSha}.`;
 }
 
 export function extractReviewedCommitSha(body: string): string | null {

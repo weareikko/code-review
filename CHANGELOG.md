@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Skip reviewer execution when the current MR head commit already appears in the summary note's reviewed-commit footer, avoiding duplicate reviews for the same diff. Add the reviewed-commit footer to summary notes and a `--force-review` / `PI_REVIEWER_FORCE_REVIEW` override for intentional re-runs ([#25]).
+- Skip reviewer execution when the current MR head commit already appears in the summary note's reviewed-commit footer, avoiding duplicate reviews for the same diff. Add the reviewed-commit footer to summary notes, link it to the `gitlab-review` GitHub repository, and provide a `--force-review` / `PI_REVIEWER_FORCE_REVIEW` override for intentional re-runs ([#25], [#26]).
 
 ## [0.1.11] - 2026-05-19
 
@@ -154,6 +154,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#22]: https://github.com/ikko-dev/gitlab-review/pull/22
 [#24]: https://github.com/ikko-dev/gitlab-review/pull/24
 [#25]: https://github.com/ikko-dev/gitlab-review/pull/25
+[#26]: https://github.com/ikko-dev/gitlab-review/pull/26
 [0.1.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.0
 [a6166f5]: https://github.com/ikko-dev/gitlab-review/commit/a6166f5
 [310dccf]: https://github.com/ikko-dev/gitlab-review/commit/310dccf
