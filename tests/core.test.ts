@@ -53,6 +53,13 @@ import {
   type GeneratedComment,
 } from '../src/review.js';
 
+const LEGACY_PROJECT_MARKER = ['pi', 'reviewer'].join('-');
+const LEGACY_PACKAGE_NAME = `@ikko-dev/${LEGACY_PROJECT_MARKER}`;
+
+function legacyHiddenMarker(name: string): string {
+  return `<!-- ${LEGACY_PROJECT_MARKER}:${name} -->`;
+}
+
 describe('config env defaults', () => {
   it('resolves GitLab CI defaults deterministically', () => {
     const cfg = resolveConfig([], {
@@ -441,6 +448,21 @@ describe('summary note upsert', () => {
     expect(findExistingReviewedCommitSha(discussions)).toBe(current);
   });
 
+  it('finds reviewed commit footers on legacy summary notes', () => {
+    const commit = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const body = [
+      legacyHiddenMarker('summary'),
+      '',
+      'previous summary',
+      '',
+      '---',
+      '',
+      `Reviewed by [${LEGACY_PACKAGE_NAME}](https://github.com/ikko-dev/${LEGACY_PROJECT_MARKER}) for commit ${commit}.`,
+    ].join('\n');
+
+    expect(findExistingReviewedCommitSha([{ notes: [{ id: 12, body }] }])).toBe(commit);
+  });
+
   it('ignores reviewed commit footers from archived summary history', () => {
     const older = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
     const discussions = [
@@ -469,6 +491,14 @@ describe('summary note upsert', () => {
         ],
       },
     ];
+    expect(findExistingSummaryNoteId(discussions)).toBe(12);
+  });
+
+  it('finds existing legacy summary notes to avoid duplicate MR summaries', () => {
+    const discussions = [
+      { notes: [{ id: 12, body: `${legacyHiddenMarker('summary')}\n\nprevious summary` }] },
+    ];
+
     expect(findExistingSummaryNoteId(discussions)).toBe(12);
   });
 
@@ -520,6 +550,27 @@ describe('summary note upsert', () => {
     expect(updatedBody.indexOf('latest summary')).toBeLessThan(
       updatedBody.indexOf('prior summary'),
     );
+    expect(createMergeRequestNote).not.toHaveBeenCalled();
+  });
+
+  it('updates legacy summary notes while emitting the renamed marker', async () => {
+    const createMergeRequestNote = vi.fn();
+    const updateMergeRequestNote = vi.fn().mockResolvedValue({ id: 12, body: 'x' });
+    const gitlab = { createMergeRequestNote, updateMergeRequestNote } as unknown as GitLabClient;
+
+    await upsertSummaryNote(
+      gitlab,
+      'group/repo',
+      '12',
+      'latest summary',
+      [{ notes: [{ id: 12, body: `${legacyHiddenMarker('summary')}\n\nprior summary` }] }],
+      { archivedAt: new Date('2026-05-19T15:00:00Z') },
+    );
+
+    const updatedBody = updateMergeRequestNote.mock.calls[0][3] as string;
+    expect(updatedBody).toContain(SUMMARY_MARKER);
+    expect(updatedBody).not.toContain(legacyHiddenMarker('summary'));
+    expect(updatedBody).toContain('prior summary');
     expect(createMergeRequestNote).not.toHaveBeenCalled();
   });
 
@@ -1134,11 +1185,13 @@ describe('gitlab-review parsing', () => {
       '{"comments":[{"file":"src/a.ts","line":3,"side":"RIGHT","body":"Fix this"}]}',
       '```',
       '<!-- gitlab-review-comment {"file":"src/b.ts","old_line":9,"body":"Old side"} -->',
+      `<!-- ${LEGACY_PROJECT_MARKER}-comment {"file":"src/c.ts","line":11,"body":"Older side"} -->`,
     ].join('\n');
 
     expect(parseReviewMarkdown(markdown)).toEqual([
       { file: 'src/a.ts', line: 3, side: 'RIGHT', severity: 'info', body: 'Fix this' },
       { file: 'src/b.ts', line: 9, side: 'LEFT', severity: 'info', body: 'Old side' },
+      { file: 'src/c.ts', line: 11, side: 'RIGHT', severity: 'info', body: 'Older side' },
     ]);
   });
 
@@ -1259,6 +1312,13 @@ describe('fingerprints and duplicate detection', () => {
     expect(normalizeBody(a)).toBe(normalizeBody(b));
   });
 
+  it('normalizes comment bodies with legacy fingerprint markers', () => {
+    const a = `Fix   this\n\n${legacyHiddenMarker('fingerprint-primary:abcd')}`;
+    const b = 'Fix this';
+
+    expect(normalizeBody(a)).toBe(normalizeBody(b));
+  });
+
   it('produces stable fingerprints for semantically same bodies', () => {
     const comment = {
       file: 'src/a.ts',
@@ -1313,6 +1373,37 @@ describe('fingerprints and duplicate detection', () => {
     expect(generated).toHaveLength(2);
     expect(generated[0].duplicate).toBe(true);
     expect(generated[1].duplicate).toBe(true);
+  });
+
+  it('extracts existing legacy markers and marks generated duplicates', () => {
+    const baseComment = {
+      file: 'src/a.ts',
+      line: 2,
+      side: 'RIGHT' as const,
+      severity: 'info' as const,
+      body: 'Please rename this variable',
+    };
+    const hunk = '@@ -1,1 +1,2 @@\n old\n+new';
+    const existing = fingerprints(baseComment, hunk);
+    const existingSet = extractExistingFingerprints([
+      {
+        notes: [
+          {
+            body: `Existing ${legacyHiddenMarker(`fingerprint-primary:${existing.primary}`)}`,
+          },
+        ],
+      },
+    ]);
+
+    const generated = buildGeneratedComments(
+      [baseComment],
+      ['diff --git a/src/a.ts b/src/a.ts', '--- a/src/a.ts', '+++ b/src/a.ts', hunk].join('\n'),
+      { base_sha: 'base', start_sha: 'start', head_sha: 'head' },
+      existingSet,
+    );
+
+    expect(generated).toHaveLength(1);
+    expect(generated[0].duplicate).toBe(true);
   });
 });
 
