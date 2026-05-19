@@ -2,7 +2,6 @@
   "name": "@ikko-dev/gitlab-review",
   "version": "0.2.0",
   "description": "Run gitlab-review in GitLab CI and post deduplicated MR discussions.",
-  "license": "MIT",
   "keywords": [
     "ci",
     "code-review",
@@ -14,6 +13,7 @@
   "bugs": {
     "url": "https://github.com/ikko-dev/gitlab-review/issues"
   },
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/ikko-dev/gitlab-review.git"

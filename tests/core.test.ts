@@ -408,6 +408,14 @@ describe('summary note upsert', () => {
     expect(body).toContain('Looks good. **Nice work.**');
   });
 
+  it('always includes a level-2 Code Review title for easy identification', () => {
+    const body = buildSummaryBody('Looks good.');
+    expect(body).toContain('## Code Review');
+    const markerIndex = body.indexOf(SUMMARY_MARKER);
+    const titleIndex = body.indexOf('## Code Review');
+    expect(titleIndex).toBeGreaterThan(markerIndex);
+  });
+
   it('appends cost footer after a horizontal rule when provided', () => {
     const body = buildSummaryBody('Great work.', 'Review usage: 100 in / 50 out — $0.0012 (model)');
     expect(body).toContain('Great work.');

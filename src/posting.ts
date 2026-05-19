@@ -57,7 +57,7 @@ export function buildSummaryBody(
   costFooter?: string,
   options: SummaryBodyOptions = {},
 ): string {
-  const body = `${SUMMARY_MARKER}\n\n${summary.trim()}`;
+  const body = `${SUMMARY_MARKER}\n\n## Code Review\n\n${summary.trim()}`;
   const footerLines = [
     costFooter?.trim(),
     options.reviewedCommitSha ? buildReviewedCommitFooter(options.reviewedCommitSha) : undefined,
