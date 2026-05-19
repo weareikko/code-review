@@ -1,10 +1,14 @@
 import type { AgentEvent } from '@earendil-works/pi-agent-core';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
+import type { Context } from '@opentelemetry/api';
 
+import { trace } from '@opentelemetry/api';
 import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+
+import type { OtelRuntime } from '../src/otel.js';
 
 import { formatUsageLine } from '../src/cli.js';
 import {
@@ -1492,9 +1496,15 @@ describe('OpenTelemetry bridge', () => {
     ended: boolean;
     parent?: RecordedSpan;
   }
+  interface RecordedMetric {
+    name: string;
+    value: number;
+    attributes: Record<string, unknown>;
+  }
 
   function createFakeRuntime() {
     const spans: RecordedSpan[] = [];
+    const metricsRecorded: RecordedMetric[] = [];
     const shutdown = vi.fn(async () => undefined);
 
     const makeSpan = (name: string, parent: RecordedSpan | undefined): RecordedSpan => {
@@ -1509,12 +1519,15 @@ describe('OpenTelemetry bridge', () => {
       return span;
     };
 
-    const SPAN_KEY = Symbol('parent-span');
     const tracer = {
       startSpan(name: string, _opts?: unknown, ctx?: unknown): RecordedSpan {
+        // The bridge wires parent context through the real `@opentelemetry/api`
+        // `trace.setSpan(context, span)` helper, so fetch the parent back out
+        // with the real `trace.getSpan` rather than threading a symbol key.
+        const parentRaw = ctx ? trace.getSpan(ctx as Context) : undefined;
         const parent =
-          ctx && typeof ctx === 'object' && SPAN_KEY in (ctx as Record<symbol, unknown>)
-            ? ((ctx as Record<symbol, unknown>)[SPAN_KEY] as RecordedSpan)
+          parentRaw && spans.includes(parentRaw as unknown as RecordedSpan)
+            ? (parentRaw as unknown as RecordedSpan)
             : undefined;
         const span = makeSpan(name, parent);
         return Object.assign(span, {
@@ -1530,21 +1543,30 @@ describe('OpenTelemetry bridge', () => {
           end() {
             span.ended = true;
           },
+          // Implement the minimum SpanContext-ish surface so `trace.setSpan`
+          // can store this span on a Context for later retrieval.
+          spanContext() {
+            return { traceId: '0'.repeat(32), spanId: '0'.repeat(16), traceFlags: 1 };
+          },
         });
       },
     };
+    const tracerProvider = { getTracer: () => tracer };
 
-    const api = {
-      trace: {
-        getTracer: () => tracer,
-        setSpan: (_ctx: unknown, span: RecordedSpan) => ({ [SPAN_KEY]: span }),
+    const meter = {
+      createHistogram(name: string) {
+        return {
+          record(value: number, attributes: Record<string, unknown> = {}) {
+            metricsRecorded.push({ name, value, attributes });
+          },
+        };
       },
-      context: { active: () => ({}) },
-      SpanKind: { INTERNAL: 1 },
-      SpanStatusCode: { ERROR: 2 },
     };
+    const meterProvider = { getMeter: () => meter };
 
-    return { runtime: { api, shutdown }, spans, shutdown };
+    const runtime = { tracerProvider, meterProvider, shutdown } as unknown as OtelRuntime;
+
+    return { runtime, spans, metricsRecorded, shutdown };
   }
 
   async function runWithBridge(
@@ -1554,11 +1576,7 @@ describe('OpenTelemetry bridge', () => {
     const { startOtelBridge } = await import('../src/otel.js');
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
-      runtime: fake.runtime as unknown as Parameters<typeof startOtelBridge>[0] extends infer T
-        ? T extends { runtime?: infer R }
-          ? R
-          : never
-        : never,
+      runtime: fake.runtime,
       env: { GITLAB_REVIEW_OTEL: '1' },
     });
     expect(bridge).not.toBeNull();
@@ -1658,6 +1676,38 @@ describe('OpenTelemetry bridge', () => {
     });
   });
 
+  it('records gen_ai client metrics from DiagnosticUsage on the success path', async () => {
+    const { metricsRecorded } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-sonnet-4-5',
+        tokens: { input: 1200, output: 340, cacheRead: 0, cacheWrite: 0, total: 1540 },
+        cost: { input: 0.012, output: 0.034, cacheRead: 0, cacheWrite: 0, total: 0.046 },
+      };
+    });
+
+    const duration = metricsRecorded.find((m) => m.name === 'gen_ai.client.operation.duration');
+    expect(duration).toBeDefined();
+    expect(typeof duration!.value).toBe('number');
+    expect(duration!.attributes).toMatchObject({
+      'gen_ai.operation.name': 'invoke_agent',
+      'gen_ai.provider.name': 'anthropic',
+      'gen_ai.request.model': 'claude-sonnet-4-5',
+      'gen_ai.response.model': 'claude-sonnet-4-5',
+    });
+    expect(duration!.attributes).not.toHaveProperty('error.type');
+
+    const tokens = metricsRecorded.filter((m) => m.name === 'gen_ai.client.token.usage');
+    expect(tokens).toHaveLength(2);
+    const byType = new Map(tokens.map((t) => [t.attributes['gen_ai.token.type'], t]));
+    expect(byType.get('input')?.value).toBe(1200);
+    expect(byType.get('output')?.value).toBe(340);
+    expect(byType.get('input')?.attributes).toMatchObject({
+      'gen_ai.operation.name': 'invoke_agent',
+      'gen_ai.provider.name': 'anthropic',
+      'gen_ai.request.model': 'claude-sonnet-4-5',
+    });
+  });
+
   it('records exceptions and ERROR status on rejected phases', async () => {
     const { startOtelBridge } = await import('../src/otel.js');
     const fake = createFakeRuntime();
@@ -1697,6 +1747,16 @@ describe('OpenTelemetry bridge', () => {
     ]);
     expect(reviewer?.status).toEqual({ code: 2, message: 'boom' });
     expect(reviewer?.ended).toBe(true);
+
+    const duration = fake.metricsRecorded.find(
+      (m) => m.name === 'gen_ai.client.operation.duration',
+    );
+    expect(duration?.attributes).toMatchObject({
+      'gen_ai.operation.name': 'invoke_agent',
+      // `error.type` prefers the typed-error `code` over the class name —
+      // ReviewerError sets code='REVIEWER_ERROR'.
+      'error.type': 'REVIEWER_ERROR',
+    });
   });
 
   it('awaits runtime.shutdown when the bridge stops', async () => {

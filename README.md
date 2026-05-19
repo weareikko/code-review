@@ -176,7 +176,9 @@ await run(config);
 
 ### OpenTelemetry bridge
 
-The CLI ships an opt-in bridge that subscribes to the same diagnostics channels and emits OpenTelemetry spans tagged with the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (`gen_ai.*`). Set `GITLAB_REVIEW_OTEL=1` to enable it — the OTel runtime is bundled, no extra installs required.
+The CLI ships an opt-in bridge that subscribes to the same diagnostics channels and emits OpenTelemetry spans **and** the standardized GenAI client metrics tagged with the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (`gen_ai.*`). Set `GITLAB_REVIEW_OTEL=1` to enable it — the OTel runtime is bundled, no extra installs required.
+
+The bridge records `gen_ai.client.operation.duration` and `gen_ai.client.token.usage` histograms alongside the spans, so Grafana Application Observability / AI Observability (and any other OTel-compliant LLM observability surface that's driven off these metric names) auto-discovers the service from its metrics without any dashboard import.
 
 Exporter selection follows the standard `OTEL_*` env vars (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_PROTOCOL`, …). Anything that ingests OTLP works: Tempo, Mimir, Jaeger, Datadog, Honeycomb, SigNoz, or [Grafana Cloud AI Observability (Sigil)](https://grafana.com/docs/grafana-cloud/machine-learning/ai-observability/).
 
@@ -198,14 +200,18 @@ Span shape:
 
 When the env var is not set, the bridge is a no-op and `@opentelemetry/*` is never imported (the modules are dynamic-loaded behind the env check, so unsetting the flag pays no startup cost).
 
-Library callers with a pre-existing `TracerProvider` can share it by injecting a runtime instead of letting the bridge boot its own `NodeSDK`:
+Library callers with pre-existing `TracerProvider`/`MeterProvider` can share them by injecting a runtime instead of letting the bridge boot its own `NodeSDK`:
 
 ```js
-import * as otelApi from '@opentelemetry/api';
+import { metrics, trace } from '@opentelemetry/api';
 import { startOtelBridge } from '@ikko-dev/gitlab-review';
 
 await startOtelBridge({
-  runtime: { api: otelApi, shutdown: async () => {} },
+  runtime: {
+    tracerProvider: trace.getTracerProvider(),
+    meterProvider: metrics.getMeterProvider(),
+    shutdown: async () => {},
+  },
 });
 ```
 
