@@ -2,6 +2,7 @@
   "name": "@ikko-dev/gitlab-review",
   "version": "0.2.0",
   "description": "Run gitlab-review in GitLab CI and post deduplicated MR discussions.",
+  "license": "MIT",
   "keywords": [
     "ci",
     "code-review",
@@ -23,6 +24,7 @@
   "files": [
     "bin/",
     "dist/",
+    "LICENSE",
     "README.md"
   ],
   "type": "module",
