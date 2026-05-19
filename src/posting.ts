@@ -4,6 +4,11 @@ import type { Fingerprints, GeneratedComment } from './types.js';
 import { extractExistingFingerprints } from './fingerprints.js';
 
 export const SUMMARY_MARKER = '<!-- pi-reviewer:summary -->';
+export const SUMMARY_HISTORY_START = '<!-- pi-reviewer:summary-history:start -->';
+export const SUMMARY_HISTORY_END = '<!-- pi-reviewer:summary-history:end -->';
+export const SUMMARY_HISTORY_ENTRY_START = '<!-- pi-reviewer:summary-history-entry:start -->';
+export const SUMMARY_HISTORY_ENTRY_END = '<!-- pi-reviewer:summary-history-entry:end -->';
+export const SUMMARY_HISTORY_LIMIT = 10;
 
 export type SummaryAction = 'created' | 'updated';
 
@@ -12,23 +17,105 @@ export interface SummaryResult {
   noteId?: number;
 }
 
-export function buildSummaryBody(summary: string, costFooter?: string): string {
-  const body = `${SUMMARY_MARKER}\n\n${summary.trim()}`;
-  if (!costFooter) return body;
-  return `${body}\n\n---\n\n${costFooter}`;
+export interface SummaryNote {
+  id: number;
+  body: string;
 }
 
-export function findExistingSummaryNoteId(discussions: Discussion[]): number | null {
+export interface SummaryBodyOptions {
+  historyEntries?: string[];
+}
+
+export interface UpsertSummaryOptions extends SummaryBodyOptions {
+  archivedAt?: Date;
+  costFooter?: string;
+}
+
+export function buildSummaryBody(
+  summary: string,
+  costFooter?: string,
+  options: SummaryBodyOptions = {},
+): string {
+  const body = `${SUMMARY_MARKER}\n\n${summary.trim()}`;
+  const withFooter = costFooter ? `${body}\n\n---\n\n${costFooter}` : body;
+  const historyEntries = options.historyEntries?.filter((entry) => entry.trim().length > 0) ?? [];
+  if (historyEntries.length === 0) return withFooter;
+  return `${withFooter}\n\n${buildSummaryHistoryBlock(historyEntries)}`;
+}
+
+export function findExistingSummaryNote(discussions: Discussion[]): SummaryNote | null {
   for (const discussion of discussions) {
     for (const note of discussion.notes ?? []) {
       const id = note.id;
       if (typeof id !== 'number') continue;
       if (typeof note.body === 'string' && note.body.includes(SUMMARY_MARKER)) {
-        return id;
+        return { id, body: note.body };
       }
     }
   }
   return null;
+}
+
+export function findExistingSummaryNoteId(discussions: Discussion[]): number | null {
+  return findExistingSummaryNote(discussions)?.id ?? null;
+}
+
+export function buildArchivedSummaryEntry(body: string, archivedAt = new Date()): string {
+  const trimmed = body.trim();
+  return [
+    SUMMARY_HISTORY_ENTRY_START,
+    `### Previous run archived ${formatSummaryArchiveDate(archivedAt)}`,
+    '',
+    trimmed,
+    SUMMARY_HISTORY_ENTRY_END,
+  ].join('\n');
+}
+
+export function extractSummaryHistoryEntries(body: string): string[] {
+  const entries: string[] = [];
+  const entryPattern = new RegExp(
+    `${escapeRegExp(SUMMARY_HISTORY_ENTRY_START)}\\s*([\\s\\S]*?)\\s*${escapeRegExp(SUMMARY_HISTORY_ENTRY_END)}`,
+    'g',
+  );
+  for (const match of body.matchAll(entryPattern)) {
+    const entry = match[1]?.trim();
+    if (entry)
+      entries.push(`${SUMMARY_HISTORY_ENTRY_START}\n${entry}\n${SUMMARY_HISTORY_ENTRY_END}`);
+  }
+  return entries;
+}
+
+export function stripSummaryHistory(body: string): string {
+  const start = body.indexOf(SUMMARY_HISTORY_START);
+  if (start === -1) return body.trim();
+
+  const detailsStart = body.lastIndexOf('<details>', start);
+  const blockStart = detailsStart === -1 ? start : detailsStart;
+  const endMarkerStart = body.indexOf(SUMMARY_HISTORY_END, start);
+  const endMarkerEnd =
+    endMarkerStart === -1
+      ? start + SUMMARY_HISTORY_START.length
+      : endMarkerStart + SUMMARY_HISTORY_END.length;
+  const detailsEnd = body.indexOf('</details>', endMarkerEnd);
+  const blockEnd = detailsEnd === -1 ? endMarkerEnd : detailsEnd + '</details>'.length;
+
+  return `${body.slice(0, blockStart)}${body.slice(blockEnd)}`.trim();
+}
+
+export function stripSummaryMarker(body: string): string {
+  return body.replace(SUMMARY_MARKER, '').trim();
+}
+
+export function buildSummaryHistoryEntries(
+  existingBody: string,
+  archivedAt = new Date(),
+): string[] {
+  const latestPrevious = stripSummaryMarker(stripSummaryHistory(existingBody));
+  const previousEntries = extractSummaryHistoryEntries(existingBody);
+  const nextEntries = latestPrevious
+    ? [buildArchivedSummaryEntry(latestPrevious, archivedAt), ...previousEntries]
+    : previousEntries;
+  return nextEntries.slice(0, SUMMARY_HISTORY_LIMIT);
 }
 
 export async function upsertSummaryNote(
@@ -37,16 +124,46 @@ export async function upsertSummaryNote(
   mr: string,
   summary: string,
   discussions: Discussion[],
-  costFooter?: string,
+  costFooterOrOptions?: string | UpsertSummaryOptions,
 ): Promise<SummaryResult> {
-  const body = buildSummaryBody(summary, costFooter);
-  const existingId = findExistingSummaryNoteId(discussions);
-  if (existingId !== null) {
-    await gitlab.updateMergeRequestNote(project, mr, existingId, body);
-    return { action: 'updated', noteId: existingId };
+  const options =
+    typeof costFooterOrOptions === 'string'
+      ? { costFooter: costFooterOrOptions }
+      : (costFooterOrOptions ?? {});
+  const existing = findExistingSummaryNote(discussions);
+  const historyEntries = existing
+    ? buildSummaryHistoryEntries(existing.body, options.archivedAt)
+    : (options.historyEntries ?? []);
+  const body = buildSummaryBody(summary, options.costFooter, { historyEntries });
+  if (existing) {
+    await gitlab.updateMergeRequestNote(project, mr, existing.id, body);
+    return { action: 'updated', noteId: existing.id };
   }
   const created = await gitlab.createMergeRequestNote(project, mr, body);
   return { action: 'created', noteId: created.id };
+}
+
+function buildSummaryHistoryBlock(entries: string[]): string {
+  return [
+    '<details>',
+    '<summary>Previous review runs</summary>',
+    '',
+    SUMMARY_HISTORY_START,
+    '',
+    entries.join('\n\n'),
+    '',
+    SUMMARY_HISTORY_END,
+    '',
+    '</details>',
+  ].join('\n');
+}
+
+function formatSummaryArchiveDate(date: Date): string {
+  return date.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export type PostingMode = 'direct' | 'draft';

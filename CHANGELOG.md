@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Preserve previous MR-level summary runs in a collapsed `Previous review runs` history section when updating the summary note, instead of erasing them; the latest summary remains at the top and history retention is bounded to 10 previous runs.
+
 ## [0.1.10] - 2026-05-19
 
 ### Added

@@ -25,8 +25,12 @@ import { GitLabClient } from '../src/gitlab.js';
 import { filterDiff, runReview, type AgentLike, type ReviewUsage } from '../src/pi-reviewer.js';
 import {
   buildSummaryBody,
+  buildSummaryHistoryEntries,
   findExistingSummaryNoteId,
   postGeneratedComments,
+  SUMMARY_HISTORY_ENTRY_START,
+  SUMMARY_HISTORY_LIMIT,
+  SUMMARY_HISTORY_START,
   SUMMARY_MARKER,
   upsertSummaryNote,
 } from '../src/posting.js';
@@ -435,7 +439,7 @@ describe('summary note upsert', () => {
     expect(updateMergeRequestNote).not.toHaveBeenCalled();
   });
 
-  it('updates the existing summary note in place on subsequent runs', async () => {
+  it('updates the existing summary note in place and archives the previous run', async () => {
     const createMergeRequestNote = vi.fn();
     const updateMergeRequestNote = vi.fn().mockResolvedValue({ id: 12, body: 'x' });
     const gitlab = { createMergeRequestNote, updateMergeRequestNote } as unknown as GitLabClient;
@@ -447,6 +451,7 @@ describe('summary note upsert', () => {
       '12',
       'latest summary',
       discussions,
+      { archivedAt: new Date('2026-05-19T15:00:00Z') },
     );
 
     expect(result).toEqual({ action: 'updated', noteId: 12 });
@@ -456,8 +461,75 @@ describe('summary note upsert', () => {
       12,
       expect.stringContaining('latest summary'),
     );
-    expect(updateMergeRequestNote.mock.calls[0][3]).toContain(SUMMARY_MARKER);
+    const updatedBody = updateMergeRequestNote.mock.calls[0][3] as string;
+    expect(updatedBody).toContain(SUMMARY_MARKER);
+    expect(updatedBody).toContain(SUMMARY_HISTORY_START);
+    expect(updatedBody).toContain('<summary>Previous review runs</summary>');
+    expect(updatedBody).toContain('### Previous run archived 2026-05-19T15:00:00Z');
+    expect(updatedBody).toContain('prior summary');
+    expect(updatedBody.indexOf('latest summary')).toBeLessThan(
+      updatedBody.indexOf('prior summary'),
+    );
     expect(createMergeRequestNote).not.toHaveBeenCalled();
+  });
+
+  it('keeps older archived summary runs when updating repeatedly', async () => {
+    const existingBody = buildSummaryBody('second summary', 'second cost', {
+      historyEntries: [
+        buildSummaryHistoryEntries(
+          `${SUMMARY_MARKER}\n\nfirst summary`,
+          new Date('2026-05-19T14:00:00Z'),
+        )[0],
+      ],
+    });
+    const createMergeRequestNote = vi.fn();
+    const updateMergeRequestNote = vi.fn().mockResolvedValue({ id: 12, body: 'x' });
+    const gitlab = { createMergeRequestNote, updateMergeRequestNote } as unknown as GitLabClient;
+
+    await upsertSummaryNote(
+      gitlab,
+      'group/repo',
+      '12',
+      'third summary',
+      [{ notes: [{ id: 12, body: existingBody }] }],
+      { costFooter: 'third cost', archivedAt: new Date('2026-05-19T15:00:00Z') },
+    );
+
+    const updatedBody = updateMergeRequestNote.mock.calls[0][3] as string;
+    expect(updatedBody).toContain('third summary');
+    expect(updatedBody).toContain('second summary');
+    expect(updatedBody).toContain('second cost');
+    expect(updatedBody).toContain('first summary');
+    expect(updatedBody.indexOf('third summary')).toBeLessThan(
+      updatedBody.indexOf('second summary'),
+    );
+    expect(updatedBody.indexOf('second summary')).toBeLessThan(
+      updatedBody.indexOf('first summary'),
+    );
+    expect(createMergeRequestNote).not.toHaveBeenCalled();
+  });
+
+  it('caps archived summary history entries', () => {
+    const existingEntries = Array.from(
+      { length: SUMMARY_HISTORY_LIMIT + 3 },
+      (_, index) =>
+        buildSummaryHistoryEntries(
+          `${SUMMARY_MARKER}\n\nolder summary ${index}`,
+          new Date(`2026-05-19T${String(index).padStart(2, '0')}:00:00Z`),
+        )[0],
+    );
+    const entries = buildSummaryHistoryEntries(
+      buildSummaryBody('latest previous summary', undefined, { historyEntries: existingEntries }),
+      new Date('2026-05-19T15:00:00Z'),
+    );
+
+    expect(entries).toHaveLength(SUMMARY_HISTORY_LIMIT);
+    expect(entries[0]).toContain('latest previous summary');
+    expect(entries.join('\n')).toContain('older summary 0');
+    expect(entries.join('\n')).not.toContain(`older summary ${SUMMARY_HISTORY_LIMIT}`);
+    expect(entries.join('\n').split(SUMMARY_HISTORY_ENTRY_START)).toHaveLength(
+      SUMMARY_HISTORY_LIMIT + 1,
+    );
   });
 });
 
