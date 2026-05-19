@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-05-19
+
+### Added
+
+- The MR-level summary note now includes a cost footer (token counts and USD total, the same line printed to the CI log) appended after a horizontal rule, so reviewers can see the run cost directly on the MR ([#22]).
+
+### Changed
+
+- The summary note is now upserted **before** inline comments are posted, so it appears at the top of the MR activity feed rather than after the inline threads ([#22]).
+
 ## [0.1.9] - 2026-05-19
 
 ### Added
@@ -111,7 +121,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.9...HEAD
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.10...HEAD
+[0.1.10]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.10
 [0.1.9]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.9
 [0.1.8]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.8
 [0.1.7]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.7
@@ -129,6 +140,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#17]: https://github.com/ikko-dev/gitlab-review/pull/17
 [#18]: https://github.com/ikko-dev/gitlab-review/pull/18
 [#19]: https://github.com/ikko-dev/gitlab-review/pull/19
+[#22]: https://github.com/ikko-dev/gitlab-review/pull/22
 [0.1.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.0
 [a6166f5]: https://github.com/ikko-dev/gitlab-review/commit/a6166f5
 [310dccf]: https://github.com/ikko-dev/gitlab-review/commit/310dccf
