@@ -12,15 +12,59 @@
  * `OTEL_EXPORTER_OTLP_HEADERS`, …). For Grafana Sigil, set the endpoint and
  * the `OTEL_EXPORTER_OTLP_HEADERS` to carry the Cloud Access Policy Token.
  *
- * The OTel runtime is loaded via dynamic `import()` so the packages are
- * effectively optional peer deps. If `GITLAB_REVIEW_OTEL=1` is set without
- * the deps installed, `startOtelBridge()` rejects with an actionable error.
+ * By default the runtime is loaded via dynamic `import()` so the OTel packages
+ * are effectively optional peer deps. Library callers who already have a
+ * configured `TracerProvider` in their process can inject their own runtime
+ * via `startOtelBridge({ runtime })` so spans join the host tracer instead of
+ * a second `NodeSDK`.
  */
 
 import { diagnosticChannels, type DiagnosticContext, type DiagnosticPhase } from './diagnostics.js';
 
 export interface OtelBridge {
   shutdown(): Promise<void>;
+}
+
+// Minimal structural typings for the OTel surface we touch — keeps this file
+// independent of `@opentelemetry/api` typings and gives callers a clear DI
+// contract.
+export interface OtelSpan {
+  setAttribute(key: string, value: string | number | boolean): void;
+  setStatus(status: { code: number; message?: string }): void;
+  recordException(exception: { name?: string; message: string }): void;
+  end(): void;
+}
+export interface OtelTracer {
+  startSpan(name: string, options?: unknown, context?: unknown): OtelSpan;
+}
+export interface OtelApi {
+  trace: {
+    getTracer(name: string): OtelTracer;
+    setSpan(ctx: unknown, span: OtelSpan): unknown;
+  };
+  context: { active(): unknown };
+  SpanKind: { INTERNAL: number };
+  SpanStatusCode: { ERROR: number };
+}
+
+export interface OtelRuntime {
+  api: OtelApi;
+  shutdown(): Promise<void>;
+}
+
+export interface OtelBridgeOptions {
+  /**
+   * Pre-wired OTel runtime. When provided, the bridge uses the supplied API
+   * and skips dynamic import of `@opentelemetry/*`. Library callers with a
+   * configured `TracerProvider` should pass their own `api` plus a no-op
+   * `shutdown`; tests inject a fake API with assertion hooks.
+   */
+  runtime?: OtelRuntime;
+  /**
+   * Override the env source used for the opt-in check. Defaults to
+   * `process.env`.
+   */
+  env?: NodeJS.ProcessEnv;
 }
 
 const ROOT_PHASE: DiagnosticPhase = 'run';
@@ -36,27 +80,6 @@ const OTEL_PACKAGES = [
 
 const noop = (): void => undefined;
 
-// Minimal structural typings for the OTel surface we touch — keeps this file
-// self-contained until the project formally adopts the @opentelemetry/* deps.
-interface OtelSpan {
-  setAttribute(key: string, value: string | number | boolean): void;
-  setStatus(status: { code: number; message?: string }): void;
-  recordException(exception: { name?: string; message: string }): void;
-  end(): void;
-}
-interface OtelTracer {
-  startSpan(name: string, options?: unknown, context?: unknown): OtelSpan;
-}
-interface OtelApi {
-  trace: {
-    getTracer(name: string): OtelTracer;
-    setSpan(ctx: unknown, span: OtelSpan): unknown;
-  };
-  context: { active(): unknown };
-  SpanKind: { INTERNAL: number };
-  SpanStatusCode: { ERROR: number };
-}
-
 interface OpenSpan {
   span: OtelSpan;
   closed: boolean;
@@ -66,35 +89,12 @@ export function isOtelEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.GITLAB_REVIEW_OTEL === '1' || env.GITLAB_REVIEW_OTEL === 'true';
 }
 
-export async function startOtelBridge(): Promise<OtelBridge | null> {
-  if (!isOtelEnabled()) return null;
+export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<OtelBridge | null> {
+  const env = options.env ?? process.env;
+  if (!isOtelEnabled(env)) return null;
 
-  let modules: unknown[];
-  try {
-    modules = await Promise.all(OTEL_PACKAGES.map((name) => import(name)));
-  } catch (cause) {
-    throw new Error(
-      `GITLAB_REVIEW_OTEL=1 was set but OTel packages are missing. Install: ${OTEL_PACKAGES.join(' ')}`,
-      { cause },
-    );
-  }
-  const [api, sdkNode, resources, semconv] = modules as [
-    OtelApi,
-    { NodeSDK: new (config: unknown) => { start: () => void; shutdown: () => Promise<void> } },
-    { Resource: new (attrs: Record<string, unknown>) => unknown },
-    Record<string, string>,
-  ];
-
-  const sdk = new sdkNode.NodeSDK({
-    resource: new resources.Resource({
-      [semconv.ATTR_SERVICE_NAME ?? 'service.name']: SERVICE_NAME,
-      [semconv.ATTR_SERVICE_VERSION ?? 'service.version']:
-        process.env.npm_package_version ?? '0.0.0',
-    }),
-    // NodeSDK auto-detects OTLP HTTP/gRPC exporters from OTEL_* env vars.
-  });
-  sdk.start();
-
+  const runtime = options.runtime ?? (await loadDefaultRuntime());
+  const { api } = runtime;
   const tracer = api.trace.getTracer(SERVICE_NAME);
   const openByRun = new Map<string, Map<DiagnosticPhase, OpenSpan>>();
 
@@ -163,9 +163,38 @@ export async function startOtelBridge(): Promise<OtelBridge | null> {
         }
       }
       openByRun.clear();
-      await sdk.shutdown();
+      await runtime.shutdown();
     },
   };
+}
+
+async function loadDefaultRuntime(): Promise<OtelRuntime> {
+  let modules: unknown[];
+  try {
+    modules = await Promise.all(OTEL_PACKAGES.map((name) => import(name)));
+  } catch (cause) {
+    throw new Error(
+      `GITLAB_REVIEW_OTEL=1 was set but OTel packages are missing. Install: ${OTEL_PACKAGES.join(' ')}`,
+      { cause },
+    );
+  }
+  const [api, sdkNode, resources, semconv] = modules as [
+    OtelApi,
+    { NodeSDK: new (config: unknown) => { start: () => void; shutdown: () => Promise<void> } },
+    { Resource: new (attrs: Record<string, unknown>) => unknown },
+    Record<string, string>,
+  ];
+
+  const sdk = new sdkNode.NodeSDK({
+    resource: new resources.Resource({
+      [semconv.ATTR_SERVICE_NAME ?? 'service.name']: SERVICE_NAME,
+      [semconv.ATTR_SERVICE_VERSION ?? 'service.version']:
+        process.env.npm_package_version ?? '0.0.0',
+    }),
+    // NodeSDK auto-detects OTLP HTTP/gRPC exporters from OTEL_* env vars.
+  });
+  sdk.start();
+  return { api, shutdown: () => sdk.shutdown() };
 }
 
 function spanNameFor(phase: DiagnosticPhase): string {
