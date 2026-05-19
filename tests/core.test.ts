@@ -416,9 +416,17 @@ describe('summary note upsert', () => {
     const body = buildSummaryBody('Great work.', undefined, { reviewedCommitSha: commit });
 
     expect(body).toContain(
-      '---\n\nReviewed commit: `27dab603346bcb994190042029ce7368021ff21e` · [gitlab-review](https://github.com/ikko-dev/gitlab-review)',
+      '---\n\nReviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) for commit 27dab603346bcb994190042029ce7368021ff21e.',
     );
     expect(extractReviewedCommitSha(body)).toBe(commit);
+  });
+
+  it('extracts the previous reviewed commit footer wording', () => {
+    expect(
+      extractReviewedCommitSha(
+        'Reviewed commit: `27dab603346bcb994190042029ce7368021ff21e` · [gitlab-review](https://github.com/ikko-dev/gitlab-review)',
+      ),
+    ).toBe('27dab603346bcb994190042029ce7368021ff21e');
   });
 
   it('finds the reviewed commit from the current summary note', () => {
