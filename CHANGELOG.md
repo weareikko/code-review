@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Post the reviewer's overall `summary` as a non-positional merge request note — the same shape a human reviewer creates from the MR comment box. The note carries a hidden `<!-- pi-reviewer:summary -->` marker so subsequent runs find the existing note and update it in place via `PUT /merge_requests/:iid/notes/:id` instead of piling up duplicates. Default-on; disable with `--no-summary` or `PI_REVIEWER_POST_SUMMARY=false`. Skipped under `--dry-run` / `--no-post`. Runs in both `direct` and `draft` posting modes (always via the regular notes endpoints) ([#19]).
 - New `GitLabClient` methods: `createMergeRequestNote`, `updateMergeRequestNote` ([#19]).
 - New `gitlab.upsert_summary` diagnostics channel and OTel attributes (`gitlab_review.summary.action`, `gitlab_review.summary.note_id`) exposing whether the summary note was created or updated and its resolved id ([#19]).
+- Emit OpenTelemetry GenAI client metrics (`gen_ai.client.operation.duration`, `gen_ai.client.token.usage`) alongside spans so Grafana Application Observability / AI Observability surfaces — and any OTel-compliant LLM observability consumer driven off these metric names — discover the service from its metrics without dashboard import.
+
+### Changed
+
+- **Breaking (library callers only).** Dropped the structural OTel typing shim and adopted the canonical `@opentelemetry/api` provider-injection pattern. Callers passing a `runtime:` to `startOtelBridge` now provide `tracerProvider` + `meterProvider` instead of the full `api` namespace. The opt-in CLI flag (`GITLAB_REVIEW_OTEL=1`) and the bundled-runtime path are unchanged — only the library-DI shape moved. See the README snippet for the new form.
 
 ## [0.1.8] - 2026-05-19
 

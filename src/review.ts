@@ -14,14 +14,7 @@ export {
   traceDiagnostic,
   traceDiagnosticPhase,
 } from './diagnostics.js';
-export type {
-  OtelApi,
-  OtelBridge,
-  OtelBridgeOptions,
-  OtelRuntime,
-  OtelSpan,
-  OtelTracer,
-} from './otel.js';
+export type { OtelBridge, OtelBridgeOptions, OtelRuntime } from './otel.js';
 export { isOtelEnabled, startOtelBridge } from './otel.js';
 export type {
   DiffRefs,
