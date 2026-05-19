@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-05-19
+
+### Added
+
+- `--posting-mode draft` (env: `PI_REVIEWER_POSTING_MODE`) creates GitLab draft notes for every fresh comment and publishes them atomically via `POST /draft_notes/bulk_publish` so the MR never shows a half-posted review. Hardened with orphan cleanup at run start, bounded-concurrency (cap 10) draft creation, a pre-publish fingerprint re-check that drops drafts colliding with discussions posted between dedupe and publish, and same-run self-heal that sweeps partial drafts if a creation fails mid-flight. Default stays `direct` for one release ([#14]).
+- New `GitLabClient` methods: `getCurrentUser`, `listDraftNotes`, `createDraftNote`, `deleteDraftNote`, `bulkPublishDraftNotes` ([#14]).
+- `gitlab.post_comments` diagnostic payload now exposes `draftsAbandoned`, `draftsCreated`, `draftsDeletedPrePublish`, and `draftsPublished` when draft mode is used ([#14]).
+
+### Changed
+
+- Post-run log reports drafts dropped by the pre-publish re-check separately from duplicates instead of conflating them in the `(N duplicates skipped)` count ([#14]).
+
 ## [0.1.4] - 2026-05-18
 
 ### Added
@@ -60,7 +72,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.4...HEAD
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.1.5...HEAD
+[0.1.5]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.5
 [0.1.4]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.4
 [0.1.3]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.3
 [0.1.2]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.2
@@ -68,6 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#11]: https://github.com/ikko-dev/gitlab-review/pull/11
 [#12]: https://github.com/ikko-dev/gitlab-review/pull/12
 [#13]: https://github.com/ikko-dev/gitlab-review/pull/13
+[#14]: https://github.com/ikko-dev/gitlab-review/pull/14
 [0.1.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.0
 [a6166f5]: https://github.com/ikko-dev/gitlab-review/commit/a6166f5
 [310dccf]: https://github.com/ikko-dev/gitlab-review/commit/310dccf
