@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Breaking (library callers only).** Dropped the structural OTel typing shim and adopted the canonical `@opentelemetry/api` provider-injection pattern. Callers passing a `runtime:` to `startOtelBridge` now provide `tracerProvider` + `meterProvider` instead of the full `api` namespace. The opt-in CLI flag (`GITLAB_REVIEW_OTEL=1`) and the bundled-runtime path are unchanged — only the library-DI shape moved. See the README snippet for the new form.
 
+### Fixed
+
+- OTel `service.version` resource attribute is now inlined at build time from `package.json` via Vite's `define`, so it reads the real package version under `npx` / standalone bin invocations instead of falling back to `'0.0.0'` (the previous `process.env.npm_package_version` lookup was only populated by `npm run`).
+
 ## [0.1.8] - 2026-05-19
 
 ### Fixed

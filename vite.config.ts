@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 const external = [
@@ -7,7 +9,14 @@ const external = [
   /^@earendil-works\//,
 ];
 
+const pkg = JSON.parse(
+  readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf8'),
+) as { version: string };
+
 export default defineConfig({
+  define: {
+    __PKG_VERSION__: JSON.stringify(pkg.version),
+  },
   build: {
     lib: {
       entry: {

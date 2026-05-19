@@ -35,6 +35,11 @@ import { context, metrics, SpanKind, SpanStatusCode, trace } from '@opentelemetr
 
 import { diagnosticChannels, type DiagnosticContext, type DiagnosticPhase } from './diagnostics.js';
 
+// Inlined at build time by Vite's `define` (see vite.config.ts). Keeps
+// `service.version` accurate under `npx`/standalone bin invocations, where
+// `npm_package_version` from `npm run` is not set.
+declare const __PKG_VERSION__: string;
+
 export interface OtelBridge {
   shutdown(): Promise<void>;
 }
@@ -213,7 +218,7 @@ async function loadDefaultRuntime(): Promise<OtelRuntime> {
   // OTEL_RESOURCE_ATTRIBUTES) are preserved.
   const serviceResource = resources.resourceFromAttributes({
     [semconv.ATTR_SERVICE_NAME ?? 'service.name']: SERVICE_NAME,
-    [semconv.ATTR_SERVICE_VERSION ?? 'service.version']: process.env.npm_package_version ?? '0.0.0',
+    [semconv.ATTR_SERVICE_VERSION ?? 'service.version']: __PKG_VERSION__,
   });
   const sdk = new sdkNode.NodeSDK({
     resource: resources.defaultResource().merge(serviceResource),
