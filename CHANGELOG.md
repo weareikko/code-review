@@ -167,6 +167,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#25]: https://github.com/ikko-dev/gitlab-review/pull/25
 [#26]: https://github.com/ikko-dev/gitlab-review/pull/26
 [#27]: https://github.com/ikko-dev/gitlab-review/pull/27
+[#28]: https://github.com/ikko-dev/gitlab-review/pull/28
 [0.1.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.0
 [a6166f5]: https://github.com/ikko-dev/gitlab-review/commit/a6166f5
 [310dccf]: https://github.com/ikko-dev/gitlab-review/commit/310dccf
