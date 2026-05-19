@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Skills**: domain-specific review modules that sharpen the agent's focus. Load built-in skills with `--skill <name>` (repeatable) or `GITLAB_REVIEW_SKILLS` (comma-separated). Project skills are auto-discovered from `.agents/skills/<name>/SKILL.md` and `.claude/skills/<name>/SKILL.md`, walking from the git root to `cwd`; a skill closer to `cwd` overrides one of the same name higher up; project skills override built-ins. Each skill injects a focused instruction block and optional `references/` files into the system prompt — reference files are made available by path so the agent can read them on demand ([#31]).
 - **Built-in `code-review` skill**: adversarial correctness reviewer that reports only real, demonstrable bugs with a concrete proof path (specific input → failure → observable symptom). Includes per-language reference files for JavaScript/TypeScript and PHP/Laravel covering async/promise pitfalls, type coercion traps, React hook gotchas, Eloquent N+1, non-atomic Laravel writes, and more ([#31]).
-- Active skill names appear in the MR summary note footer (`Skills: \`code-review\``) after the cost line, and in `review-usage.json` under `skills` ([#31]).
+- Active skill names appear in the MR summary note footer (`Skills: \`code-review\``) after the cost line, and in `review-usage.json`under`skills` ([#31]).
 
 ### Changed
 

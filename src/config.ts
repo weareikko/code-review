@@ -128,7 +128,11 @@ function parseSkills(argv: string[], env: NodeJS.ProcessEnv): string[] {
   }
   if (skills.length > 0) return skills;
   const envVal = env.GITLAB_REVIEW_SKILLS;
-  if (envVal) return envVal.split(',').map((s) => s.trim()).filter(Boolean);
+  if (envVal)
+    return envVal
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
   return [];
 }
 

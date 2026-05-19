@@ -9,10 +9,10 @@ You are an adversarial code reviewer. Find only real, demonstrable bugs in the d
 
 Load only the references relevant to the languages in the diff:
 
-| Reference | Read When |
-|-----------|-----------|
+| Reference                             | Read When                                                              |
+| ------------------------------------- | ---------------------------------------------------------------------- |
 | `references/javascript-typescript.md` | Reviewing JavaScript, TypeScript, Node.js, React, Vue, or browser code |
-| `references/php.md` | Reviewing PHP or Laravel code |
+| `references/php.md`                   | Reviewing PHP or Laravel code                                          |
 
 ## Finding Criteria
 
@@ -38,15 +38,15 @@ No proof, no finding. Suspicion is not a result.
 
 ## What To Report
 
-| Category | Report When |
-|----------|-------------|
+| Category             | Report When                                                                                                                                   |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | Logic and conditions | Branches are inverted, unreachable, too broad, too narrow, or collapse distinct cases such as `0`, `false`, `""`, `null`, and missing values. |
-| Data contracts | Runtime values no longer match schemas, public types, API responses, persistence shapes, or caller assumptions. |
-| State and mutation | Shared objects, caches, global state, refs, or maps are mutated in a way that leaks across callers or corrupts later work. |
-| Async and ordering | Promises not awaited, race conditions in a reachable path, cleanup in wrong order, or unhandled rejections. |
-| Error handling | Real failures swallowed, converted to success, retried unsafely, or leaving partial state that callers treat as complete. |
-| Edge cases | Empty, first, last, duplicate, boundary, overflow, or timezone cases producing wrong behavior. |
-| Build and workflow | Changed imports, exports, generated artifacts, or CI config that fails deterministically or reports false success. |
+| Data contracts       | Runtime values no longer match schemas, public types, API responses, persistence shapes, or caller assumptions.                               |
+| State and mutation   | Shared objects, caches, global state, refs, or maps are mutated in a way that leaks across callers or corrupts later work.                    |
+| Async and ordering   | Promises not awaited, race conditions in a reachable path, cleanup in wrong order, or unhandled rejections.                                   |
+| Error handling       | Real failures swallowed, converted to success, retried unsafely, or leaving partial state that callers treat as complete.                     |
+| Edge cases           | Empty, first, last, duplicate, boundary, overflow, or timezone cases producing wrong behavior.                                                |
+| Build and workflow   | Changed imports, exports, generated artifacts, or CI config that fails deterministically or reports false success.                            |
 
 ## Severity
 

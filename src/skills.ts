@@ -15,7 +15,9 @@ export interface Skill {
 const SKILL_DIRS = ['.agents/skills', '.claude/skills'] as const;
 const RESOURCE_DIRS = ['references'] as const;
 
-function parseFrontmatter(content: string): { name: string; description: string; body: string } | null {
+function parseFrontmatter(
+  content: string,
+): { name: string; description: string; body: string } | null {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!match) return null;
   const [, frontmatter, body] = match;

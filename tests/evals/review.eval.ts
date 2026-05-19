@@ -1,16 +1,17 @@
-// oxlint-disable eslint-plugin-jest/no-standalone-expect -- describeEval uses its own `it` wrapper that oxlint doesn't recognise
-import { createHarness, createJudge, describeEval } from 'vitest-evals';
 import type { JudgeContext } from 'vitest-evals';
 
 import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { tmpdir } from 'node:os';
 import { expect } from 'vitest';
+// oxlint-disable eslint-plugin-jest/no-standalone-expect -- describeEval uses its own `it` wrapper that oxlint doesn't recognise
+import { createHarness, createJudge, describeEval } from 'vitest-evals';
+
+import type { Config } from '../../src/config.js';
 
 import { runReview } from '../../src/gitlab-review.js';
 import { parseReviewMarkdownWithWarnings } from '../../src/parser.js';
-import type { Config } from '../../src/config.js';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
@@ -110,9 +111,7 @@ const AsyncBugDetectedJudge = createJudge(
       'never await',
       "won't be awaited",
     ];
-    const allText = [output.summary, ...output.comments.map((c) => c.body)]
-      .join(' ')
-      .toLowerCase();
+    const allText = [output.summary, ...output.comments.map((c) => c.body)].join(' ').toLowerCase();
     const hit = patterns.some((p) => allText.includes(p));
     return {
       score: hit ? 1 : 0,
@@ -226,9 +225,7 @@ const StaleClosureJudge = createJudge(
       'debounce',
       'initial',
     ];
-    const allText = [output.summary, ...output.comments.map((c) => c.body)]
-      .join(' ')
-      .toLowerCase();
+    const allText = [output.summary, ...output.comments.map((c) => c.body)].join(' ').toLowerCase();
     const hit = keywords.filter((k) => allText.includes(k));
     // Require at least 2 distinct keywords to avoid accidental matches
     const score = hit.length >= 2 ? 1 : 0;
@@ -250,9 +247,7 @@ const RaceConditionJudge = createJudge(
   'RaceConditionJudge',
   ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
     const keywords = ['race', 'concurrent', 'atomic', 'lock', 'transaction', 'updateorcreate'];
-    const allText = [output.summary, ...output.comments.map((c) => c.body)]
-      .join(' ')
-      .toLowerCase();
+    const allText = [output.summary, ...output.comments.map((c) => c.body)].join(' ').toLowerCase();
     const hit = keywords.filter((k) => allText.includes(k));
     const score = hit.length >= 1 ? 1 : 0;
     return {
@@ -284,7 +279,9 @@ describeEval(
       expect(result.output.comments.length).toBeGreaterThan(0);
     });
 
-    it('detects missing useEffect deps / stale closure without skill (baseline)', async ({ run }) => {
+    it('detects missing useEffect deps / stale closure without skill (baseline)', async ({
+      run,
+    }) => {
       const diff = await readFile(join(FIXTURES, 'react-stale-deps.diff'), 'utf8');
       const result = await run({ diff, skills: [] });
 

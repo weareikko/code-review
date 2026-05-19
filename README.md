@@ -77,25 +77,25 @@ review:
 
 The CLI auto-resolves values from CI variables and common token/key names.
 
-| Variable                       | Purpose                                                             |
-| ------------------------------ | ------------------------------------------------------------------- |
-| `CI_PROJECT_ID`                | Default for `--project`                                             |
-| `CI_MERGE_REQUEST_IID`         | Default for `--mr`                                                  |
-| `CI_SERVER_URL`                | Default for `--gitlab-url`                                          |
-| `CI_SERVER_HOST`               | Fallback for `--gitlab-url` as `https://$CI_SERVER_HOST`            |
-| `GITLAB_TOKEN`                 | Preferred GitLab API token (`PRIVATE-TOKEN`)                        |
-| `GLAB_CLI_TOKEN`               | Fallback GitLab API token (`PRIVATE-TOKEN`)                         |
-| `CI_JOB_TOKEN`                 | Fallback token (`JOB-TOKEN`)                                        |
-| `GITLAB_PRIVATE_TOKEN`         | Fallback token (`PRIVATE-TOKEN`)                                    |
-| `GITLAB_REVIEW_API_KEY`        | Preferred AI API key                                                |
-| `ANTHROPIC_API_KEY`            | Fallback AI API key                                                 |
-| `CLAUDE_API_KEY`               | Fallback AI API key                                                 |
-| `GITLAB_REVIEW_MODEL`          | Default for `--model`                                               |
-| `GITLAB_REVIEW_MIN_SEVERITY`   | Default for `--min-severity`                                        |
-| `GITLAB_REVIEW_THINKING_LEVEL` | Default for `--thinking`                                            |
-| `GITLAB_REVIEW_POSTING_MODE`   | Default for `--posting-mode`                                        |
-| `GITLAB_REVIEW_POST_SUMMARY`   | Set to `false`/`0` to skip the MR-level summary note                |
-| `GITLAB_REVIEW_FORCE_REVIEW`   | Set to `true`/`1` to review even if the commit was already reviewed |
+| Variable                       | Purpose                                                                     |
+| ------------------------------ | --------------------------------------------------------------------------- |
+| `CI_PROJECT_ID`                | Default for `--project`                                                     |
+| `CI_MERGE_REQUEST_IID`         | Default for `--mr`                                                          |
+| `CI_SERVER_URL`                | Default for `--gitlab-url`                                                  |
+| `CI_SERVER_HOST`               | Fallback for `--gitlab-url` as `https://$CI_SERVER_HOST`                    |
+| `GITLAB_TOKEN`                 | Preferred GitLab API token (`PRIVATE-TOKEN`)                                |
+| `GLAB_CLI_TOKEN`               | Fallback GitLab API token (`PRIVATE-TOKEN`)                                 |
+| `CI_JOB_TOKEN`                 | Fallback token (`JOB-TOKEN`)                                                |
+| `GITLAB_PRIVATE_TOKEN`         | Fallback token (`PRIVATE-TOKEN`)                                            |
+| `GITLAB_REVIEW_API_KEY`        | Preferred AI API key                                                        |
+| `ANTHROPIC_API_KEY`            | Fallback AI API key                                                         |
+| `CLAUDE_API_KEY`               | Fallback AI API key                                                         |
+| `GITLAB_REVIEW_MODEL`          | Default for `--model`                                                       |
+| `GITLAB_REVIEW_MIN_SEVERITY`   | Default for `--min-severity`                                                |
+| `GITLAB_REVIEW_THINKING_LEVEL` | Default for `--thinking`                                                    |
+| `GITLAB_REVIEW_POSTING_MODE`   | Default for `--posting-mode`                                                |
+| `GITLAB_REVIEW_POST_SUMMARY`   | Set to `false`/`0` to skip the MR-level summary note                        |
+| `GITLAB_REVIEW_FORCE_REVIEW`   | Set to `true`/`1` to review even if the commit was already reviewed         |
 | `GITLAB_REVIEW_SKILLS`         | Comma-separated list of built-in skill names to enable (e.g. `code-review`) |
 
 ## Flags
@@ -132,8 +132,8 @@ Skills are domain-specific review modules that sharpen the agent's focus on a pa
 
 ### Built-in skills
 
-| Name | What it does |
-| --- | --- |
+| Name          | What it does                                                                                                                                                                                                                                        |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `code-review` | Adversarial correctness review: finds real, demonstrable bugs only. Reports nothing without a concrete proof path (specific input → failure → observable symptom). Includes per-language reference files for JavaScript/TypeScript and PHP/Laravel. |
 
 Enable a built-in skill with `--skill`:
