@@ -364,3 +364,11 @@ GITLAB_REVIEW_EVAL_MODEL=anthropic/claude-haiku-4-5-20251001 npm run test:evals
 ```
 
 The review agent runs against pinned `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and `@earendil-works/pi-coding-agent` versions, so published builds keep a deterministic reviewer runtime.
+
+## Acknowledgements
+
+`gitlab-review` builds on ideas and prior work from several projects:
+
+- **[pi-reviewer](https://github.com/earendil-works/pi-reviewer)** — the original agent-driven code reviewer that `gitlab-review` grew out of. The agent runtime (`@earendil-works/pi-agent-core`), model abstraction (`@earendil-works/pi-ai`), and read-only coding tools (`@earendil-works/pi-coding-agent`) are all pi-reviewer infrastructure.
+- **[Warden](https://warden.sentry.dev)** by Sentry — the skills architecture (per-skill instruction blocks, reference files loaded on demand by the agent, project-level discovery) takes direct inspiration from Warden's approach to composable, domain-specific review modules.
+- **[agentskills.io](https://agentskills.io)** — the `SKILL.md` frontmatter format and multi-file skill layout (`references/`, `scripts/`, `assets/`) follow the agentskills.io open standard for portable agent skills.
