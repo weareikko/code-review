@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main, develop]
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   lint:
     name: Lint
@@ -94,7 +98,7 @@ jobs:
         uses: codecov/codecov-action@v6
         if: ${{ !cancelled() }}
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          use_oidc: true
           files: ./coverage/lcov.info
           fail_ci_if_error: false
           flags: unittests
@@ -104,7 +108,7 @@ jobs:
         uses: codecov/codecov-action@v6
         if: ${{ !cancelled() }}
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          use_oidc: true
           files: ./test-results/junit.xml
           report_type: test_results
 
