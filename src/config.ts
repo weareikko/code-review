@@ -22,6 +22,7 @@ export interface Config {
   postSummary: boolean;
   forceReview: boolean;
   cwd: string;
+  skills: string[];
 }
 
 export type ParsedArgs = Record<string, string | boolean>;
@@ -110,6 +111,31 @@ function resolvePostingMode(value: unknown): PostingMode | string {
     .toLowerCase();
 }
 
+function parseSkills(argv: string[], env: NodeJS.ProcessEnv): string[] {
+  const skills: string[] = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg.startsWith('--skill=')) {
+      const val = arg.slice('--skill='.length).trim();
+      if (val) skills.push(val);
+    } else if (arg === '--skill') {
+      const next = argv[i + 1];
+      if (next && !next.startsWith('--')) {
+        skills.push(next.trim());
+        i += 1;
+      }
+    }
+  }
+  if (skills.length > 0) return skills;
+  const envVal = env.GITLAB_REVIEW_SKILLS;
+  if (envVal)
+    return envVal
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  return [];
+}
+
 function resolveGitLabToken(
   args: ParsedArgs,
   env: NodeJS.ProcessEnv,
@@ -163,6 +189,7 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     postSummary: resolvePostSummary(args, env),
     forceReview: toBoolean(args.forceReview) || toBoolean(env.GITLAB_REVIEW_FORCE_REVIEW),
     cwd: String(args.cwd ?? process.cwd()),
+    skills: parseSkills(argv, env),
   };
 }
 

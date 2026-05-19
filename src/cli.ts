@@ -268,6 +268,7 @@ export async function run(config: Config): Promise<RunResult> {
             discussions,
             {
               costFooter: formatUsageLine(usage),
+              skillsFooter: formatSkillsFooter(usage.skills),
               reviewedCommitSha: version.head_commit_sha,
             },
           );
@@ -327,7 +328,13 @@ function zeroReviewUsage(model: string): ReviewUsage {
     model,
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    skills: [],
   };
+}
+
+export function formatSkillsFooter(skills: string[]): string | undefined {
+  if (skills.length === 0) return undefined;
+  return `Skills: ${skills.map((s) => `\`${s}\``).join(', ')}`;
 }
 
 export function formatUsageLine(usage: ReviewUsage): string {

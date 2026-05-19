@@ -10,9 +10,11 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { Config } from './config.js';
+import type { Skill } from './skills.js';
 import type { GitLabReviewSeverity, ThinkingLevel } from './types.js';
 
 import { ReviewerError } from './errors.js';
+import { loadAutoDiscoveredSkills, loadBuiltinSkill } from './skills.js';
 import { toGitLabReviewSeverity } from './types.js';
 
 export interface UsageBreakdown {
@@ -27,6 +29,7 @@ export interface ReviewUsage {
   model: string;
   tokens: UsageBreakdown;
   cost: UsageBreakdown;
+  skills: string[];
 }
 
 export interface AgentLike {
@@ -58,6 +61,7 @@ interface ContextFile {
 interface ReviewContext {
   conventions: ContextFile[];
   reviewRules: ContextFile[];
+  skills: Skill[];
 }
 
 const DEFAULT_MAX_DIFF_CHARS = 100_000;
@@ -160,13 +164,27 @@ async function walkUpContextFiles(
   return result;
 }
 
-export async function loadReviewContext(cwd: string): Promise<ReviewContext> {
+export async function loadReviewContext(
+  cwd: string,
+  skillNames: string[] = [],
+): Promise<ReviewContext> {
   const gitRoot = await findGitRoot(cwd);
-  const [conventions, reviewRules] = await Promise.all([
+  const [conventions, reviewRules, discovered] = await Promise.all([
     walkUpContextFiles(cwd, CONVENTION_FILES, gitRoot),
     walkUpContextFiles(cwd, REVIEW_RULE_FILES, gitRoot),
+    loadAutoDiscoveredSkills(cwd, gitRoot),
   ]);
-  return { conventions, reviewRules };
+
+  const skills = [...discovered];
+  const discoveredNames = new Set(discovered.map((s) => s.name));
+  const builtins = await Promise.all(
+    skillNames.filter((n) => !discoveredNames.has(n)).map((n) => loadBuiltinSkill(n)),
+  );
+  for (const skill of builtins) {
+    if (skill) skills.push(skill);
+  }
+
+  return { conventions, reviewRules, skills };
 }
 
 export interface FilteredDiff {
@@ -216,6 +234,27 @@ export function filterDiff(raw: string, maxChars = DEFAULT_MAX_DIFF_CHARS): Filt
 
 function mergeContent(files: ContextFile[]): string {
   return files.map((file) => file.content).join('\n\n');
+}
+
+function buildSkillSection(skill: Skill): string {
+  const lines = [
+    `<skill name="${skill.name}">`,
+    `<description>${skill.description}</description>`,
+    '',
+    skill.body,
+  ];
+  if (skill.resourceDirs.length > 0) {
+    const dirList = skill.resourceDirs.map((d) => `${d}/`).join(', ');
+    lines.push(
+      '',
+      '<skill_resources>',
+      `This skill is located at: ${skill.rootDir}`,
+      `You can read files from ${dirList} using the Read tool with the full path.`,
+      '</skill_resources>',
+    );
+  }
+  lines.push('</skill>');
+  return lines.join('\n');
 }
 
 function buildSharedBase(minSeverity: GitLabReviewSeverity): string[] {
@@ -272,6 +311,10 @@ export function buildJSONSystemPrompt(
   if (conventions) sections.push(`<conventions>\n${conventions}\n</conventions>`);
   const reviewRules = mergeContent(context.reviewRules).trim();
   if (reviewRules) sections.push(`<review_rules>\n${reviewRules}\n</review_rules>`);
+  if (context.skills.length > 0) {
+    const skillSections = context.skills.map(buildSkillSection).join('\n\n');
+    sections.push(`<skills>\n${skillSections}\n</skills>`);
+  }
   return sections.join('\n\n');
 }
 
@@ -361,7 +404,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     });
   }
 
-  const context = await loadReviewContext(cwd);
+  const context = await loadReviewContext(cwd, config.skills);
   const systemPrompt = buildJSONSystemPrompt(context, minSeverity);
   const userPrompt = buildUserPrompt(diff, skippedFiles);
 
@@ -424,5 +467,6 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     model: config.model,
     tokens: aggregated.tokens,
     cost: aggregated.cost,
+    skills: context.skills.map((s) => s.name),
   };
 }

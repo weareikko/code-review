@@ -24,6 +24,7 @@
   "files": [
     "bin/",
     "dist/",
+    "skills/",
     "LICENSE",
     "README.md"
   ],
@@ -45,6 +46,7 @@
     "build": "vite build && tsgo --emitDeclarationOnly",
     "test": "vitest run",
     "test:ci": "vitest run --coverage",
+    "test:evals": "vitest run --config vite.eval.config.ts",
     "typecheck": "tsgo --noEmit",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
@@ -67,11 +69,13 @@
     "@types/node": "^24.0.0",
     "@typescript/native-preview": "7.0.0-dev.20260304.1",
     "@vitest/coverage-v8": "^4.1.6",
+    "dotenv": "^17.4.2",
     "oxfmt": "0.36.0",
     "oxlint": "1.51.0",
     "oxlint-tsgolint": "^0.16.0",
     "vite": "^8.0.7",
-    "vitest": "^4.1.0-beta.5"
+    "vitest": "^4.1.0-beta.5",
+    "vitest-evals": "^0.9.0"
   },
   "engines": {
     "node": ">=24"

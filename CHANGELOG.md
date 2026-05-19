@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Skills**: domain-specific review modules that sharpen the agent's focus. Load built-in skills with `--skill <name>` (repeatable) or `GITLAB_REVIEW_SKILLS` (comma-separated). Project skills are auto-discovered from `.agents/skills/<name>/SKILL.md` and `.claude/skills/<name>/SKILL.md`, walking from the git root to `cwd`; a skill closer to `cwd` overrides one of the same name higher up; project skills override built-ins. Each skill injects a focused instruction block and optional `references/` files into the system prompt — reference files are made available by path so the agent can read them on demand ([#31]).
+- **Built-in `code-review` skill**: adversarial correctness reviewer that reports only real, demonstrable bugs with a concrete proof path (specific input → failure → observable symptom). Includes per-language reference files for JavaScript/TypeScript and PHP/Laravel covering async/promise pitfalls, type coercion traps, React hook gotchas, Eloquent N+1, non-atomic Laravel writes, and more ([#31]).
+- Active skill names appear in the MR summary note footer (`Skills: \`code-review\``) after the cost line, and in `review-usage.json`under`skills` ([#31]).
+
 ### Changed
 
 - Switch license from MIT to FSL-1.1-ALv2 (Functional Source License). Internal use, education, research, and professional services remain freely permitted; the restriction covers commercial products or services that compete with gitlab-review. The license converts to Apache 2.0 two years after each release.
@@ -176,6 +182,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#26]: https://github.com/ikko-dev/gitlab-review/pull/26
 [#27]: https://github.com/ikko-dev/gitlab-review/pull/27
 [#28]: https://github.com/ikko-dev/gitlab-review/pull/28
+[#29]: https://github.com/ikko-dev/gitlab-review/pull/29
+[#31]: https://github.com/ikko-dev/gitlab-review/pull/31
 [0.1.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.0
 [a6166f5]: https://github.com/ikko-dev/gitlab-review/commit/a6166f5
 [310dccf]: https://github.com/ikko-dev/gitlab-review/commit/310dccf

@@ -45,11 +45,13 @@ export interface SummaryNote {
 export interface SummaryBodyOptions {
   historyEntries?: string[];
   reviewedCommitSha?: string;
+  skillsFooter?: string;
 }
 
 export interface UpsertSummaryOptions extends SummaryBodyOptions {
   archivedAt?: Date;
   costFooter?: string;
+  skillsFooter?: string;
 }
 
 export function buildSummaryBody(
@@ -60,6 +62,7 @@ export function buildSummaryBody(
   const body = `${SUMMARY_MARKER}\n\n## Code Review\n\n${summary.trim()}`;
   const footerLines = [
     costFooter?.trim(),
+    options.skillsFooter?.trim(),
     options.reviewedCommitSha ? buildReviewedCommitFooter(options.reviewedCommitSha) : undefined,
   ].filter((line): line is string => Boolean(line));
   const withFooter =
@@ -180,6 +183,7 @@ export async function upsertSummaryNote(
   const body = buildSummaryBody(summary, options.costFooter, {
     historyEntries,
     reviewedCommitSha: options.reviewedCommitSha,
+    skillsFooter: options.skillsFooter,
   });
   if (existing) {
     await gitlab.updateMergeRequestNote(project, mr, existing.id, body);

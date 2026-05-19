@@ -1,0 +1,56 @@
+diff --git a/app/Http/Controllers/PromoController.php b/app/Http/Controllers/PromoController.php
+new file mode 100644
+index 0000000..d4e7a01
+--- /dev/null
++++ b/app/Http/Controllers/PromoController.php
+@@ -0,0 +1,46 @@
++<?php
++
++namespace App\Http\Controllers;
++
++use App\Models\Order;
++use App\Models\PromoCode;
++use Illuminate\Http\JsonResponse;
++use Illuminate\Http\Request;
++
++class PromoController extends Controller
++{
++    /**
++     * Apply a one-time promo code to the authenticated user's current order.
++     * Each code may only be used once.
++     */
++    public function apply(Request $request): JsonResponse
++    {
++        $request->validate(['code' => 'required|string']);
++
++        $promo = PromoCode::where('code', $request->code)
++            ->where('used', false)
++            ->first();
++
++        if (! $promo) {
++            return response()->json(['error' => 'Invalid or already used code'], 422);
++        }
++
++        $promo->update(['used' => true, 'claimed_by' => $request->user()->id]);
++
++        Order::updateOrCreate(
++            ['user_id' => $request->user()->id, 'status' => 'pending'],
++            ['promo_code_id' => $promo->id, 'discount' => $promo->discount_amount],
++        );
++
++        return response()->json([
++            'discount' => $promo->discount_amount,
++            'message'  => 'Promo code applied successfully.',
++        ]);
++    }
++
++    public function index(): JsonResponse
++    {
++        $codes = PromoCode::where('used', false)->get();
++
++        return response()->json($codes->map(fn (PromoCode $c) => [
++            'code'     => $c->code,
++            'discount' => $c->discount_amount,
++        ]));
++    }
++}
