@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Parse JSON review fences whose comment bodies contain nested fenced code blocks by only treating backticks at the beginning of a line as the closing fence ([#15]).
+
+### Changed
+
+- Use Codecov OIDC authentication for coverage and test-result uploads in CI ([#15]).
+
 ## [0.1.5] - 2026-05-19
 
 ### Added
@@ -82,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#12]: https://github.com/ikko-dev/gitlab-review/pull/12
 [#13]: https://github.com/ikko-dev/gitlab-review/pull/13
 [#14]: https://github.com/ikko-dev/gitlab-review/pull/14
+[#15]: https://github.com/ikko-dev/gitlab-review/pull/15
 [0.1.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.0
 [a6166f5]: https://github.com/ikko-dev/gitlab-review/commit/a6166f5
 [310dccf]: https://github.com/ikko-dev/gitlab-review/commit/310dccf
