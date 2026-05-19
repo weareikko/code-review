@@ -13,7 +13,7 @@
   "bugs": {
     "url": "https://github.com/ikko-dev/gitlab-review/issues"
   },
-  "license": "MIT",
+  "license": "FSL-1.1-ALv2",
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/ikko-dev/gitlab-review.git"
