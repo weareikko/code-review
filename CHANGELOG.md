@@ -7,23 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-19
+
 ### Added
 
 - **Skills**: domain-specific review modules that sharpen the agent's focus. Load built-in skills with `--skill <name>` (repeatable) or `GITLAB_REVIEW_SKILLS` (comma-separated). Project skills are auto-discovered from `.agents/skills/<name>/SKILL.md` and `.claude/skills/<name>/SKILL.md`, walking from the git root to `cwd`; a skill closer to `cwd` overrides one of the same name higher up; project skills override built-ins. Each skill injects a focused instruction block and optional `references/` files into the system prompt — reference files are made available by path so the agent can read them on demand ([#31]).
 - **Built-in `code-review` skill**: adversarial correctness reviewer that reports only real, demonstrable bugs with a concrete proof path (specific input → failure → observable symptom). Includes per-language reference files for JavaScript/TypeScript and PHP/Laravel covering async/promise pitfalls, type coercion traps, React hook gotchas, Eloquent N+1, non-atomic Laravel writes, and more ([#31]).
 - Active skill names appear in the MR summary note footer (`Skills: \`code-review\``) after the cost line, and in `review-usage.json`under`skills` ([#31]).
+- `runReview` now accepts a `timeoutMs` option (default 10 min); the agent run is raced against a `ReviewerError` timeout promise so hung LLM calls do not block the CI job indefinitely.
+- New `dist/review.js` Vite build entry exposes the public library API (`runReview`, context helpers, etc.) separately from the CLI bundle; the `"."` package export now points to `review.js` / `review.d.ts` instead of the CLI entry.
+- `typecheck:tests` script (`tsgo -p tsconfig.test.json --noEmit`) and matching `tsconfig.test.json` extend type-checking to the `tests/` directory, catching incomplete `Config` objects and other test-fixture type errors.
 
 ### Changed
 
 - Switch license from MIT to FSL-1.1-ALv2 (Functional Source License). Internal use, education, research, and professional services remain freely permitted; the restriction covers commercial products or services that compete with gitlab-review. The license converts to Apache 2.0 two years after each release.
+- The summary comment now always opens with a `## Code Review` level-2 heading, making the bot's note easy to identify in busy MR discussions ([#28]).
+- `--skill` flag is now handled natively by `parseArgs` as a multi-value flag (`MULTI_FLAGS`), replacing the separate `parseSkills` pass over `argv`; both `--skill foo --skill bar` and `--skill=foo` forms are supported and accumulate correctly.
+- `UpsertSummaryOptions` no longer re-declares `skillsFooter`; it now inherits the field cleanly from `SummaryBodyOptions`.
 
 ### Fixed
 
 - Inject today's date into the reviewer system prompt and add a rule banning claims about external state (dates, library versions, deprecation status, API availability) that cannot be verified from the diff, preventing a class of hallucinations where the reviewer flags correct information as wrong based on stale world knowledge ([#29]).
-
-### Changed
-
-- The summary comment now always opens with a `## Code Review` level-2 heading, making the bot's note easy to identify in busy MR discussions ([#28]).
+- `GitLabClient.request()` no longer unconditionally sets `Content-Type: application/json`; the header is now only added when `init.body` is present, avoiding a spurious content-type on GET and DELETE requests.
+- `GitLabClient.paginate()` now wraps each page fetch in an `AbortController` timeout (same `requestTimeout` used by `request()`), so long-running paginated calls are bounded by the same timeout as single requests.
+- Eval helper function renamed from `hasApiKey` to `missingApiKey` to match its actual semantics (returns `true` when the key is absent).
 
 ## [0.2.0] - 2026-05-19
 
@@ -155,7 +162,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.2.0...HEAD
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.3.0...HEAD
+[0.3.0]: https://github.com/ikko-dev/gitlab-review/compare/0.2.0...0.3.0
 [0.2.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.2.0
 [0.1.11]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.11
 [0.1.10]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.10

@@ -40,7 +40,7 @@ function makeConfig(overrides: Partial<Config>): Config {
     mr: '1',
     gitlabUrl: 'https://gitlab.example.com',
     gitlabToken: 'test',
-    gitlabAuthHeader: undefined,
+    gitlabAuthHeader: 'PRIVATE-TOKEN',
     model: process.env.GITLAB_REVIEW_EVAL_MODEL ?? 'anthropic/claude-sonnet-4-5',
     minSeverity: 'info',
     thinkingLevel: 'off',
@@ -169,7 +169,7 @@ const NoSevereFindingsJudge = createJudge(
   },
 );
 
-const hasApiKey = () => {
+const missingApiKey = () => {
   return !(process.env.ANTHROPIC_API_KEY ?? process.env.GITLAB_REVIEW_API_KEY);
 };
 
@@ -179,7 +179,7 @@ describeEval(
     harness: reviewHarness,
     judges: [AsyncBugDetectedJudge, HasSevereFindingJudge],
     judgeThreshold: 1,
-    skipIf: hasApiKey,
+    skipIf: missingApiKey,
   },
   (it) => {
     it('detects async/forEach bugs with code-review skill enabled', async ({ run }) => {
@@ -269,7 +269,7 @@ describeEval(
     harness: reviewHarness,
     judges: [StaleClosureJudge, HasSevereFindingJudge],
     judgeThreshold: 1,
-    skipIf: hasApiKey,
+    skipIf: missingApiKey,
   },
   (it) => {
     it('detects missing useEffect deps / stale closure with skill', async ({ run }) => {
@@ -297,7 +297,7 @@ describeEval(
     harness: reviewHarness,
     judges: [RaceConditionJudge, HasSevereFindingJudge],
     judgeThreshold: 1,
-    skipIf: hasApiKey,
+    skipIf: missingApiKey,
   },
   (it) => {
     it('detects non-atomic promo code claim with skill', async ({ run }) => {
@@ -323,7 +323,7 @@ describeEval(
     judges: [NoSevereFindingsJudge],
     // Use null so false positives are recorded without hard-failing CI (LLM non-determinism)
     judgeThreshold: null,
-    skipIf: hasApiKey,
+    skipIf: missingApiKey,
   },
   (it) => {
     it('produces no severe findings on clean code with skill enabled', async ({ run }) => {

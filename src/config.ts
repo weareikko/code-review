@@ -25,7 +25,7 @@ export interface Config {
   skills: string[];
 }
 
-export type ParsedArgs = Record<string, string | boolean>;
+export type ParsedArgs = Record<string, string | boolean | string[]>;
 
 const BOOLEAN_FLAGS = new Set([
   'dry-run',
@@ -35,6 +35,8 @@ const BOOLEAN_FLAGS = new Set([
   'help',
   'version',
 ]);
+
+const MULTI_FLAGS = new Set(['skill']);
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const args: ParsedArgs = {};
@@ -55,10 +57,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (!rawKey) continue;
     const key = rawKey.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
 
+    let value: string | boolean;
     if (inlineValue !== undefined) {
-      args[key] = inlineValue;
+      value = inlineValue;
     } else if (BOOLEAN_FLAGS.has(rawKey)) {
-      args[key] = true;
+      value = true;
     } else {
       const next = argv[i + 1];
       if (!next || next.startsWith('--')) {
@@ -66,8 +69,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
           hint: `Pass a value after --${rawKey} or use --${rawKey}=<value>.`,
         });
       }
-      args[key] = next;
+      value = next;
       i += 1;
+    }
+
+    if (MULTI_FLAGS.has(rawKey)) {
+      const existing = args[key];
+      args[key] = Array.isArray(existing) ? [...existing, value as string] : [value as string];
+    } else {
+      args[key] = value;
     }
   }
 
@@ -111,22 +121,10 @@ function resolvePostingMode(value: unknown): PostingMode | string {
     .toLowerCase();
 }
 
-function parseSkills(argv: string[], env: NodeJS.ProcessEnv): string[] {
-  const skills: string[] = [];
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg.startsWith('--skill=')) {
-      const val = arg.slice('--skill='.length).trim();
-      if (val) skills.push(val);
-    } else if (arg === '--skill') {
-      const next = argv[i + 1];
-      if (next && !next.startsWith('--')) {
-        skills.push(next.trim());
-        i += 1;
-      }
-    }
-  }
-  if (skills.length > 0) return skills;
+function resolveSkills(args: ParsedArgs, env: NodeJS.ProcessEnv): string[] {
+  const argSkill = args.skill;
+  if (Array.isArray(argSkill) && argSkill.length > 0) return argSkill;
+  if (typeof argSkill === 'string' && argSkill.length > 0) return [argSkill];
   const envVal = env.GITLAB_REVIEW_SKILLS;
   if (envVal)
     return envVal
@@ -189,7 +187,7 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     postSummary: resolvePostSummary(args, env),
     forceReview: toBoolean(args.forceReview) || toBoolean(env.GITLAB_REVIEW_FORCE_REVIEW),
     cwd: String(args.cwd ?? process.cwd()),
-    skills: parseSkills(argv, env),
+    skills: resolveSkills(args, env),
   };
 }
 

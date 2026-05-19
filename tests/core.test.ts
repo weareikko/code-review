@@ -949,7 +949,10 @@ describe('runReview pipeline', () => {
     output: 'review-comments.json',
     dryRun: false,
     noPost: false,
+    postSummary: false,
+    forceReview: false,
     cwd: '/tmp',
+    skills: [],
   };
 
   const sampleDiff = [
@@ -1471,7 +1474,10 @@ describe('validateConfig', () => {
     output: 'review-comments.json',
     dryRun: false,
     noPost: false,
+    postSummary: false,
+    forceReview: false,
     cwd: '/tmp',
+    skills: [],
   };
 
   it('throws listing all missing required fields', () => {
@@ -1648,7 +1654,10 @@ describe('diagnostics_channel instrumentation', () => {
     output: 'review-comments.json',
     dryRun: true,
     noPost: false,
+    postSummary: false,
+    forceReview: false,
     cwd: '/tmp',
+    skills: [],
   };
 
   it('publishes tracing channel lifecycle events with safe context', async () => {
@@ -1827,7 +1836,10 @@ describe('OpenTelemetry bridge', () => {
       output: 'review-comments.json',
       dryRun: false,
       noPost: false,
+      postSummary: false,
+      forceReview: false,
       cwd: '/tmp',
+      skills: [],
     };
 
     const runContext = createDiagnosticContext('run', config, runId);
@@ -1962,7 +1974,10 @@ describe('OpenTelemetry bridge', () => {
       output: 'review-comments.json',
       dryRun: false,
       noPost: false,
+      postSummary: false,
+      forceReview: false,
       cwd: '/tmp',
+      skills: [],
     };
     const ctx = createDiagnosticContext('reviewer.run', config, 'run-error');
     await expect(

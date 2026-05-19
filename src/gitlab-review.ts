@@ -51,7 +51,10 @@ export interface RunReviewOptions {
   cwd?: string;
   diff: string;
   createAgent?: CreateAgent;
+  timeoutMs?: number;
 }
+
+const DEFAULT_REVIEW_TIMEOUT_MS = 10 * 60 * 1000;
 
 interface ContextFile {
   path: string;
@@ -423,7 +426,9 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   const aggregated = emptyUsage();
   const collectedAssistantMessages: AssistantMessage[] = [];
 
+  const timeoutMs = options.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS;
   let unsubscribe: (() => void) | undefined;
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
   let finalText = '';
   try {
     const ended = new Promise<void>((resolvePromise, rejectPromise) => {
@@ -453,9 +458,22 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
       });
     });
 
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(
+        () =>
+          reject(
+            new ReviewerError(`Review timed out after ${Math.round(timeoutMs / 1000)}s`, {
+              hint: 'Increase timeoutMs or reduce the diff size.',
+            }),
+          ),
+        timeoutMs,
+      );
+    });
+
     await agent.prompt(userPrompt);
-    await ended;
+    await Promise.race([ended, timeout]);
   } finally {
+    clearTimeout(timeoutId);
     unsubscribe?.();
   }
 

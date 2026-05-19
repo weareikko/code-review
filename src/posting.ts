@@ -51,7 +51,6 @@ export interface SummaryBodyOptions {
 export interface UpsertSummaryOptions extends SummaryBodyOptions {
   archivedAt?: Date;
   costFooter?: string;
-  skillsFooter?: string;
 }
 
 export function buildSummaryBody(

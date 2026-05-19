@@ -21,6 +21,7 @@ export default defineConfig({
     lib: {
       entry: {
         cli: './src/cli.ts',
+        review: './src/review.ts',
       },
       formats: ['es'],
       fileName: (_format, entryName) => `${entryName}.js`,

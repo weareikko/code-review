@@ -1,6 +1,6 @@
 {
   "name": "@ikko-dev/gitlab-review",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Run gitlab-review in GitLab CI and post deduplicated MR discussions.",
   "keywords": [
     "ci",
@@ -32,7 +32,7 @@
   "exports": {
     ".": {
       "types": "./dist/review.d.ts",
-      "default": "./dist/cli.js"
+      "default": "./dist/review.js"
     },
     "./cli": {
       "types": "./dist/cli.d.ts",
@@ -48,12 +48,13 @@
     "test:ci": "vitest run --coverage",
     "test:evals": "vitest run --config vite.eval.config.ts",
     "typecheck": "tsgo --noEmit",
+    "typecheck:tests": "tsgo -p tsconfig.test.json --noEmit",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "lint:types": "oxlint --type-aware",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
-    "check": "npm run lint && npm run format:check && npm run typecheck && npm test",
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm run typecheck:tests && npm test",
     "prepublishOnly": "npm run check && npm run build && npm pack --dry-run"
   },
   "dependencies": {
