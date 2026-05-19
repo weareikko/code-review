@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Switch license from MIT to FSL-1.1-ALv2 (Functional Source License). Internal use, education, research, and professional services remain freely permitted; the restriction covers commercial products or services that compete with gitlab-review. The license converts to Apache 2.0 two years after each release.
+
 ### Fixed
 
 - Inject today's date into the reviewer system prompt and add a rule banning claims about external state (dates, library versions, deprecation status, API availability) that cannot be verified from the diff, preventing a class of hallucinations where the reviewer flags correct information as wrong based on stale world knowledge ([#29]).
