@@ -9,8 +9,7 @@ export const SUMMARY_HISTORY_END = '<!-- pi-reviewer:summary-history:end -->';
 export const SUMMARY_HISTORY_ENTRY_START = '<!-- pi-reviewer:summary-history-entry:start -->';
 export const SUMMARY_HISTORY_ENTRY_END = '<!-- pi-reviewer:summary-history-entry:end -->';
 export const SUMMARY_HISTORY_LIMIT = 10;
-export const REVIEWED_COMMIT_FOOTER_PATTERN =
-  /<sup>Reviewed by \[Pi Reviewer\]\(https:\/\/github\.com\/ikko-dev\/gitlab-review\) for commit ([a-f0-9]{40})\.<\/sup>/i;
+export const REVIEWED_COMMIT_FOOTER_PATTERN = /Reviewed commit: `?([a-f0-9]{40})`?/i;
 
 export type SummaryAction = 'created' | 'updated';
 
@@ -40,17 +39,19 @@ export function buildSummaryBody(
   options: SummaryBodyOptions = {},
 ): string {
   const body = `${SUMMARY_MARKER}\n\n${summary.trim()}`;
-  const withCostFooter = costFooter ? `${body}\n\n---\n\n${costFooter}` : body;
-  const withReviewedFooter = options.reviewedCommitSha
-    ? `${withCostFooter}\n\n${buildReviewedCommitFooter(options.reviewedCommitSha)}`
-    : withCostFooter;
+  const footerLines = [
+    costFooter?.trim(),
+    options.reviewedCommitSha ? buildReviewedCommitFooter(options.reviewedCommitSha) : undefined,
+  ].filter((line): line is string => Boolean(line));
+  const withFooter =
+    footerLines.length > 0 ? `${body}\n\n---\n\n${footerLines.join('\n\n')}` : body;
   const historyEntries = options.historyEntries?.filter((entry) => entry.trim().length > 0) ?? [];
-  if (historyEntries.length === 0) return withReviewedFooter;
-  return `${withReviewedFooter}\n\n${buildSummaryHistoryBlock(historyEntries)}`;
+  if (historyEntries.length === 0) return withFooter;
+  return `${withFooter}\n\n${buildSummaryHistoryBlock(historyEntries)}`;
 }
 
 export function buildReviewedCommitFooter(commitSha: string): string {
-  return `<sup>Reviewed by [Pi Reviewer](https://github.com/ikko-dev/gitlab-review) for commit ${commitSha}.</sup>`;
+  return `Reviewed commit: \`${commitSha}\``;
 }
 
 export function extractReviewedCommitSha(body: string): string | null {

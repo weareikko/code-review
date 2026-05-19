@@ -227,10 +227,14 @@ In addition to inline discussions, the reviewer returns an overall `summary` (Ma
 
 On subsequent runs the CLI finds the existing note by that marker and **updates it in place** via `PUT /merge_requests/:iid/notes/:id`, so the summary always reflects the latest review without piling up duplicates. The latest summary stays at the top of the note. When a note is updated, the previous latest summary is moved into a collapsed `<details>` section labeled `Previous review runs` instead of being erased; existing history is retained with a bounded limit of 10 previous runs.
 
-The summary is upserted **before** inline comments are posted so it appears at the top of the MR activity feed. It appends a cost footer (token counts and USD total) after a horizontal rule so reviewers can see the run cost at a glance, followed by a reviewed-commit footer:
+The summary is upserted **before** inline comments are posted so it appears at the top of the MR activity feed. It appends footer metadata after a horizontal rule so reviewers can see the run cost and reviewed commit at a glance:
 
 ```md
-<sup>Reviewed by [Pi Reviewer](https://github.com/ikko-dev/gitlab-review) for commit <sha>.</sup>
+---
+
+Review usage: 12,345 in / 678 out tokens — $0.0421 (anthropic/claude-sonnet-4-5)
+
+Reviewed commit: `<sha>`
 ```
 
 If a later CI job sees that the current MR head commit already appears in that footer, it skips the agent run to avoid producing a different review for the same diff. Use `--force-review` or `PI_REVIEWER_FORCE_REVIEW=true` to bypass the guard. The summary upsert runs in both `direct` and `draft` posting modes (it always uses the regular notes endpoints — the atomic bulk-publish flow is reserved for inline comments).
