@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- OpenTelemetry bridge boot crash with `resources.Resource is not a constructor`. The bootstrap now uses the `@opentelemetry/resources` v2 factory API (`resourceFromAttributes` merged onto `defaultResource()`) instead of the removed v1 `new Resource(...)` constructor, so opt-in runs (`GITLAB_REVIEW_OTEL=1`) start cleanly again ([#18]).
+
 ## [0.1.7] - 2026-05-19
 
 ### Added
@@ -102,6 +106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#14]: https://github.com/ikko-dev/gitlab-review/pull/14
 [#15]: https://github.com/ikko-dev/gitlab-review/pull/15
 [#17]: https://github.com/ikko-dev/gitlab-review/pull/17
+[#18]: https://github.com/ikko-dev/gitlab-review/pull/18
 [0.1.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.0
 [a6166f5]: https://github.com/ikko-dev/gitlab-review/commit/a6166f5
 [310dccf]: https://github.com/ikko-dev/gitlab-review/commit/310dccf

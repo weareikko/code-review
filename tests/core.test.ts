@@ -1566,6 +1566,51 @@ describe('OpenTelemetry bridge', () => {
     await bridge?.shutdown();
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
   });
+
+  it('propagates every gitlab_review.* result attribute when present on the context', async () => {
+    const { spans } = await runWithBridge(async (ctx) => {
+      ctx.generated = 7;
+      ctx.newComments = 5;
+      ctx.duplicateComments = 2;
+      ctx.posted = 4;
+      ctx.draftsCreated = 6;
+      ctx.draftsPublished = 6;
+    });
+    const reviewer = spans.find((s) => s.name === 'invoke_agent pi-reviewer');
+    const attrs = Object.fromEntries(reviewer!.attributes.map((a) => [a.key, a.value]));
+    // `durationMs` is stamped by `traceDiagnostic` from real elapsed time — we
+    // only assert the branch fired, not its value.
+    expect(typeof attrs['gitlab_review.duration_ms']).toBe('number');
+    expect(attrs).toMatchObject({
+      'gitlab_review.comments.generated': 7,
+      'gitlab_review.comments.new': 5,
+      'gitlab_review.comments.duplicate': 2,
+      'gitlab_review.comments.posted': 4,
+      'gitlab_review.drafts.created': 6,
+      'gitlab_review.drafts.published': 6,
+    });
+  });
+
+  // Regression test for the 0.1.7 crash: `loadDefaultRuntime` called
+  // `new resources.Resource(...)` which throws under `@opentelemetry/resources`
+  // v2. The rest of the suite injects a fake runtime and never touches the
+  // real OTel bootstrap, so the bug shipped despite green tests. This test
+  // exercises the production import + `NodeSDK` start/shutdown path against
+  // the bundled OTel packages with all exporters disabled so no network I/O
+  // is attempted.
+  it('boots NodeSDK against the real @opentelemetry runtime without throwing', async () => {
+    vi.stubEnv('OTEL_TRACES_EXPORTER', 'none');
+    vi.stubEnv('OTEL_METRICS_EXPORTER', 'none');
+    vi.stubEnv('OTEL_LOGS_EXPORTER', 'none');
+    try {
+      const { startOtelBridge } = await import('../src/otel.js');
+      const bridge = await startOtelBridge({ env: { GITLAB_REVIEW_OTEL: '1' } });
+      expect(bridge).not.toBeNull();
+      await expect(bridge!.shutdown()).resolves.toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });
 
 describe('dry-run and no-post flags', () => {

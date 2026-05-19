@@ -184,16 +184,25 @@ async function loadDefaultRuntime(): Promise<OtelRuntime> {
   const [api, sdkNode, resources, semconv] = modules as [
     OtelApi,
     { NodeSDK: new (config: unknown) => { start: () => void; shutdown: () => Promise<void> } },
-    { Resource: new (attrs: Record<string, unknown>) => unknown },
+    {
+      resourceFromAttributes: (attrs: Record<string, unknown>) => {
+        merge: (other: unknown) => unknown;
+      };
+      defaultResource: () => { merge: (other: unknown) => unknown };
+    },
     Record<string, string>,
   ];
 
+  // `@opentelemetry/resources` v2 removed the `Resource` constructor in favor
+  // of factory functions. Merge our service-identifying attributes onto the
+  // default resource so SDK-detected attributes (telemetry.sdk.*, env-supplied
+  // OTEL_RESOURCE_ATTRIBUTES) are preserved.
+  const serviceResource = resources.resourceFromAttributes({
+    [semconv.ATTR_SERVICE_NAME ?? 'service.name']: SERVICE_NAME,
+    [semconv.ATTR_SERVICE_VERSION ?? 'service.version']: process.env.npm_package_version ?? '0.0.0',
+  });
   const sdk = new sdkNode.NodeSDK({
-    resource: new resources.Resource({
-      [semconv.ATTR_SERVICE_NAME ?? 'service.name']: SERVICE_NAME,
-      [semconv.ATTR_SERVICE_VERSION ?? 'service.version']:
-        process.env.npm_package_version ?? '0.0.0',
-    }),
+    resource: resources.defaultResource().merge(serviceResource),
     // NodeSDK auto-detects OTLP HTTP/gRPC exporters from OTEL_* env vars.
   });
   sdk.start();
