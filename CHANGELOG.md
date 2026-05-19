@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Inject today's date into the reviewer system prompt and add a rule banning claims about external state (dates, library versions, deprecation status, API availability) that cannot be verified from the diff, preventing a class of hallucinations where the reviewer flags correct information as wrong based on stale world knowledge ([#29]).
+
 ### Changed
 
 - The summary comment now always opens with a `## Code Review` level-2 heading, making the bot's note easy to identify in busy MR discussions ([#28]).

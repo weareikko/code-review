@@ -220,8 +220,9 @@ function mergeContent(files: ContextFile[]): string {
 
 function buildSharedBase(minSeverity: GitLabReviewSeverity): string[] {
   const rule = SEVERITY_RULE[minSeverity];
+  const today = new Date().toISOString().slice(0, 10);
   return [
-    'You are a code reviewer. Review the following PR diff carefully.',
+    `You are a code reviewer. Review the following PR diff carefully. Today's date is ${today}.`,
     '',
     '<severity_tiers>',
     '- 🔴 CRITICAL: bugs causing runtime failures, security vulnerabilities, data loss risks',
@@ -232,6 +233,7 @@ function buildSharedBase(minSeverity: GitLabReviewSeverity): string[] {
     '<rules>',
     '- Only flag what is actually wrong in the diff — no hypotheticals',
     '- If nothing is wrong, say so clearly',
+    '- Do not make claims about external state (dates, library versions, deprecation status, API availability) that cannot be verified from the diff itself',
     ...(rule ? [rule] : []),
     '</rules>',
   ];
