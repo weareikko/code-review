@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Opt-in OpenTelemetry bridge over the existing `diagnostics_channel` events. Set `GITLAB_REVIEW_OTEL=1` and install `@opentelemetry/{api,sdk-node,resources,semantic-conventions}` to emit spans tagged with the OpenTelemetry GenAI semantic conventions (`gen_ai.*`) — including token counts and per-run USD cost on the `invoke_agent pi-reviewer` span. Exporter selection follows standard `OTEL_*` env vars, so the same run reports into Tempo, Datadog, Honeycomb, SigNoz, or Grafana Cloud AI Observability (Sigil).
+- Opt-in OpenTelemetry bridge over the existing `diagnostics_channel` events. Set `GITLAB_REVIEW_OTEL=1` to emit spans tagged with the OpenTelemetry GenAI semantic conventions (`gen_ai.*`) — including token counts and per-run USD cost on the `invoke_agent pi-reviewer` span. Exporter selection follows standard `OTEL_*` env vars, so the same run reports into Tempo, Datadog, Honeycomb, SigNoz, or Grafana Cloud AI Observability (Sigil). The OTel runtime is bundled, so `npx @ikko-dev/gitlab-review` works without extra installs; library callers with their own `TracerProvider` can inject a custom runtime via `startOtelBridge({ runtime })`.
 - `DiagnosticUsage` field on the `reviewer.run` and `run` diagnostic contexts so subscribers can read final token and cost totals from `asyncEnd` without parsing `review-usage.json`.
 
 ## [0.1.6] - 2026-05-19

@@ -12,11 +12,11 @@
  * `OTEL_EXPORTER_OTLP_HEADERS`, …). For Grafana Sigil, set the endpoint and
  * the `OTEL_EXPORTER_OTLP_HEADERS` to carry the Cloud Access Policy Token.
  *
- * By default the runtime is loaded via dynamic `import()` so the OTel packages
- * are effectively optional peer deps. Library callers who already have a
- * configured `TracerProvider` in their process can inject their own runtime
- * via `startOtelBridge({ runtime })` so spans join the host tracer instead of
- * a second `NodeSDK`.
+ * The OTel runtime is bundled but loaded via dynamic `import()` behind the
+ * env check, so disabling the bridge skips the SDK boot entirely. Library
+ * callers who already have a configured `TracerProvider` in their process can
+ * inject their own runtime via `startOtelBridge({ runtime })` so spans join
+ * the host tracer instead of a second `NodeSDK`.
  */
 
 import { diagnosticChannels, type DiagnosticContext, type DiagnosticPhase } from './diagnostics.js';
@@ -173,8 +173,11 @@ async function loadDefaultRuntime(): Promise<OtelRuntime> {
   try {
     modules = await Promise.all(OTEL_PACKAGES.map((name) => import(name)));
   } catch (cause) {
+    // The OTel runtime ships as a regular dependency; reaching this branch
+    // means the install is corrupt or a bundler stripped the modules.
     throw new Error(
-      `GITLAB_REVIEW_OTEL=1 was set but OTel packages are missing. Install: ${OTEL_PACKAGES.join(' ')}`,
+      `Failed to load the bundled OpenTelemetry runtime (${OTEL_PACKAGES.join(', ')}). ` +
+        `Reinstall @ikko-dev/gitlab-review or pass startOtelBridge({ runtime }) explicitly.`,
       { cause },
     );
   }
