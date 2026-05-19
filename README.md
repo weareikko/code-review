@@ -1,5 +1,10 @@
 # @ikko-dev/gitlab-review
 
+[![NPM Version](https://img.shields.io/npm/v/@ikko-dev/gitlab-review.svg?style=flat&colorB=3e63dd&colorA=414853)](https://www.npmjs.com/package/@ikko-dev/gitlab-review/)
+[![Downloads](https://img.shields.io/npm/dm/@ikko-dev/gitlab-review?style=flat&colorB=3e63dd&colorA=414853)](https://www.npmjs.com/package/@ikko-dev/gitlab-review/)
+[![Size](https://img.shields.io/bundlephobia/minzip/@ikko-dev/gitlab-review?style=flat&colorB=3e63dd&colorA=414853&label=size)](https://bundlephobia.com/package/@ikko-dev/gitlab-review)
+![Codecov](https://img.shields.io/codecov/c/github/ikko-dev/gitlab-review?style=flat&colorB=3e63dd&colorA=414853)
+
 Run an agent-driven code review in GitLab CI, parse inline comments, post deduplicated merge request discussions, and report per-run token usage and cost.
 
 ## Requirements
