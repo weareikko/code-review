@@ -173,8 +173,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/v0.3.1...HEAD
-[0.3.1]: https://github.com/ikko-dev/gitlab-review/compare/0.3.0...v0.3.1
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.3.1...HEAD
+[0.3.1]: https://github.com/ikko-dev/gitlab-review/compare/0.3.0...0.3.1
 [0.3.0]: https://github.com/ikko-dev/gitlab-review/compare/0.2.0...0.3.0
 [0.2.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.2.0
 [0.1.11]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.11
