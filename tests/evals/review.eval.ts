@@ -1,15 +1,12 @@
-import type { JudgeContext } from 'vitest-evals';
-
 import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect } from 'vitest';
+import type { JudgeContext } from 'vitest-evals';
 // oxlint-disable eslint-plugin-jest/no-standalone-expect -- describeEval uses its own `it` wrapper that oxlint doesn't recognise
 import { createHarness, createJudge, describeEval } from 'vitest-evals';
-
 import type { Config } from '../../src/config.js';
-
 import { runReview } from '../../src/gitlab-review.js';
 import { parseReviewMarkdownWithWarnings } from '../../src/parser.js';
 

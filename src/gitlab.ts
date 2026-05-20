@@ -1,5 +1,4 @@
 import type { GitLabAuthHeader } from './config.js';
-
 import { GitLabApiError } from './errors.js';
 
 export interface GitLabClientOptions {

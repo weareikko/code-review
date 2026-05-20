@@ -105,19 +105,19 @@ function resolvePostSummary(args: ParsedArgs, env: NodeJS.ProcessEnv): boolean {
   return true;
 }
 
-function resolveMinSeverity(value: unknown): Severity | string {
+function resolveMinSeverity(value: unknown): string {
   return String(value ?? '')
     .trim()
     .toLowerCase();
 }
 
-function resolveThinkingLevel(value: unknown): ThinkingLevel | string {
+function resolveThinkingLevel(value: unknown): string {
   return String(value ?? '')
     .trim()
     .toLowerCase();
 }
 
-function resolvePostingMode(value: unknown): PostingMode | string {
+function resolvePostingMode(value: unknown): string {
   return String(value ?? '')
     .trim()
     .toLowerCase();

@@ -1,22 +1,19 @@
-import type { AgentEvent, AgentTool } from '@earendil-works/pi-agent-core';
-import type { AssistantMessage, KnownProvider, Model } from '@earendil-works/pi-ai';
-
-import { Agent } from '@earendil-works/pi-agent-core';
-import { getModel } from '@earendil-works/pi-ai';
-import { createReadOnlyTools } from '@earendil-works/pi-coding-agent';
 import { execFile } from 'node:child_process';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
-
+import type { AgentEvent, AgentTool } from '@earendil-works/pi-agent-core';
+import { Agent } from '@earendil-works/pi-agent-core';
+import type { AssistantMessage, KnownProvider, Model } from '@earendil-works/pi-ai';
+import { getModel } from '@earendil-works/pi-ai';
+import { createReadOnlyTools } from '@earendil-works/pi-coding-agent';
 import type { Config } from './config.js';
-import type { Logger } from './logger.js';
-import type { Skill } from './skills.js';
-import type { GitLabReviewSeverity, ThinkingLevel } from './types.js';
-
 import { ReviewerError } from './errors.js';
+import type { Logger } from './logger.js';
 import { noopLogger } from './logger.js';
+import type { Skill } from './skills.js';
 import { loadAutoDiscoveredSkills, loadBuiltinSkill } from './skills.js';
+import type { GitLabReviewSeverity, ThinkingLevel } from './types.js';
 import { toGitLabReviewSeverity } from './types.js';
 
 export interface UsageBreakdown {

@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-
 import type { Discussion } from './gitlab.js';
 import type { Fingerprints, ReviewComment, Side } from './types.js';
 

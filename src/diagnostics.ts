@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { tracingChannel, type TracingChannel } from 'node:diagnostics_channel';
 import { performance } from 'node:perf_hooks';
-
 import type { Config } from './config.js';
 
 export type DiagnosticPhase =

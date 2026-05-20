@@ -2,12 +2,7 @@ import { readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-
 import type { Config } from './config.js';
-import type { ReviewUsage } from './gitlab-review.js';
-import type { SummaryResult } from './posting.js';
-import type { DiffRefs, GeneratedComment } from './types.js';
-
 import { resolveConfig, validateConfig } from './config.js';
 import {
   createDiagnosticRunId,
@@ -17,17 +12,20 @@ import {
 import { formatError, RuntimeError } from './errors.js';
 import { extractExistingFingerprints } from './fingerprints.js';
 import { getMergeDiff, prepareGitHistory } from './git.js';
+import type { ReviewUsage } from './gitlab-review.js';
 import { runReview } from './gitlab-review.js';
 import { GitLabClient } from './gitlab.js';
 import { createLogger } from './logger.js';
 import { startOtelBridge } from './otel.js';
 import { parseReviewMarkdownWithWarnings } from './parser.js';
 import { buildGeneratedComments } from './payloads.js';
+import type { SummaryResult } from './posting.js';
 import {
   findExistingReviewedCommitSha,
   postGeneratedComments,
   upsertSummaryNote,
 } from './posting.js';
+import type { DiffRefs, GeneratedComment } from './types.js';
 
 export type {
   DiagnosticContext,
