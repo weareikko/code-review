@@ -45,6 +45,7 @@
 import type { SigilContentCaptureMode } from './config.js';
 import { SIGIL_CAPTURE_MODES } from './config.js';
 import { diagnosticChannels, type DiagnosticContext } from './diagnostics.js';
+import type { TurnData } from './gitlab-review.js';
 
 // Inlined at build time by Vite's `define` (see vite.config.ts). Keeps
 // `agentVersion` accurate under `npx`/standalone bin invocations, where
@@ -77,6 +78,7 @@ interface SigilGenerationStart {
   agentVersion?: string;
   model: SigilModelRef;
   contentCapture?: string;
+  thinkingEnabled?: boolean;
   startedAt?: Date;
   metadata?: Record<string, unknown>;
   tags?: Record<string, string>;
@@ -85,11 +87,32 @@ interface SigilGenerationStart {
 interface SigilGenerationResult {
   usage?: SigilTokenUsage;
   completedAt?: Date;
+  stopReason?: string;
   metadata?: Record<string, unknown>;
 }
 
 interface SigilGenerationRecorder {
   setResult(result: SigilGenerationResult): void;
+  setCallError(error: unknown): void;
+  setFirstTokenAt(firstTokenAt: Date): void;
+  end(): void;
+}
+
+interface SigilToolExecutionStart {
+  toolName: string;
+  toolCallId?: string;
+  toolType?: string;
+  conversationId?: string;
+  agentName?: string;
+  agentVersion?: string;
+  requestModel?: string;
+  requestProvider?: string;
+  contentCapture?: string;
+  startedAt?: Date;
+}
+
+interface SigilToolExecutionRecorder {
+  setResult(result: { completedAt?: Date }): void;
   setCallError(error: unknown): void;
   end(): void;
 }
@@ -97,6 +120,11 @@ interface SigilGenerationRecorder {
 /** Minimal interface for the @grafana/sigil-sdk-js SigilClient. */
 export interface SigilClientLike {
   startGeneration(start: SigilGenerationStart): SigilGenerationRecorder;
+  startStreamingGeneration<T>(
+    start: SigilGenerationStart,
+    callback: (recorder: SigilGenerationRecorder) => Promise<T>,
+  ): Promise<T>;
+  startToolExecution(start: SigilToolExecutionStart): SigilToolExecutionRecorder;
   shutdown(): Promise<void>;
 }
 
@@ -106,6 +134,12 @@ export interface SigilClientLike {
 
 export interface SigilBridge {
   shutdown(): Promise<void>;
+  /**
+   * Creates a per-turn telemetry handler suitable for `RunReviewOptions.onTurnEnd`.
+   * The handler emits one `startStreamingGeneration` record per agent turn and one
+   * `startToolExecution` span for each tool call within that turn.
+   */
+  createTurnHandler(): (data: TurnData) => Promise<void>;
 }
 
 export interface SigilBridgeOptions {
@@ -219,6 +253,66 @@ export async function startSigilBridge(
       openByRun.clear();
       await client.shutdown();
     },
+
+    createTurnHandler(): (data: TurnData) => Promise<void> {
+      return async (data: TurnData) => {
+        const { provider, name } = parseModel(data.model ?? '');
+        await client.startStreamingGeneration(
+          {
+            conversationId: data.conversationId,
+            agentName: 'gitlab-review',
+            agentVersion: __PKG_VERSION__,
+            model: {
+              provider: data.provider || provider || 'unknown',
+              name: name || data.model || 'unknown',
+            },
+            contentCapture: captureMode,
+            startedAt: data.startedAt,
+            thinkingEnabled: data.thinkingEnabled || undefined,
+          },
+          async (recorder) => {
+            if (data.firstTokenAt) {
+              recorder.setFirstTokenAt(data.firstTokenAt);
+            }
+            // Emit one tool span per tool execution within this turn.
+            for (const tool of data.toolTimings) {
+              const toolRec = client.startToolExecution({
+                toolName: tool.toolName,
+                toolCallId: tool.toolCallId,
+                toolType: 'function',
+                conversationId: data.conversationId,
+                agentName: 'gitlab-review',
+                agentVersion: __PKG_VERSION__,
+                requestModel: data.model,
+                requestProvider: data.provider,
+                contentCapture: captureMode,
+                startedAt: tool.startedAt,
+              });
+              if (tool.isError) {
+                toolRec.setCallError(new Error(`tool ${tool.toolName} failed`));
+              } else {
+                toolRec.setResult({ completedAt: tool.completedAt });
+              }
+              toolRec.end();
+            }
+            const { inputTokens, outputTokens, cacheReadInputTokens, cacheWriteInputTokens } =
+              data.usage;
+            recorder.setResult({
+              completedAt: data.completedAt,
+              stopReason: mapTurnStopReason(data.stopReason),
+              usage: {
+                inputTokens,
+                outputTokens,
+                // totalTokens follows the OTel gen_ai convention: input + output only.
+                totalTokens: inputTokens + outputTokens,
+                ...(cacheReadInputTokens > 0 ? { cacheReadInputTokens } : {}),
+                ...(cacheWriteInputTokens > 0 ? { cacheWriteInputTokens } : {}),
+              },
+            });
+          },
+        );
+      };
+    },
   };
 }
 
@@ -265,6 +359,28 @@ function parseModel(model: string): { provider: string; name: string } {
   const idx = model.indexOf('/');
   if (idx === -1) return { provider: '', name: model };
   return { provider: model.slice(0, idx), name: model.slice(idx + 1) };
+}
+
+/**
+ * Normalise pi stop-reason strings to the Sigil/OTel gen_ai convention.
+ * Mirrors mappers.ts in @grafana/sigil-pi.
+ */
+function mapTurnStopReason(reason: string): string {
+  switch (reason) {
+    case 'stop':
+      return 'end_turn';
+    case 'length':
+      return 'max_tokens';
+    case 'toolUse':
+    case 'tool_use':
+      return 'tool_use';
+    case 'error':
+      return 'error';
+    case 'aborted':
+      return 'aborted';
+    default:
+      return reason;
+  }
 }
 
 const noop = (): void => undefined;

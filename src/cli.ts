@@ -25,6 +25,7 @@ import {
   postGeneratedComments,
   upsertSummaryNote,
 } from './posting.js';
+import type { SigilBridge } from './sigil.js';
 import { startSigilBridge } from './sigil.js';
 import type { DiffRefs, GeneratedComment } from './types.js';
 
@@ -127,7 +128,12 @@ function refsFromVersion(version: {
   };
 }
 
-export async function run(config: Config): Promise<RunResult> {
+export interface RunBridges {
+  /** Pre-started Sigil bridge for per-turn generation telemetry. */
+  sigil?: SigilBridge;
+}
+
+export async function run(config: Config, bridges?: RunBridges): Promise<RunResult> {
   validateConfig(config);
 
   const logger = createLogger(config.verbose ? 'debug' : 'info');
@@ -202,7 +208,13 @@ export async function run(config: Config): Promise<RunResult> {
     );
     logger.info('Running review...');
     const usage = await traceDiagnosticPhase('reviewer.run', config, runId, async (context) => {
-      const result = await runReview(config, { cwd: config.cwd, diff, logger });
+      const result = await runReview(config, {
+        cwd: config.cwd,
+        diff,
+        logger,
+        conversationId: runId,
+        onTurnEnd: bridges?.sigil?.createTurnHandler(),
+      });
       context.usage = result;
       return result;
     });
@@ -389,7 +401,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     captureMode: config.sigilCaptureMode,
   });
   try {
-    await run(config);
+    await run(config, { sigil: sigil ?? undefined });
   } finally {
     await otel?.shutdown();
     await sigil?.shutdown();

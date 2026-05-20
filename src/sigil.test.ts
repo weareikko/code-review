@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Config, SigilContentCaptureMode } from './config.js';
 import { ReviewerError } from './errors.js';
+import type { ToolTiming, TurnData } from './gitlab-review.js';
 import {
   createDiagnosticContext,
   diagnosticChannels,
@@ -9,6 +10,30 @@ import {
 } from './review.js';
 import type { SigilBridgeOptions, SigilClientLike } from './sigil.js';
 
+function makeTurnData(overrides: Partial<TurnData> = {}): TurnData {
+  const now = new Date('2025-01-01T00:00:00.000Z');
+  return {
+    conversationId: 'conv-1',
+    turnIndex: 1,
+    startedAt: now,
+    completedAt: new Date(now.getTime() + 3000),
+    firstTokenAt: new Date(now.getTime() + 500),
+    model: 'claude-sonnet-4-5',
+    provider: 'anthropic',
+    thinkingEnabled: false,
+    toolTimings: [],
+    usage: {
+      inputTokens: 1000,
+      outputTokens: 200,
+      cacheReadInputTokens: 50,
+      cacheWriteInputTokens: 10,
+      totalTokens: 1260, // all-in from provider
+    },
+    stopReason: 'end_turn',
+    ...overrides,
+  };
+}
+
 describe('Sigil bridge', () => {
   interface SigilGenerationStart {
     conversationId?: string;
@@ -16,6 +41,7 @@ describe('Sigil bridge', () => {
     agentVersion?: string;
     model: { provider: string; name: string };
     contentCapture?: string;
+    thinkingEnabled?: boolean;
     startedAt?: Date;
     metadata?: Record<string, unknown>;
   }
@@ -29,6 +55,7 @@ describe('Sigil bridge', () => {
       cacheWriteInputTokens?: number;
     };
     completedAt?: Date;
+    stopReason?: string;
     metadata?: Record<string, unknown>;
   }
 
@@ -37,15 +64,49 @@ describe('Sigil bridge', () => {
     result: SigilGenerationResult | undefined;
     callError: unknown;
     ended: boolean;
+    firstTokenAt: Date | undefined;
+    /** Whether this was opened via startStreamingGeneration (vs. startGeneration). */
+    streaming: boolean;
+  }
+
+  interface RecordedToolExecution {
+    toolName: string;
+    toolCallId?: string;
+    conversationId?: string;
+    requestModel?: string;
+    requestProvider?: string;
+    startedAt?: Date;
+    completedAt: Date | undefined;
+    callError: unknown;
+    ended: boolean;
   }
 
   function createFakeClient(): {
     client: SigilClientLike;
     generations: RecordedGeneration[];
+    toolExecutions: RecordedToolExecution[];
     shutdown: ReturnType<typeof vi.fn>;
   } {
     const generations: RecordedGeneration[] = [];
+    const toolExecutions: RecordedToolExecution[] = [];
     const shutdown = vi.fn(async () => undefined);
+
+    function makeGenerationRecorder(gen: RecordedGeneration) {
+      return {
+        setResult(result: SigilGenerationResult) {
+          gen.result = result;
+        },
+        setCallError(error: unknown) {
+          gen.callError = error;
+        },
+        setFirstTokenAt(date: Date) {
+          gen.firstTokenAt = date;
+        },
+        end() {
+          gen.ended = true;
+        },
+      };
+    }
 
     const client: SigilClientLike = {
       startGeneration(start: SigilGenerationStart) {
@@ -54,24 +115,68 @@ describe('Sigil bridge', () => {
           result: undefined,
           callError: undefined,
           ended: false,
+          firstTokenAt: undefined,
+          streaming: false,
         };
         generations.push(gen);
+        return makeGenerationRecorder(gen);
+      },
+      async startStreamingGeneration<T>(
+        start: SigilGenerationStart,
+        callback: (recorder: ReturnType<typeof makeGenerationRecorder>) => Promise<T>,
+      ): Promise<T> {
+        const gen: RecordedGeneration = {
+          start,
+          result: undefined,
+          callError: undefined,
+          ended: false,
+          firstTokenAt: undefined,
+          streaming: true,
+        };
+        generations.push(gen);
+        const recorder = makeGenerationRecorder(gen);
+        try {
+          return await callback(recorder);
+        } finally {
+          gen.ended = true;
+        }
+      },
+      startToolExecution(start: {
+        toolName: string;
+        toolCallId?: string;
+        conversationId?: string;
+        requestModel?: string;
+        requestProvider?: string;
+        startedAt?: Date;
+      }) {
+        const exec: RecordedToolExecution = {
+          toolName: start.toolName,
+          toolCallId: start.toolCallId,
+          conversationId: start.conversationId,
+          requestModel: start.requestModel,
+          requestProvider: start.requestProvider,
+          startedAt: start.startedAt,
+          completedAt: undefined,
+          callError: undefined,
+          ended: false,
+        };
+        toolExecutions.push(exec);
         return {
-          setResult(result: SigilGenerationResult) {
-            gen.result = result;
+          setResult(result: { completedAt?: Date }) {
+            exec.completedAt = result.completedAt;
           },
           setCallError(error: unknown) {
-            gen.callError = error;
+            exec.callError = error;
           },
           end() {
-            gen.ended = true;
+            exec.ended = true;
           },
         };
       },
       shutdown,
     };
 
-    return { client, generations, shutdown };
+    return { client, generations, toolExecutions, shutdown };
   }
 
   const baseConfig: Config = {
@@ -295,5 +400,150 @@ describe('Sigil bridge', () => {
 
     expect(fake.generations[0].start.model.provider).toBe('unknown');
     expect(fake.generations[0].start.model.name).toBe('claude-sonnet-4-5');
+  });
+
+  // ---------------------------------------------------------------------------
+  // createTurnHandler — per-turn streaming generation and tool spans
+  // ---------------------------------------------------------------------------
+
+  async function startBridgeWithFake(opts: SigilBridgeOptions = {}) {
+    const { startSigilBridge } = await import('./sigil.js');
+    const fake = createFakeClient();
+    const bridge = await startSigilBridge({
+      client: fake.client,
+      env: { GITLAB_REVIEW_SIGIL: '1' },
+      ...opts,
+    });
+    return { fake, bridge };
+  }
+
+  it('createTurnHandler emits a streaming generation per turn', async () => {
+    const { fake, bridge } = await startBridgeWithFake();
+    const handler = bridge!.createTurnHandler();
+    await handler(makeTurnData());
+    await bridge!.shutdown();
+
+    // Should have 0 run-level generations (none triggered) plus 1 streaming turn.
+    const streaming = fake.generations.filter((g) => g.streaming);
+    expect(streaming).toHaveLength(1);
+    const gen = streaming[0];
+    expect(gen.start.model).toEqual({ provider: 'anthropic', name: 'claude-sonnet-4-5' });
+    expect(gen.start.conversationId).toBe('conv-1');
+    expect(gen.start.agentName).toBe('gitlab-review');
+    expect(gen.start.contentCapture).toBe('metadata_only');
+    expect(gen.ended).toBe(true);
+  });
+
+  it('createTurnHandler sets TTFT on the generation recorder', async () => {
+    const { fake, bridge } = await startBridgeWithFake();
+    const firstTokenAt = new Date('2025-01-01T00:00:00.500Z');
+    await bridge!.createTurnHandler()(makeTurnData({ firstTokenAt }));
+    await bridge!.shutdown();
+
+    const gen = fake.generations.find((g) => g.streaming)!;
+    expect(gen.firstTokenAt).toEqual(firstTokenAt);
+  });
+
+  it('createTurnHandler omits setFirstTokenAt when firstTokenAt is absent', async () => {
+    const { fake, bridge } = await startBridgeWithFake();
+    await bridge!.createTurnHandler()(makeTurnData({ firstTokenAt: undefined }));
+    await bridge!.shutdown();
+
+    const gen = fake.generations.find((g) => g.streaming)!;
+    expect(gen.firstTokenAt).toBeUndefined();
+  });
+
+  it('createTurnHandler sets result with OTel-convention totalTokens', async () => {
+    const { fake, bridge } = await startBridgeWithFake();
+    await bridge!.createTurnHandler()(
+      makeTurnData({
+        usage: {
+          inputTokens: 1000,
+          outputTokens: 200,
+          cacheReadInputTokens: 50,
+          cacheWriteInputTokens: 10,
+          totalTokens: 1260, // all-in; bridge should NOT use this
+        },
+      }),
+    );
+    await bridge!.shutdown();
+
+    const gen = fake.generations.find((g) => g.streaming)!;
+    expect(gen.result?.usage).toMatchObject({
+      inputTokens: 1000,
+      outputTokens: 200,
+      // totalTokens = input + output (OTel convention), NOT the all-in 1260.
+      totalTokens: 1200,
+      cacheReadInputTokens: 50,
+      cacheWriteInputTokens: 10,
+    });
+  });
+
+  it('createTurnHandler maps stop reason to OTel convention', async () => {
+    const { fake, bridge } = await startBridgeWithFake();
+    await bridge!.createTurnHandler()(makeTurnData({ stopReason: 'stop' }));
+    await bridge!.shutdown();
+
+    const gen = fake.generations.find((g) => g.streaming)!;
+    expect(gen.result?.stopReason).toBe('end_turn');
+  });
+
+  it('createTurnHandler emits one tool span per tool timing', async () => {
+    const toolTimings: ToolTiming[] = [
+      {
+        toolCallId: 'tc-1',
+        toolName: 'read_file',
+        startedAt: new Date('2025-01-01T00:00:01Z'),
+        completedAt: new Date('2025-01-01T00:00:02Z'),
+        isError: false,
+      },
+      {
+        toolCallId: 'tc-2',
+        toolName: 'write_file',
+        startedAt: new Date('2025-01-01T00:00:02Z'),
+        completedAt: new Date('2025-01-01T00:00:03Z'),
+        isError: false,
+      },
+    ];
+    const { fake, bridge } = await startBridgeWithFake();
+    await bridge!.createTurnHandler()(makeTurnData({ toolTimings }));
+    await bridge!.shutdown();
+
+    expect(fake.toolExecutions).toHaveLength(2);
+    expect(fake.toolExecutions[0].toolName).toBe('read_file');
+    expect(fake.toolExecutions[0].toolCallId).toBe('tc-1');
+    expect(fake.toolExecutions[0].conversationId).toBe('conv-1');
+    expect(fake.toolExecutions[0].requestModel).toBe('claude-sonnet-4-5');
+    expect(fake.toolExecutions[0].requestProvider).toBe('anthropic');
+    expect(fake.toolExecutions[0].ended).toBe(true);
+    expect(fake.toolExecutions[0].callError).toBeUndefined();
+    expect(fake.toolExecutions[1].toolName).toBe('write_file');
+  });
+
+  it('createTurnHandler sets callError for errored tools', async () => {
+    const toolTimings: ToolTiming[] = [
+      {
+        toolCallId: 'tc-err',
+        toolName: 'bash',
+        startedAt: new Date(),
+        completedAt: new Date(),
+        isError: true,
+      },
+    ];
+    const { fake, bridge } = await startBridgeWithFake();
+    await bridge!.createTurnHandler()(makeTurnData({ toolTimings }));
+    await bridge!.shutdown();
+
+    expect(fake.toolExecutions[0].callError).toBeInstanceOf(Error);
+    expect(fake.toolExecutions[0].completedAt).toBeUndefined();
+  });
+
+  it('createTurnHandler sets thinkingEnabled on streaming generation seed', async () => {
+    const { fake, bridge } = await startBridgeWithFake();
+    await bridge!.createTurnHandler()(makeTurnData({ thinkingEnabled: true }));
+    await bridge!.shutdown();
+
+    const gen = fake.generations.find((g) => g.streaming)!;
+    expect(gen.start.thinkingEnabled).toBe(true);
   });
 });

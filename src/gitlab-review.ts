@@ -46,12 +46,62 @@ export interface CreateAgentParams {
 
 export type CreateAgent = (params: CreateAgentParams) => AgentLike;
 
+export interface ToolTiming {
+  toolCallId: string;
+  toolName: string;
+  startedAt: Date;
+  completedAt: Date;
+  isError: boolean;
+}
+
+export interface TurnData {
+  /** The conversation (run) ID — matches the diagnostics runId for this review. */
+  conversationId: string | undefined;
+  /** 1-based index of this turn within the review run. */
+  turnIndex: number;
+  /** Wall-clock time the turn started (when turn_start fired). */
+  startedAt: Date;
+  /** Wall-clock time the turn completed (when turn_end fired). */
+  completedAt: Date;
+  /** Wall-clock time the first streaming token was received. Absent when no streaming update was observed. */
+  firstTokenAt?: Date;
+  /** Provider-reported model name (e.g. "claude-sonnet-4-5"). */
+  model: string;
+  /** Provider ID (e.g. "anthropic"). */
+  provider: string;
+  /** True when the assistant used at least one extended thinking block. */
+  thinkingEnabled: boolean;
+  /** Tool executions that ran during this turn, in completion order. */
+  toolTimings: ToolTiming[];
+  /** Raw token counts from the provider for this turn. */
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadInputTokens: number;
+    cacheWriteInputTokens: number;
+    /** All-in total from the provider (input + output + cacheRead + cacheWrite). */
+    totalTokens: number;
+  };
+  /** Stop reason reported by the provider (e.g. "end_turn", "tool_use", "error"). */
+  stopReason: string;
+}
+
 export interface RunReviewOptions {
   cwd?: string;
   diff: string;
   createAgent?: CreateAgent;
   timeoutMs?: number;
   logger?: Logger;
+  /**
+   * Conversation ID to include in per-turn telemetry events.
+   * Typically the diagnostics runId so all turns group under one conversation.
+   */
+  conversationId?: string;
+  /**
+   * Called after each agent turn fully completes (including tool executions).
+   * Receives structured data about the turn for telemetry forwarding.
+   */
+  onTurnEnd?: (data: TurnData) => Promise<void> | void;
 }
 
 const DEFAULT_REVIEW_TIMEOUT_MS = 10 * 60 * 1000;
@@ -440,26 +490,81 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   let turnCount = 0;
   let toolCallCount = 0;
 
+  // Per-turn telemetry state — reset on each turn_start.
+  let turnStartTime = 0;
+  let firstTokenTime: number | undefined;
+  const toolStarts = new Map<string, number>();
+  let turnToolTimings: ToolTiming[] = [];
+
   const timeoutMs = options.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS;
   let unsubscribe: (() => void) | undefined;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   let finalText = '';
   try {
     const ended = new Promise<void>((resolvePromise, rejectPromise) => {
-      unsubscribe = agent.subscribe((event) => {
+      unsubscribe = agent.subscribe(async (event) => {
         if (event.type === 'turn_start') {
           turnCount += 1;
+          turnStartTime = Date.now();
+          firstTokenTime = undefined;
+          toolStarts.clear();
+          turnToolTimings = [];
           logger.debug(`Turn ${turnCount} started`);
+        }
+        if (event.type === 'message_update' && event.message.role === 'assistant') {
+          // First streaming update marks time-to-first-token.
+          if (firstTokenTime === undefined) firstTokenTime = Date.now();
         }
         if (event.type === 'tool_execution_start') {
           toolCallCount += 1;
+          toolStarts.set(event.toolCallId, Date.now());
           const argsPreview = formatToolArgs(event.toolName, event.args);
           logger.debug(`  → ${event.toolName}${argsPreview}`);
+        }
+        if (event.type === 'tool_execution_end') {
+          const startMs = toolStarts.get(event.toolCallId) ?? turnStartTime;
+          toolStarts.delete(event.toolCallId);
+          turnToolTimings.push({
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            startedAt: new Date(startMs),
+            completedAt: new Date(),
+            isError: event.isError,
+          });
         }
         if (event.type === 'message_end' && event.message.role === 'assistant') {
           const assistant = event.message as AssistantMessage;
           collectedAssistantMessages.push(assistant);
           accumulateUsage(aggregated, assistant);
+        }
+        if (event.type === 'turn_end' && event.message.role === 'assistant') {
+          const assistant = event.message as AssistantMessage;
+          if (options.onTurnEnd) {
+            const thinkingEnabled = assistant.content.some((b) => b.type === 'thinking');
+            try {
+              await options.onTurnEnd({
+                conversationId: options.conversationId,
+                turnIndex: turnCount,
+                startedAt: new Date(turnStartTime),
+                completedAt: new Date(),
+                firstTokenAt: firstTokenTime !== undefined ? new Date(firstTokenTime) : undefined,
+                model: assistant.model,
+                provider: assistant.provider,
+                thinkingEnabled,
+                toolTimings: turnToolTimings.slice(),
+                usage: {
+                  inputTokens: assistant.usage.input,
+                  outputTokens: assistant.usage.output,
+                  cacheReadInputTokens: assistant.usage.cacheRead,
+                  cacheWriteInputTokens: assistant.usage.cacheWrite,
+                  totalTokens: assistant.usage.totalTokens,
+                },
+                stopReason: assistant.stopReason ?? 'unknown',
+              });
+            } catch {
+              // Telemetry errors must not abort the review.
+            }
+          }
         }
         if (event.type !== 'agent_end') return;
         const messages = event.messages.filter(
