@@ -21,6 +21,16 @@
  * the standard `OTEL_*` env vars (`OTEL_EXPORTER_OTLP_ENDPOINT`,
  * `OTEL_EXPORTER_OTLP_HEADERS`, …).
  *
+ * **Grafana Cloud token scopes**: for all three signals to reach their
+ * respective backends, the service account token used in
+ * `OTEL_EXPORTER_OTLP_HEADERS` must have:
+ *   - `Traces Publisher` — writes to Tempo (traces)
+ *   - `Metrics Publisher` — writes to Mimir (gen_ai.* histograms)
+ *   - `Logs Publisher` — writes to Loki (structured log records)
+ * A token missing any of these scopes will receive `401 Unauthorized:
+ * invalid scope requested` silently from the OTLP gateway. Enable OTel
+ * diagnostics with `OTEL_LOG_LEVEL=error` to surface export failures.
+ *
  * The OTel SDK runtime is bundled but loaded via dynamic `import()` behind the
  * env check, so disabling the bridge skips the SDK boot entirely. Library
  * callers who already have configured providers in their process can inject
@@ -455,10 +465,12 @@ async function loadDefaultRuntime(): Promise<OtelRuntime> {
     [semconv.ATTR_SERVICE_NAME ?? 'service.name']: SERVICE_NAME,
     [semconv.ATTR_SERVICE_VERSION ?? 'service.version']: __PKG_VERSION__,
   });
-  // NodeSDK defaults OTEL_METRICS_EXPORTER and OTEL_LOGS_EXPORTER to 'none';
-  // set both to 'otlp' so gen_ai.client.* histograms and structured log records
-  // land in Mimir/Loki via the same OTLP gateway as traces. Only override when
-  // the caller has not already set them.
+  // NodeSDK defaults both OTEL_METRICS_EXPORTER and OTEL_LOGS_EXPORTER to
+  // 'otlp' when the env vars are empty. However if the caller explicitly sets
+  // them to 'none' (common in CI setups that ship traces but not metrics/logs),
+  // we preserve that intent. Setting them here ensures the otlp default takes
+  // effect even when the shell exports them as an empty string, which would
+  // otherwise be parsed as an unknown exporter and silently ignored.
   process.env.OTEL_METRICS_EXPORTER = process.env.OTEL_METRICS_EXPORTER ?? 'otlp';
   process.env.OTEL_LOGS_EXPORTER = process.env.OTEL_LOGS_EXPORTER ?? 'otlp';
 

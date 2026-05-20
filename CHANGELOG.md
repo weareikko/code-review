@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `gitlab_review.comment` — one record per generated comment (via `OtelBridge.logComments()`), carrying file, line, severity, `is_duplicate`, and the comment body (truncated to 500 chars). Enables Loki searches across comment text and audit trails by project/model.
 - **`@opentelemetry/api-logs`** added as a direct dependency for the `logs` global and `SeverityNumber` enum.
 
+### Notes
+
+- **Grafana Cloud token scopes**: for structured logs to reach Loki via the OTLP gateway, the service account token in `OTEL_EXPORTER_OTLP_HEADERS` must include the `Logs Publisher` scope in addition to `Traces Publisher` and `Metrics Publisher`. A token missing `Logs Publisher` receives a silent `401 Unauthorized: invalid scope requested`. Use `OTEL_LOG_LEVEL=error` to surface such export failures.
+
 ### Removed
 
 - **Grafana AI Observability (Sigil) bridge**: removed `src/sigil.ts`, `@grafana/sigil-pi` dependency, `--sigil` / `--sigil-capture-mode` CLI flags, and all related config fields. The equivalent observability (per-turn spans, tool calls, TTFT, cost metrics) is now handled directly by the OTel bridge.
