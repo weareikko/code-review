@@ -13,12 +13,7 @@ export function createLogger(minLevel: LogLevel = 'info'): Logger {
   const min = LEVELS[minLevel];
   function log(level: LogLevel, message: string): void {
     if (LEVELS[level] < min) return;
-    const line = `[gitlab-review] ${message}`;
-    if (level === 'error' || level === 'warn') {
-      process.stderr.write(`${line}\n`);
-    } else {
-      process.stderr.write(`${line}\n`);
-    }
+    process.stderr.write(`[gitlab-review] ${message}\n`);
   }
   return {
     debug: (message) => log('debug', message),

@@ -19,11 +19,11 @@ import {
   type Severity,
   type ThinkingLevel,
 } from '../src/config.js';
-import { createLogger, noopLogger, type Logger } from '../src/logger.js';
 import { ConfigError, GitLabApiError, ReviewerError, formatError } from '../src/errors.js';
 import { getMergeDiffArguments } from '../src/git.js';
 import { filterDiff, runReview, type AgentLike, type ReviewUsage } from '../src/gitlab-review.js';
 import { GitLabClient } from '../src/gitlab.js';
+import { createLogger, noopLogger, type Logger } from '../src/logger.js';
 import {
   buildSummaryBody,
   buildSummaryHistoryEntries,
@@ -1165,29 +1165,57 @@ describe('runReview pipeline', () => {
     const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
     const messages = [makeAssistant('Done.', { input: 1, output: 1 })];
     const debugLines: string[] = [];
-    const logger: Logger = { ...noopLogger, debug: (msg) => { debugLines.push(msg); } };
+    const logger: Logger = {
+      ...noopLogger,
+      debug: (msg) => {
+        debugLines.push(msg);
+      },
+    };
 
     let listener: ((event: AgentEvent) => void | Promise<void>) | undefined;
     const agent: AgentLike = {
-      subscribe(fn) { listener = fn; return () => {}; },
+      subscribe(fn) {
+        listener = fn;
+        return () => {};
+      },
       async prompt() {
         if (!listener) return;
         await listener({ type: 'turn_start' });
-        await listener({ type: 'tool_execution_start', toolCallId: 'id1', toolName: 'Read', args: { file_path: 'src/auth.ts' } });
-        await listener({ type: 'tool_execution_start', toolCallId: 'id2', toolName: 'Bash', args: { command: 'grep -n foo src/auth.ts' } });
-        await listener({ type: 'tool_execution_start', toolCallId: 'id3', toolName: 'Glob', args: { pattern: '**/*.ts', cwd: '/tmp' } });
+        await listener({
+          type: 'tool_execution_start',
+          toolCallId: 'id1',
+          toolName: 'Read',
+          args: { file_path: 'src/auth.ts' },
+        });
+        await listener({
+          type: 'tool_execution_start',
+          toolCallId: 'id2',
+          toolName: 'Bash',
+          args: { command: 'grep -n foo src/auth.ts' },
+        });
+        await listener({
+          type: 'tool_execution_start',
+          toolCallId: 'id3',
+          toolName: 'Glob',
+          args: { pattern: '**/*.ts', cwd: '/tmp' },
+        });
         await listener({ type: 'message_end', message: messages[0] });
         await listener({ type: 'agent_end', messages });
       },
     };
 
-    await runReview({ ...minimalConfig, cwd }, { cwd, diff: sampleDiff, createAgent: () => agent, logger });
+    await runReview(
+      { ...minimalConfig, cwd },
+      { cwd, diff: sampleDiff, createAgent: () => agent, logger },
+    );
 
     expect(debugLines.some((l) => l.startsWith('Turn 1 started'))).toBe(true);
     expect(debugLines.some((l) => l.includes('Read') && l.includes('src/auth.ts'))).toBe(true);
     expect(debugLines.some((l) => l.includes('Bash') && l.includes('grep -n foo'))).toBe(true);
     expect(debugLines.some((l) => l.includes('Glob') && l.includes('pattern=**/*.ts'))).toBe(true);
-    expect(debugLines.some((l) => l.startsWith('Agent finished: 1 turn(s), 3 tool call(s)'))).toBe(true);
+    expect(debugLines.some((l) => l.startsWith('Agent finished: 1 turn(s), 3 tool call(s)'))).toBe(
+      true,
+    );
   });
 
   it('counts multiple turns and tool calls correctly', async () => {
@@ -1195,15 +1223,28 @@ describe('runReview pipeline', () => {
     const msg1 = makeAssistant('', { input: 1, output: 1 });
     const msg2 = makeAssistant('Final.', { input: 1, output: 1 });
     const debugLines: string[] = [];
-    const logger: Logger = { ...noopLogger, debug: (msg) => { debugLines.push(msg); } };
+    const logger: Logger = {
+      ...noopLogger,
+      debug: (msg) => {
+        debugLines.push(msg);
+      },
+    };
 
     let listener: ((event: AgentEvent) => void | Promise<void>) | undefined;
     const agent: AgentLike = {
-      subscribe(fn) { listener = fn; return () => {}; },
+      subscribe(fn) {
+        listener = fn;
+        return () => {};
+      },
       async prompt() {
         if (!listener) return;
         await listener({ type: 'turn_start' });
-        await listener({ type: 'tool_execution_start', toolCallId: 'a', toolName: 'Read', args: { file_path: 'x.ts' } });
+        await listener({
+          type: 'tool_execution_start',
+          toolCallId: 'a',
+          toolName: 'Read',
+          args: { file_path: 'x.ts' },
+        });
         await listener({ type: 'message_end', message: msg1 });
         await listener({ type: 'turn_start' });
         await listener({ type: 'message_end', message: msg2 });
@@ -1211,7 +1252,10 @@ describe('runReview pipeline', () => {
       },
     };
 
-    await runReview({ ...minimalConfig, cwd }, { cwd, diff: sampleDiff, createAgent: () => agent, logger });
+    await runReview(
+      { ...minimalConfig, cwd },
+      { cwd, diff: sampleDiff, createAgent: () => agent, logger },
+    );
 
     expect(debugLines.filter((l) => l.startsWith('Turn'))).toHaveLength(2);
     expect(debugLines.some((l) => l.includes('2 turn(s), 1 tool call(s)'))).toBe(true);
@@ -1221,7 +1265,10 @@ describe('runReview pipeline', () => {
     const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
     const messages = [makeAssistant('ok.', { input: 1, output: 1 })];
     await expect(
-      runReview({ ...minimalConfig, cwd }, { cwd, diff: sampleDiff, createAgent: () => fakeAgent(messages) }),
+      runReview(
+        { ...minimalConfig, cwd },
+        { cwd, diff: sampleDiff, createAgent: () => fakeAgent(messages) },
+      ),
     ).resolves.toBeDefined();
   });
 });
@@ -1239,7 +1286,10 @@ describe('logger', () => {
 
   it('createLogger at info level suppresses debug, emits info/warn/error', () => {
     const lines: string[] = [];
-    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => { lines.push(String(chunk)); return true; });
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      lines.push(String(chunk));
+      return true;
+    });
     const logger = createLogger('info');
     logger.debug('hidden');
     logger.info('visible-info');
@@ -1254,7 +1304,10 @@ describe('logger', () => {
 
   it('createLogger at debug level emits all levels', () => {
     const lines: string[] = [];
-    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => { lines.push(String(chunk)); return true; });
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      lines.push(String(chunk));
+      return true;
+    });
     const logger = createLogger('debug');
     logger.debug('d');
     logger.info('i');
@@ -1267,7 +1320,10 @@ describe('logger', () => {
 
   it('createLogger at error level only emits error', () => {
     const lines: string[] = [];
-    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => { lines.push(String(chunk)); return true; });
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      lines.push(String(chunk));
+      return true;
+    });
     const logger = createLogger('error');
     logger.debug('d');
     logger.info('i');
@@ -1280,7 +1336,10 @@ describe('logger', () => {
 
   it('prefixes every line with [gitlab-review]', () => {
     const lines: string[] = [];
-    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => { lines.push(String(chunk)); return true; });
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      lines.push(String(chunk));
+      return true;
+    });
     const logger = createLogger('debug');
     logger.info('hello');
     vi.restoreAllMocks();
@@ -1289,7 +1348,10 @@ describe('logger', () => {
 
   it('createLogger defaults to info level when no argument is passed', () => {
     const lines: string[] = [];
-    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => { lines.push(String(chunk)); return true; });
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      lines.push(String(chunk));
+      return true;
+    });
     const logger = createLogger();
     logger.debug('should-be-hidden');
     logger.info('should-show');

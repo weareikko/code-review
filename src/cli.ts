@@ -14,12 +14,12 @@ import {
   traceDiagnosticPhase,
   type DiagnosticContext,
 } from './diagnostics.js';
-import { createLogger } from './logger.js';
 import { formatError, RuntimeError } from './errors.js';
 import { extractExistingFingerprints } from './fingerprints.js';
 import { getMergeDiff, prepareGitHistory } from './git.js';
 import { runReview } from './gitlab-review.js';
 import { GitLabClient } from './gitlab.js';
+import { createLogger } from './logger.js';
 import { startOtelBridge } from './otel.js';
 import { parseReviewMarkdownWithWarnings } from './parser.js';
 import { buildGeneratedComments } from './payloads.js';
