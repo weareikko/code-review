@@ -19,6 +19,7 @@ import { extractExistingFingerprints } from './fingerprints.js';
 import { getMergeDiff, prepareGitHistory } from './git.js';
 import { runReview } from './gitlab-review.js';
 import { GitLabClient } from './gitlab.js';
+import { createLogger } from './logger.js';
 import { startOtelBridge } from './otel.js';
 import { parseReviewMarkdownWithWarnings } from './parser.js';
 import { buildGeneratedComments } from './payloads.js';
@@ -72,6 +73,8 @@ Options:
                           (env: GITLAB_REVIEW_POST_SUMMARY=false)
   --force-review          Run even when the current commit was already reviewed
                           (env: GITLAB_REVIEW_FORCE_REVIEW=true)
+  --verbose               Enable debug-level logging
+                          (env: GITLAB_REVIEW_VERBOSE=true)
   --help, -h              Show help
   --version, -v           Show version
 `;
@@ -122,6 +125,7 @@ function refsFromVersion(version: {
 export async function run(config: Config): Promise<RunResult> {
   validateConfig(config);
 
+  const logger = createLogger(config.verbose ? 'debug' : 'info');
   const runId = createDiagnosticRunId();
   return traceDiagnosticPhase('run', config, runId, async (runContext) => {
     const gitlab = new GitLabClient({
@@ -130,6 +134,7 @@ export async function run(config: Config): Promise<RunResult> {
       authHeader: config.gitlabAuthHeader,
     });
 
+    logger.info('Fetching MR info...');
     const mr = await traceDiagnosticPhase('gitlab.get_merge_request', config, runId, () =>
       gitlab.getMergeRequest(config.project, config.mr),
     );
@@ -183,14 +188,16 @@ export async function run(config: Config): Promise<RunResult> {
       return { generated: [], posted: 0, usage, summary: null, skipped: true };
     }
 
+    logger.info('Fetching diff...');
     await traceDiagnosticPhase('git.prepare_history', config, runId, () =>
       prepareGitHistory(mr.source_branch, mr.target_branch, { cwd: config.cwd }),
     );
     const diff = await traceDiagnosticPhase('git.get_merge_diff', config, runId, () =>
       getMergeDiff(mr.target_branch, { cwd: config.cwd }),
     );
+    logger.info('Running review...');
     const usage = await traceDiagnosticPhase('reviewer.run', config, runId, async (context) => {
-      const result = await runReview(config, { cwd: config.cwd, diff });
+      const result = await runReview(config, { cwd: config.cwd, diff, logger });
       context.usage = result;
       return result;
     });
@@ -244,6 +251,7 @@ export async function run(config: Config): Promise<RunResult> {
 
     const newCount = generated.filter((item) => !item.duplicate).length;
     recordCommentCounts(runContext, generated);
+    logger.info(`Posting ${newCount} new comment(s)...`);
     if (config.dryRun || config.noPost) {
       console.log(`Generated ${generated.length} comments, ${newCount} new. Posting disabled.`);
       if (config.postSummary && parsed.summary) {

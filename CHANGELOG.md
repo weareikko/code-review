@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Structured logger**: a `Logger` interface (`debug`/`info`/`warn`/`error` levels) with a `createLogger(minLevel)` factory and a `noopLogger` no-op for library consumers. All log output goes to stderr (169c470, #33).
+- **`--verbose` flag** (or `GITLAB_REVIEW_VERBOSE=true` env var): enables `debug`-level logging. Without it, only `info`-level phase lines are printed. Debug output includes loaded skills and convention files, agent turn numbers, and individual tool calls with argument previews (e.g. `→ Read src/auth.ts`, `→ Bash grep -n …`) (169c470, #33).
+
 ## [0.3.1] - 2026-05-20
 
 ### Fixed

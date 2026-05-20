@@ -23,6 +23,7 @@ import { ConfigError, GitLabApiError, ReviewerError, formatError } from '../src/
 import { getMergeDiffArguments } from '../src/git.js';
 import { filterDiff, runReview, type AgentLike, type ReviewUsage } from '../src/gitlab-review.js';
 import { GitLabClient } from '../src/gitlab.js';
+import { createLogger, noopLogger, type Logger } from '../src/logger.js';
 import {
   buildSummaryBody,
   buildSummaryHistoryEntries,
@@ -951,6 +952,7 @@ describe('runReview pipeline', () => {
     noPost: false,
     postSummary: false,
     forceReview: false,
+    verbose: false,
     cwd: '/tmp',
     skills: [],
   };
@@ -1157,6 +1159,205 @@ describe('runReview pipeline', () => {
         },
       ),
     ).rejects.toBeInstanceOf(ReviewerError);
+  });
+
+  it('emits turn_start and tool_execution_start debug lines to the logger', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const messages = [makeAssistant('Done.', { input: 1, output: 1 })];
+    const debugLines: string[] = [];
+    const logger: Logger = {
+      ...noopLogger,
+      debug: (msg) => {
+        debugLines.push(msg);
+      },
+    };
+
+    let listener: ((event: AgentEvent) => void | Promise<void>) | undefined;
+    const agent: AgentLike = {
+      subscribe(fn) {
+        listener = fn;
+        return () => {};
+      },
+      async prompt() {
+        if (!listener) return;
+        await listener({ type: 'turn_start' });
+        await listener({
+          type: 'tool_execution_start',
+          toolCallId: 'id1',
+          toolName: 'Read',
+          args: { file_path: 'src/auth.ts' },
+        });
+        await listener({
+          type: 'tool_execution_start',
+          toolCallId: 'id2',
+          toolName: 'Bash',
+          args: { command: 'grep -n foo src/auth.ts' },
+        });
+        await listener({
+          type: 'tool_execution_start',
+          toolCallId: 'id3',
+          toolName: 'Glob',
+          args: { pattern: '**/*.ts', cwd: '/tmp' },
+        });
+        await listener({ type: 'message_end', message: messages[0] });
+        await listener({ type: 'agent_end', messages });
+      },
+    };
+
+    await runReview(
+      { ...minimalConfig, cwd },
+      { cwd, diff: sampleDiff, createAgent: () => agent, logger },
+    );
+
+    expect(debugLines.some((l) => l.startsWith('Turn 1 started'))).toBe(true);
+    expect(debugLines.some((l) => l.includes('Read') && l.includes('src/auth.ts'))).toBe(true);
+    expect(debugLines.some((l) => l.includes('Bash') && l.includes('grep -n foo'))).toBe(true);
+    expect(debugLines.some((l) => l.includes('Glob') && l.includes('pattern=**/*.ts'))).toBe(true);
+    expect(debugLines.some((l) => l.startsWith('Agent finished: 1 turn(s), 3 tool call(s)'))).toBe(
+      true,
+    );
+  });
+
+  it('counts multiple turns and tool calls correctly', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const msg1 = makeAssistant('', { input: 1, output: 1 });
+    const msg2 = makeAssistant('Final.', { input: 1, output: 1 });
+    const debugLines: string[] = [];
+    const logger: Logger = {
+      ...noopLogger,
+      debug: (msg) => {
+        debugLines.push(msg);
+      },
+    };
+
+    let listener: ((event: AgentEvent) => void | Promise<void>) | undefined;
+    const agent: AgentLike = {
+      subscribe(fn) {
+        listener = fn;
+        return () => {};
+      },
+      async prompt() {
+        if (!listener) return;
+        await listener({ type: 'turn_start' });
+        await listener({
+          type: 'tool_execution_start',
+          toolCallId: 'a',
+          toolName: 'Read',
+          args: { file_path: 'x.ts' },
+        });
+        await listener({ type: 'message_end', message: msg1 });
+        await listener({ type: 'turn_start' });
+        await listener({ type: 'message_end', message: msg2 });
+        await listener({ type: 'agent_end', messages: [msg1, msg2] });
+      },
+    };
+
+    await runReview(
+      { ...minimalConfig, cwd },
+      { cwd, diff: sampleDiff, createAgent: () => agent, logger },
+    );
+
+    expect(debugLines.filter((l) => l.startsWith('Turn'))).toHaveLength(2);
+    expect(debugLines.some((l) => l.includes('2 turn(s), 1 tool call(s)'))).toBe(true);
+  });
+
+  it('uses noopLogger when no logger is provided', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const messages = [makeAssistant('ok.', { input: 1, output: 1 })];
+    await expect(
+      runReview(
+        { ...minimalConfig, cwd },
+        { cwd, diff: sampleDiff, createAgent: () => fakeAgent(messages) },
+      ),
+    ).resolves.toBeDefined();
+  });
+});
+
+describe('logger', () => {
+  it('noopLogger never writes to stderr', () => {
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    noopLogger.debug('d');
+    noopLogger.info('i');
+    noopLogger.warn('w');
+    noopLogger.error('e');
+    expect(write).not.toHaveBeenCalled();
+    write.mockRestore();
+  });
+
+  it('createLogger at info level suppresses debug, emits info/warn/error', () => {
+    const lines: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      lines.push(String(chunk));
+      return true;
+    });
+    const logger = createLogger('info');
+    logger.debug('hidden');
+    logger.info('visible-info');
+    logger.warn('visible-warn');
+    logger.error('visible-error');
+    vi.restoreAllMocks();
+    expect(lines.some((l) => l.includes('hidden'))).toBe(false);
+    expect(lines.some((l) => l.includes('visible-info'))).toBe(true);
+    expect(lines.some((l) => l.includes('visible-warn'))).toBe(true);
+    expect(lines.some((l) => l.includes('visible-error'))).toBe(true);
+  });
+
+  it('createLogger at debug level emits all levels', () => {
+    const lines: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      lines.push(String(chunk));
+      return true;
+    });
+    const logger = createLogger('debug');
+    logger.debug('d');
+    logger.info('i');
+    logger.warn('w');
+    logger.error('e');
+    vi.restoreAllMocks();
+    expect(lines.some((l) => l.includes('d'))).toBe(true);
+    expect(lines.some((l) => l.includes('i'))).toBe(true);
+  });
+
+  it('createLogger at error level only emits error', () => {
+    const lines: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      lines.push(String(chunk));
+      return true;
+    });
+    const logger = createLogger('error');
+    logger.debug('d');
+    logger.info('i');
+    logger.warn('w');
+    logger.error('only-this');
+    vi.restoreAllMocks();
+    expect(lines.filter((l) => l.includes('[gitlab-review]'))).toHaveLength(1);
+    expect(lines.some((l) => l.includes('only-this'))).toBe(true);
+  });
+
+  it('prefixes every line with [gitlab-review]', () => {
+    const lines: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      lines.push(String(chunk));
+      return true;
+    });
+    const logger = createLogger('debug');
+    logger.info('hello');
+    vi.restoreAllMocks();
+    expect(lines[0]).toBe('[gitlab-review] hello\n');
+  });
+
+  it('createLogger defaults to info level when no argument is passed', () => {
+    const lines: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
+      lines.push(String(chunk));
+      return true;
+    });
+    const logger = createLogger();
+    logger.debug('should-be-hidden');
+    logger.info('should-show');
+    vi.restoreAllMocks();
+    expect(lines.some((l) => l.includes('should-be-hidden'))).toBe(false);
+    expect(lines.some((l) => l.includes('should-show'))).toBe(true);
   });
 });
 
@@ -1476,6 +1677,7 @@ describe('validateConfig', () => {
     noPost: false,
     postSummary: false,
     forceReview: false,
+    verbose: false,
     cwd: '/tmp',
     skills: [],
   };
@@ -1656,6 +1858,7 @@ describe('diagnostics_channel instrumentation', () => {
     noPost: false,
     postSummary: false,
     forceReview: false,
+    verbose: false,
     cwd: '/tmp',
     skills: [],
   };
@@ -1838,6 +2041,7 @@ describe('OpenTelemetry bridge', () => {
       noPost: false,
       postSummary: false,
       forceReview: false,
+      verbose: false,
       cwd: '/tmp',
       skills: [],
     };
@@ -1976,6 +2180,7 @@ describe('OpenTelemetry bridge', () => {
       noPost: false,
       postSummary: false,
       forceReview: false,
+      verbose: false,
       cwd: '/tmp',
       skills: [],
     };

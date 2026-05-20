@@ -10,10 +10,12 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { Config } from './config.js';
+import type { Logger } from './logger.js';
 import type { Skill } from './skills.js';
 import type { GitLabReviewSeverity, ThinkingLevel } from './types.js';
 
 import { ReviewerError } from './errors.js';
+import { noopLogger } from './logger.js';
 import { loadAutoDiscoveredSkills, loadBuiltinSkill } from './skills.js';
 import { toGitLabReviewSeverity } from './types.js';
 
@@ -52,6 +54,7 @@ export interface RunReviewOptions {
   diff: string;
   createAgent?: CreateAgent;
   timeoutMs?: number;
+  logger?: Logger;
 }
 
 const DEFAULT_REVIEW_TIMEOUT_MS = 10 * 60 * 1000;
@@ -399,6 +402,7 @@ function accumulateUsage(target: AggregatedUsage, message: AssistantMessage): vo
 export async function runReview(config: Config, options: RunReviewOptions): Promise<ReviewUsage> {
   const cwd = options.cwd ?? config.cwd;
   const minSeverity = toGitLabReviewSeverity(config.minSeverity);
+  const logger = options.logger ?? noopLogger;
 
   const { diff, skippedFiles } = filterDiff(options.diff);
   if (!diff.trim()) {
@@ -410,6 +414,17 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   const context = await loadReviewContext(cwd, config.skills);
   const systemPrompt = buildJSONSystemPrompt(context, minSeverity);
   const userPrompt = buildUserPrompt(diff, skippedFiles);
+
+  const skillNames = context.skills.map((s) => s.name);
+  if (skillNames.length > 0) {
+    logger.debug(`Skills loaded: ${skillNames.join(', ')}`);
+  }
+  if (context.conventions.length > 0) {
+    logger.debug(`Conventions: ${context.conventions.map((f) => f.path).join(', ')}`);
+  }
+  if (context.reviewRules.length > 0) {
+    logger.debug(`Review rules: ${context.reviewRules.map((f) => f.path).join(', ')}`);
+  }
 
   const model = resolveModel(config.model);
   const tools = createReadOnlyTools(cwd) as AgentTool[];
@@ -425,6 +440,8 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
 
   const aggregated = emptyUsage();
   const collectedAssistantMessages: AssistantMessage[] = [];
+  let turnCount = 0;
+  let toolCallCount = 0;
 
   const timeoutMs = options.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS;
   let unsubscribe: (() => void) | undefined;
@@ -433,6 +450,15 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   try {
     const ended = new Promise<void>((resolvePromise, rejectPromise) => {
       unsubscribe = agent.subscribe((event) => {
+        if (event.type === 'turn_start') {
+          turnCount += 1;
+          logger.debug(`Turn ${turnCount} started`);
+        }
+        if (event.type === 'tool_execution_start') {
+          toolCallCount += 1;
+          const argsPreview = formatToolArgs(event.toolName, event.args);
+          logger.debug(`  → ${event.toolName}${argsPreview}`);
+        }
         if (event.type === 'message_end' && event.message.role === 'assistant') {
           const assistant = event.message as AssistantMessage;
           collectedAssistantMessages.push(assistant);
@@ -481,10 +507,27 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   await mkdir(dirname(reviewPath), { recursive: true });
   await writeFile(reviewPath, finalText, 'utf8');
 
+  logger.debug(`Agent finished: ${turnCount} turn(s), ${toolCallCount} tool call(s)`);
+
   return {
     model: config.model,
     tokens: aggregated.tokens,
     cost: aggregated.cost,
     skills: context.skills.map((s) => s.name),
   };
+}
+
+function formatToolArgs(toolName: string, args: unknown): string {
+  if (!args || typeof args !== 'object') return '';
+  const obj = args as Record<string, unknown>;
+  if (toolName === 'Read' || toolName === 'read') {
+    return typeof obj.file_path === 'string' ? ` ${obj.file_path}` : '';
+  }
+  if (toolName === 'Bash' || toolName === 'bash') {
+    return typeof obj.command === 'string' ? ` ${obj.command.slice(0, 80)}` : '';
+  }
+  const entries = Object.entries(obj)
+    .slice(0, 2)
+    .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`);
+  return entries.length > 0 ? ` ${entries.join(' ')}` : '';
 }
