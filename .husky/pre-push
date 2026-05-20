@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+
+zero_oid='0000000000000000000000000000000000000000'
+
+while read -r local_ref local_oid remote_ref remote_oid; do
+  case "$remote_ref" in
+    refs/tags/v*)
+      # Allow deleting old malformed tags, but block creating/updating them.
+      if [ "$local_oid" != "$zero_oid" ]; then
+        tag_name=${remote_ref#refs/tags/}
+        fixed_tag_name=${tag_name#v}
+        echo "Error: release tags must not use the v prefix." >&2
+        echo "Rename '$tag_name' to '$fixed_tag_name' before pushing." >&2
+        exit 1
+      fi
+      ;;
+  esac
+done
