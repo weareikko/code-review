@@ -48,10 +48,16 @@ describe('OpenTelemetry bridge', () => {
     value: number;
     attributes: Record<string, unknown>;
   }
+  interface RecordedLog {
+    severityNumber?: number;
+    body: string;
+    attributes: Record<string, unknown>;
+  }
 
   function createFakeRuntime() {
     const spans: RecordedSpan[] = [];
     const metricsRecorded: RecordedMetric[] = [];
+    const logsEmitted: RecordedLog[] = [];
     const shutdown = vi.fn(async () => undefined);
 
     const makeSpan = (name: string, parent: RecordedSpan | undefined): RecordedSpan => {
@@ -111,9 +117,25 @@ describe('OpenTelemetry bridge', () => {
     };
     const meterProvider = { getMeter: () => meter };
 
-    const runtime = { tracerProvider, meterProvider, shutdown } as unknown as OtelRuntime;
+    const fakeLogger = {
+      emit(log: { severityNumber?: number; body?: unknown; attributes?: Record<string, unknown> }) {
+        logsEmitted.push({
+          severityNumber: log.severityNumber,
+          body: String(log.body ?? ''),
+          attributes: log.attributes ?? {},
+        });
+      },
+    };
+    const loggerProvider = { getLogger: () => fakeLogger };
 
-    return { runtime, spans, metricsRecorded, shutdown };
+    const runtime = {
+      tracerProvider,
+      meterProvider,
+      loggerProvider,
+      shutdown,
+    } as unknown as OtelRuntime;
+
+    return { runtime, spans, metricsRecorded, logsEmitted, shutdown };
   }
 
   async function runWithBridge(
@@ -659,5 +681,206 @@ describe('OpenTelemetry bridge', () => {
     for (const span of spans) {
       expect(span.ended).toBe(true);
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // OTel logs — review completion and per-comment records
+  // ---------------------------------------------------------------------------
+
+  it('emits a review completion log when the run phase closes', async () => {
+    const { logsEmitted } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-haiku-4-5',
+        tokens: { input: 100, output: 50, cacheRead: 200, cacheWrite: 10, total: 360 },
+        cost: { input: 0.001, output: 0.002, cacheRead: 0.002, cacheWrite: 0.001, total: 0.006 },
+      };
+    });
+    const completedLog = logsEmitted.find(
+      (l) => l.attributes['event.name'] === 'gitlab_review.completed',
+    );
+    expect(completedLog).toBeDefined();
+    expect(completedLog!.body).toMatch(/review completed: proj MR#1/);
+    expect(completedLog!.attributes).toMatchObject({
+      'event.name': 'gitlab_review.completed',
+      'gitlab.project_id': 'proj',
+      'gitlab.mr_iid': '1',
+      'gen_ai.request.model': 'claude-haiku-4-5',
+      'gen_ai.usage.cost.total_usd': 0.006,
+      'gen_ai.usage.input_tokens': 100,
+      'gen_ai.usage.output_tokens': 50,
+      'gen_ai.usage.cache_read.input_tokens': 200,
+      'gen_ai.usage.cache_creation.input_tokens': 10,
+    });
+  });
+
+  it('logComments emits one log record per comment with file/line/severity/is_duplicate', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config: Config = {
+      project: 'acme/web',
+      mr: '42',
+      gitlabUrl: 'https://gitlab.acme.com',
+      gitlabToken: 't',
+      gitlabAuthHeader: 'PRIVATE-TOKEN',
+      model: 'anthropic/claude-sonnet-4-5',
+      minSeverity: 'info',
+      thinkingLevel: 'off',
+      postingMode: 'direct',
+      apiKey: 'k',
+      reviewFile: 'gitlab-review.md',
+      output: 'review-comments.json',
+      dryRun: false,
+      noPost: false,
+      postSummary: false,
+      forceReview: false,
+      verbose: false,
+      cwd: '/tmp',
+      skills: [],
+    };
+    const runContext = createDiagnosticContext('run', config, 'run-logs');
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      bridge!.logComments(
+        [
+          {
+            comment: {
+              file: 'src/auth.ts',
+              line: 42,
+              side: 'RIGHT',
+              severity: 'critical',
+              body: 'Use bcrypt.',
+            },
+            fingerprints: { primary: 'a', secondary: 'b' },
+            duplicate: false,
+            payload: {
+              body: '',
+              position: {
+                position_type: 'text',
+                base_sha: '',
+                start_sha: '',
+                head_sha: '',
+                old_path: '',
+                new_path: '',
+              },
+            },
+          },
+          {
+            comment: {
+              file: 'src/utils.ts',
+              line: 7,
+              side: 'RIGHT',
+              severity: 'warn',
+              body: 'Remove unused import.',
+            },
+            fingerprints: { primary: 'c', secondary: 'd' },
+            duplicate: true,
+            payload: {
+              body: '',
+              position: {
+                position_type: 'text',
+                base_sha: '',
+                start_sha: '',
+                head_sha: '',
+                old_path: '',
+                new_path: '',
+              },
+            },
+          },
+        ],
+        'run-logs',
+      );
+    });
+    await bridge!.shutdown();
+
+    const commentLogs = fake.logsEmitted.filter(
+      (l) => l.attributes['event.name'] === 'gitlab_review.comment',
+    );
+    expect(commentLogs).toHaveLength(2);
+
+    const [auth, utils] = commentLogs;
+    expect(auth.body).toContain('[critical] src/auth.ts:42');
+    expect(auth.attributes).toMatchObject({
+      'gitlab.project_id': 'acme/web',
+      'gitlab.mr_iid': '42',
+      'gitlab_review.run_id': 'run-logs',
+      'gitlab_review.comment.file': 'src/auth.ts',
+      'gitlab_review.comment.line': 42,
+      'gitlab_review.comment.severity': 'critical',
+      'gitlab_review.comment.is_duplicate': false,
+    });
+    expect(utils.attributes['gitlab_review.comment.is_duplicate']).toBe(true);
+  });
+
+  it('logComments truncates comment body at 500 chars', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+    const config: Config = {
+      project: 'p',
+      mr: '1',
+      gitlabUrl: 'https://gitlab.example.com',
+      gitlabToken: 't',
+      gitlabAuthHeader: 'PRIVATE-TOKEN',
+      model: 'anthropic/claude-sonnet-4-5',
+      minSeverity: 'info',
+      thinkingLevel: 'off',
+      postingMode: 'direct',
+      apiKey: 'k',
+      reviewFile: 'gitlab-review.md',
+      output: 'review-comments.json',
+      dryRun: false,
+      noPost: false,
+      postSummary: false,
+      forceReview: false,
+      verbose: false,
+      cwd: '/tmp',
+      skills: [],
+    };
+    const runContext = createDiagnosticContext('run', config, 'run-trunc');
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      bridge!.logComments(
+        [
+          {
+            comment: {
+              file: 'a.ts',
+              line: 1,
+              side: 'RIGHT',
+              severity: 'info',
+              body: 'x'.repeat(600),
+            },
+            fingerprints: { primary: 'e', secondary: 'f' },
+            duplicate: false,
+            payload: {
+              body: '',
+              position: {
+                position_type: 'text',
+                base_sha: '',
+                start_sha: '',
+                head_sha: '',
+                old_path: '',
+                new_path: '',
+              },
+            },
+          },
+        ],
+        'run-trunc',
+      );
+    });
+    await bridge!.shutdown();
+
+    const log = fake.logsEmitted.find(
+      (l) => l.attributes['event.name'] === 'gitlab_review.comment',
+    );
+    // The log body includes the prefix "[info] a.ts:1 — " plus the truncated body.
+    expect(log!.body).toContain('…');
+    // Total body should not exceed ~520 chars (prefix + 500 content chars + ellipsis)
+    expect(log!.body.length).toBeLessThan(520);
   });
 });

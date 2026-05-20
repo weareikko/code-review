@@ -262,6 +262,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
 
     const newCount = generated.filter((item) => !item.duplicate).length;
     recordCommentCounts(runContext, generated);
+    bridges?.otel?.logComments(generated, runId);
     logger.info(`Posting ${newCount} new comment(s)...`);
     if (config.dryRun || config.noPost) {
       console.log(`Generated ${generated.length} comments, ${newCount} new. Posting disabled.`);

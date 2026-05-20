@@ -38,8 +38,16 @@ import type {
   TracerProvider,
 } from '@opentelemetry/api';
 import { context, metrics, SpanKind, SpanStatusCode, trace } from '@opentelemetry/api';
-import { diagnosticChannels, type DiagnosticContext, type DiagnosticPhase } from './diagnostics.js';
+import type { Logger, LoggerProvider } from '@opentelemetry/api-logs';
+import { logs, SeverityNumber } from '@opentelemetry/api-logs';
+import {
+  diagnosticChannels,
+  type DiagnosticContext,
+  type DiagnosticPhase,
+  type DiagnosticUsage,
+} from './diagnostics.js';
 import type { AgentLike } from './gitlab-review.js';
+import type { GeneratedComment } from './types.js';
 
 // Inlined at build time by Vite's `define` (see vite.config.ts). Keeps
 // `service.version` accurate under `npx`/standalone bin invocations, where
@@ -56,11 +64,19 @@ export interface OtelBridge {
    * when the span is not yet open or OTel is disabled.
    */
   createAgentTelemetry(runId: string): ((agent: AgentLike) => () => void) | undefined;
+  /**
+   * Emits one structured OTel log record per generated comment to Loki/the
+   * configured log backend. Each record carries `event.name`,
+   * `gitlab_review.comment.*` attributes, and the comment body as the log
+   * line. Safe to call at any point after the run phase has opened.
+   */
+  logComments(comments: GeneratedComment[], runId: string): void;
 }
 
 export interface OtelRuntime {
   tracerProvider: TracerProvider;
   meterProvider: MeterProvider;
+  loggerProvider: LoggerProvider;
   shutdown(): Promise<void>;
 }
 
@@ -138,6 +154,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
   const runtime = options.runtime ?? (await loadDefaultRuntime());
   const tracer: Tracer = runtime.tracerProvider.getTracer(SERVICE_NAME);
   const meter: Meter = runtime.meterProvider.getMeter(SERVICE_NAME);
+  const logger: Logger = runtime.loggerProvider.getLogger(SERVICE_NAME);
 
   const operationDuration = meter.createHistogram('gen_ai.client.operation.duration', {
     description: 'GenAI operation duration',
@@ -162,6 +179,10 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
 
   const openByRun = new Map<string, Map<DiagnosticPhase, OpenSpan>>();
 
+  // Per-run metadata cached from the ROOT_PHASE context for use in the review
+  // completion log and in logComments attribute enrichment.
+  const runMeta = new Map<string, RunMeta>();
+
   const parentContext = (runId: string) => {
     const root = openByRun.get(runId)?.get(ROOT_PHASE);
     return root && !root.closed ? trace.setSpan(context.active(), root.span) : context.active();
@@ -180,6 +201,15 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
       parentContext(ctx.runId),
     );
     phases.set(ctx.phase, { span, closed: false });
+    // Seed run metadata so logComments and the review completion log can enrich
+    // records with project/mr context even before the run phase closes.
+    if (ctx.phase === ROOT_PHASE) {
+      runMeta.set(ctx.runId, {
+        project: ctx.project,
+        mr: ctx.mr,
+        gitlabUrl: ctx.gitlabUrl,
+      });
+    }
   };
 
   const closeSpan = (ctx: DiagnosticContext, isError: boolean): void => {
@@ -188,6 +218,11 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     if (ctx.phase === GEN_AI_PHASE) {
       applyGenAiAttributes(entry.span, ctx);
       recordGenAiMetrics(operationDuration, tokenUsage, operationCost, ctx, isError);
+      // Cache usage so the ROOT_PHASE completion log can include cost/token totals.
+      if (ctx.usage) {
+        const meta = runMeta.get(ctx.runId);
+        if (meta) meta.usage = ctx.usage;
+      }
     }
     applyResultAttributes(entry.span, ctx);
     if (isError && ctx.errorInfo) {
@@ -199,7 +234,11 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     }
     entry.span.end();
     entry.closed = true;
-    if (ctx.phase === ROOT_PHASE) openByRun.delete(ctx.runId);
+    if (ctx.phase === ROOT_PHASE) {
+      emitReviewCompletedLog(logger, ctx, runMeta.get(ctx.runId), isError);
+      runMeta.delete(ctx.runId);
+      openByRun.delete(ctx.runId);
+    }
   };
 
   const handlers = {
@@ -228,7 +267,33 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         }
       }
       openByRun.clear();
+      runMeta.clear();
       await runtime.shutdown();
+    },
+
+    logComments(comments: GeneratedComment[], runId: string): void {
+      const meta = runMeta.get(runId);
+      for (const { comment, duplicate } of comments) {
+        const preview = comment.body.length > 500 ? `${comment.body.slice(0, 497)}…` : comment.body;
+        logger.emit({
+          severityNumber: SeverityNumber.INFO,
+          severityText: 'INFO',
+          body: `[${comment.severity}] ${comment.file}:${comment.line} — ${preview}`,
+          attributes: {
+            'event.name': 'gitlab_review.comment',
+            'gitlab_review.run_id': runId,
+            'gitlab_review.comment.file': comment.file,
+            'gitlab_review.comment.line': comment.line,
+            'gitlab_review.comment.severity': comment.severity,
+            'gitlab_review.comment.is_duplicate': duplicate,
+            ...(meta && {
+              'gitlab.project_id': meta.project,
+              'gitlab.mr_iid': meta.mr,
+              'gitlab.server_url': meta.gitlabUrl,
+            }),
+          },
+        });
+      }
     },
 
     createAgentTelemetry(runId: string): ((agent: AgentLike) => () => void) | undefined {
@@ -390,6 +455,13 @@ async function loadDefaultRuntime(): Promise<OtelRuntime> {
     [semconv.ATTR_SERVICE_NAME ?? 'service.name']: SERVICE_NAME,
     [semconv.ATTR_SERVICE_VERSION ?? 'service.version']: __PKG_VERSION__,
   });
+  // NodeSDK defaults OTEL_METRICS_EXPORTER and OTEL_LOGS_EXPORTER to 'none';
+  // set both to 'otlp' so gen_ai.client.* histograms and structured log records
+  // land in Mimir/Loki via the same OTLP gateway as traces. Only override when
+  // the caller has not already set them.
+  process.env.OTEL_METRICS_EXPORTER = process.env.OTEL_METRICS_EXPORTER ?? 'otlp';
+  process.env.OTEL_LOGS_EXPORTER = process.env.OTEL_LOGS_EXPORTER ?? 'otlp';
+
   const sdk = new sdkNode.NodeSDK({
     resource: resources.defaultResource().merge(serviceResource),
     // NodeSDK auto-detects OTLP HTTP/gRPC exporters and a periodic metric
@@ -399,8 +471,66 @@ async function loadDefaultRuntime(): Promise<OtelRuntime> {
   return {
     tracerProvider: trace.getTracerProvider(),
     meterProvider: metrics.getMeterProvider(),
+    loggerProvider: logs.getLoggerProvider(),
     shutdown: () => sdk.shutdown(),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Log helpers
+// ---------------------------------------------------------------------------
+
+interface RunMeta {
+  project: string;
+  mr: string;
+  gitlabUrl: string;
+  usage?: DiagnosticUsage;
+}
+
+function emitReviewCompletedLog(
+  logger: Logger,
+  ctx: DiagnosticContext,
+  meta: RunMeta | undefined,
+  isError: boolean,
+): void {
+  const usage = meta?.usage;
+  const rawModel = usage?.model ?? ctx.model ?? '';
+  const modelId = rawModel.includes('/') ? rawModel.split('/')[1] : rawModel || undefined;
+  const cost = usage?.cost.total;
+  const costStr = cost !== undefined ? ` $${cost.toFixed(4)}` : '';
+  const commentStr = ctx.generated !== undefined ? ` → ${ctx.generated} comments` : '';
+  logger.emit({
+    severityNumber: isError ? SeverityNumber.ERROR : SeverityNumber.INFO,
+    severityText: isError ? 'ERROR' : 'INFO',
+    body: `review completed: ${ctx.project} MR#${ctx.mr}${commentStr}${costStr}`,
+    attributes: {
+      'event.name': 'gitlab_review.completed',
+      'gitlab.project_id': ctx.project,
+      'gitlab.mr_iid': ctx.mr,
+      'gitlab.server_url': ctx.gitlabUrl,
+      'gitlab_review.run_id': ctx.runId,
+      'gitlab_review.duration_ms': ctx.durationMs ?? 0,
+      'gitlab_review.dry_run': ctx.dryRun,
+      'gitlab_review.comments.generated': ctx.generated ?? 0,
+      'gitlab_review.comments.new': ctx.newComments ?? 0,
+      'gitlab_review.comments.duplicate': ctx.duplicateComments ?? 0,
+      'gitlab_review.comments.posted': ctx.posted ?? 0,
+      ...(modelId !== undefined && { 'gen_ai.request.model': modelId }),
+      ...(cost !== undefined && { 'gen_ai.usage.cost.total_usd': cost }),
+      ...(usage?.tokens.input !== undefined && {
+        'gen_ai.usage.input_tokens': usage.tokens.input,
+      }),
+      ...(usage?.tokens.output !== undefined && {
+        'gen_ai.usage.output_tokens': usage.tokens.output,
+      }),
+      ...(usage?.tokens.cacheRead && {
+        'gen_ai.usage.cache_read.input_tokens': usage.tokens.cacheRead,
+      }),
+      ...(usage?.tokens.cacheWrite && {
+        'gen_ai.usage.cache_creation.input_tokens': usage.tokens.cacheWrite,
+      }),
+    },
+  });
 }
 
 function spanNameFor(phase: DiagnosticPhase): string {

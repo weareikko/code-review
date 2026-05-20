@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `gen_ai.client.time_to_first_token` histogram (seconds, per turn) recorded when streaming `message_update` events fire.
   - Per-turn `gen_ai.client.token.usage` and `gen_ai.client.cost` metrics so dashboards can break down token spend and USD cost by turn, model, and operation.
 - **`gen_ai.client.cost` histogram** (unit `usd`) on the aggregate `invoke_agent` span — enables $/review and $/model dashboards in Prometheus/Grafana without custom queries.
+- **Automatic metrics export**: `loadDefaultRuntime()` now defaults `OTEL_METRICS_EXPORTER` to `otlp` when the caller has not already set it, so `gen_ai.client.*` histograms land in Mimir/Prometheus via the same OTLP gateway as traces without extra env configuration.
+- **OTel structured logs**: `OtelBridge` now emits two types of log records to Loki/the configured log backend (auto-enabled via `OTEL_LOGS_EXPORTER=otlp`):
+  - `gitlab_review.completed` — one record per review at `ROOT_PHASE` close, carrying project, MR, model, full cost/token breakdown, and comment counts.
+  - `gitlab_review.comment` — one record per generated comment (via `OtelBridge.logComments()`), carrying file, line, severity, `is_duplicate`, and the comment body (truncated to 500 chars). Enables Loki searches across comment text and audit trails by project/model.
+- **`@opentelemetry/api-logs`** added as a direct dependency for the `logs` global and `SeverityNumber` enum.
 
 ### Removed
 
