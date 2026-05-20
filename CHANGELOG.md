@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-05-20
+
 ### Added
 
 - **Structured logger**: a `Logger` interface (`debug`/`info`/`warn`/`error` levels) with a `createLogger(minLevel)` factory and a `noopLogger` no-op for library consumers. All log output goes to stderr (169c470, #33).
@@ -173,7 +175,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.3.1...HEAD
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.3.2...HEAD
+[0.3.2]: https://github.com/ikko-dev/gitlab-review/compare/0.3.1...0.3.2
 [0.3.1]: https://github.com/ikko-dev/gitlab-review/compare/0.3.0...0.3.1
 [0.3.0]: https://github.com/ikko-dev/gitlab-review/compare/0.2.0...0.3.0
 [0.2.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.2.0
