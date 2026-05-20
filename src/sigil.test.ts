@@ -113,9 +113,9 @@ describe('Sigil bridge', () => {
     expect(bridge).not.toBeNull();
 
     const runId = opts.runId ?? 'run-sigil';
-    const ctx = createDiagnosticContext('reviewer.run', baseConfig, runId);
+    const ctx = createDiagnosticContext('run', baseConfig, runId);
     try {
-      await traceDiagnostic(diagnosticChannels.runReviewer, ctx, async (c) => {
+      await traceDiagnostic(diagnosticChannels.run, ctx, async (c) => {
         await work(c);
       });
     } catch {
@@ -194,7 +194,9 @@ describe('Sigil bridge', () => {
     expect(gen.result?.usage).toMatchObject({
       inputTokens: 1200,
       outputTokens: 340,
-      totalTokens: 1600,
+      // totalTokens = input + output only (OTel gen_ai convention); cache tokens
+      // are separate fields and must not inflate this value.
+      totalTokens: 1540,
       cacheReadInputTokens: 50,
       cacheWriteInputTokens: 10,
     });
@@ -247,8 +249,8 @@ describe('Sigil bridge', () => {
       client: fake.client,
       env: { GITLAB_REVIEW_SIGIL: '1', SIGIL_CONTENT_CAPTURE_MODE: 'full' },
     });
-    const ctx = createDiagnosticContext('reviewer.run', baseConfig, 'run-env-mode');
-    await traceDiagnostic(diagnosticChannels.runReviewer, ctx, async () => {});
+    const ctx = createDiagnosticContext('run', baseConfig, 'run-env-mode');
+    await traceDiagnostic(diagnosticChannels.run, ctx, async () => {});
     await bridge?.shutdown();
 
     expect(fake.generations[0].start.contentCapture).toBe('full');
@@ -261,8 +263,8 @@ describe('Sigil bridge', () => {
       client: fake.client,
       env: { GITLAB_REVIEW_SIGIL: '1', SIGIL_CONTENT_CAPTURE_MODE: 'invalid-mode' },
     });
-    const ctx = createDiagnosticContext('reviewer.run', baseConfig, 'run-fallback');
-    await traceDiagnostic(diagnosticChannels.runReviewer, ctx, async () => {});
+    const ctx = createDiagnosticContext('run', baseConfig, 'run-fallback');
+    await traceDiagnostic(diagnosticChannels.run, ctx, async () => {});
     await bridge?.shutdown();
 
     expect(fake.generations[0].start.contentCapture).toBe('metadata_only');
@@ -287,8 +289,8 @@ describe('Sigil bridge', () => {
       client: fake.client,
       env: { GITLAB_REVIEW_SIGIL: '1' },
     });
-    const ctx = createDiagnosticContext('reviewer.run', configNoProvider, 'run-no-provider');
-    await traceDiagnostic(diagnosticChannels.runReviewer, ctx, async () => {});
+    const ctx = createDiagnosticContext('run', configNoProvider, 'run-no-provider');
+    await traceDiagnostic(diagnosticChannels.run, ctx, async () => {});
     await bridge?.shutdown();
 
     expect(fake.generations[0].start.model.provider).toBe('unknown');

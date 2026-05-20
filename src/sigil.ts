@@ -1,8 +1,8 @@
 /**
  * Optional Grafana AI Observability (Sigil) bridge over `diagnostics_channel`.
  *
- * Subscribes to the `@ikko-dev/gitlab-review:reviewer.run` tracing channel
- * and forwards generation telemetry to Grafana AI Observability via
+ * Subscribes to the `@ikko-dev/gitlab-review:run` tracing channel and
+ * forwards generation telemetry to Grafana AI Observability via
  * `@grafana/sigil-sdk-js`.
  *
  * Opt-in: set `GITLAB_REVIEW_SIGIL=1` (or pass `--sigil`). The Sigil client
@@ -172,17 +172,16 @@ export async function startSigilBridge(
         metadata: buildResultMetadata(ctx),
       };
       if (ctx.usage) {
+        const { input, output, cacheRead, cacheWrite } = ctx.usage.tokens;
         result.usage = {
-          inputTokens: ctx.usage.tokens.input,
-          outputTokens: ctx.usage.tokens.output,
-          totalTokens: ctx.usage.tokens.total,
+          inputTokens: input,
+          outputTokens: output,
+          // totalTokens follows the OTel gen_ai convention: input + output only.
+          // Cache tokens are reported separately and must not inflate this field.
+          totalTokens: input + output,
           // Only set cache tokens when non-zero to keep the payload clean.
-          ...(ctx.usage.tokens.cacheRead > 0
-            ? { cacheReadInputTokens: ctx.usage.tokens.cacheRead }
-            : {}),
-          ...(ctx.usage.tokens.cacheWrite > 0
-            ? { cacheWriteInputTokens: ctx.usage.tokens.cacheWrite }
-            : {}),
+          ...(cacheRead > 0 ? { cacheReadInputTokens: cacheRead } : {}),
+          ...(cacheWrite > 0 ? { cacheWriteInputTokens: cacheWrite } : {}),
         };
       }
       recorder.setResult(result);
@@ -203,11 +202,16 @@ export async function startSigilBridge(
     },
   };
 
-  diagnosticChannels.runReviewer.subscribe(handlers);
+  // Subscribe to the outer `run` channel (not `reviewer.run`) so that asyncEnd
+  // fires after all phases complete — including comment parsing and deduplication
+  // — giving us `ctx.generated`, `ctx.newComments`, and `ctx.duplicateComments`
+  // alongside `ctx.usage`. The `reviewer.run` channel fires too early (before
+  // comment counts are populated on the run context).
+  diagnosticChannels.run.subscribe(handlers);
 
   return {
     async shutdown() {
-      diagnosticChannels.runReviewer.unsubscribe(handlers);
+      diagnosticChannels.run.unsubscribe(handlers);
       // End any recorders that were never closed (e.g. process killed mid-run).
       for (const recorder of openByRun.values()) {
         recorder.end();
