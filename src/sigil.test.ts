@@ -1,4 +1,3 @@
-import type { GenerationRecorder, GenerationResult, GenerationStart } from '@grafana/sigil-sdk-js';
 import { describe, expect, it, vi } from 'vitest';
 import type { Config, SigilContentCaptureMode } from './config.js';
 import { ReviewerError } from './errors.js';
@@ -8,22 +7,48 @@ import {
   traceDiagnostic,
   type DiagnosticContext,
 } from './review.js';
-import type { SigilBridgeOptions } from './sigil.js';
+import type { SigilBridgeOptions, SigilClientLike } from './sigil.js';
 
 describe('Sigil bridge', () => {
+  interface SigilGenerationStart {
+    conversationId?: string;
+    agentName?: string;
+    agentVersion?: string;
+    model: { provider: string; name: string };
+    contentCapture?: string;
+    startedAt?: Date;
+    metadata?: Record<string, unknown>;
+  }
+
+  interface SigilGenerationResult {
+    usage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+      cacheReadInputTokens?: number;
+      cacheWriteInputTokens?: number;
+    };
+    completedAt?: Date;
+    metadata?: Record<string, unknown>;
+  }
+
   interface RecordedGeneration {
-    start: GenerationStart;
-    result: GenerationResult | undefined;
+    start: SigilGenerationStart;
+    result: SigilGenerationResult | undefined;
     callError: unknown;
     ended: boolean;
   }
 
-  function createFakeClient() {
+  function createFakeClient(): {
+    client: SigilClientLike;
+    generations: RecordedGeneration[];
+    shutdown: ReturnType<typeof vi.fn>;
+  } {
     const generations: RecordedGeneration[] = [];
     const shutdown = vi.fn(async () => undefined);
 
-    const client = {
-      startGeneration(start: GenerationStart): GenerationRecorder {
+    const client: SigilClientLike = {
+      startGeneration(start: SigilGenerationStart) {
         const gen: RecordedGeneration = {
           start,
           result: undefined,
@@ -32,17 +57,15 @@ describe('Sigil bridge', () => {
         };
         generations.push(gen);
         return {
-          setResult(result: GenerationResult) {
+          setResult(result: SigilGenerationResult) {
             gen.result = result;
           },
           setCallError(error: unknown) {
             gen.callError = error;
           },
-          setFirstTokenAt(_firstTokenAt: Date) {},
           end() {
             gen.ended = true;
           },
-          getError: () => undefined,
         };
       },
       shutdown,
@@ -82,7 +105,7 @@ describe('Sigil bridge', () => {
     const { startSigilBridge } = await import('./sigil.js');
     const fake = createFakeClient();
     const bridgeOptions: SigilBridgeOptions = {
-      client: fake.client as ReturnType<typeof createFakeClient>['client'] as never,
+      client: fake.client,
       env: { GITLAB_REVIEW_SIGIL: '1' },
       captureMode: opts.captureMode,
     };
@@ -115,7 +138,7 @@ describe('Sigil bridge', () => {
   it('returns null when disabled without touching the client', async () => {
     const { startSigilBridge } = await import('./sigil.js');
     const fake = createFakeClient();
-    const result = await startSigilBridge({ client: fake.client as never, env: {} });
+    const result = await startSigilBridge({ client: fake.client, env: {} });
     expect(result).toBeNull();
     expect(fake.generations).toHaveLength(0);
     expect(fake.shutdown).not.toHaveBeenCalled();
@@ -221,7 +244,7 @@ describe('Sigil bridge', () => {
     const { startSigilBridge } = await import('./sigil.js');
     const fake = createFakeClient();
     const bridge = await startSigilBridge({
-      client: fake.client as never,
+      client: fake.client,
       env: { GITLAB_REVIEW_SIGIL: '1', SIGIL_CONTENT_CAPTURE_MODE: 'full' },
     });
     const ctx = createDiagnosticContext('reviewer.run', baseConfig, 'run-env-mode');
@@ -235,7 +258,7 @@ describe('Sigil bridge', () => {
     const { startSigilBridge } = await import('./sigil.js');
     const fake = createFakeClient();
     const bridge = await startSigilBridge({
-      client: fake.client as never,
+      client: fake.client,
       env: { GITLAB_REVIEW_SIGIL: '1', SIGIL_CONTENT_CAPTURE_MODE: 'invalid-mode' },
     });
     const ctx = createDiagnosticContext('reviewer.run', baseConfig, 'run-fallback');
@@ -249,7 +272,7 @@ describe('Sigil bridge', () => {
     const { startSigilBridge } = await import('./sigil.js');
     const fake = createFakeClient();
     const bridge = await startSigilBridge({
-      client: fake.client as never,
+      client: fake.client,
       env: { GITLAB_REVIEW_SIGIL: '1' },
     });
     await bridge?.shutdown();
@@ -261,7 +284,7 @@ describe('Sigil bridge', () => {
     const { startSigilBridge } = await import('./sigil.js');
     const fake = createFakeClient();
     const bridge = await startSigilBridge({
-      client: fake.client as never,
+      client: fake.client,
       env: { GITLAB_REVIEW_SIGIL: '1' },
     });
     const ctx = createDiagnosticContext('reviewer.run', configNoProvider, 'run-no-provider');

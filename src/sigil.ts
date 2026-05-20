@@ -9,6 +9,11 @@
  * is dynamically loaded only when enabled — omitting the env var costs nothing
  * at startup.
  *
+ * `@grafana/sigil-sdk-js` is an **optional peer dependency** and is not
+ * bundled with this package. Install it separately when you need Sigil support:
+ *
+ *   npm install @grafana/sigil-sdk-js
+ *
  * Configure the generation endpoint and auth through `SIGIL_*` env vars as
  * shown in Grafana AI Observability → Configuration (e.g. `SIGIL_ENDPOINT`,
  * `SIGIL_AUTH_TENANT_ID`, `SIGIL_AUTH_TOKEN`, …). Unlike `GITLAB_REVIEW_OTEL`
@@ -17,7 +22,7 @@
  *
  * Content capture is controlled by `SIGIL_CONTENT_CAPTURE_MODE` (or the
  * `--sigil-capture-mode` CLI flag):
- * - `metadata_only` (default): token counts, costs, model names, timing, and
+ * - `metadata_only` (default): token counts, costs, model name, timing, and
  *   project/MR identifiers only. No diff, prompt, or review body content.
  * - `no_tool_content` / `full`: accepted at the SDK level; message content is
  *   not yet captured in the diagnostic context so these modes behave like
@@ -27,14 +32,16 @@
  * Library callers with a pre-configured `SigilClient` can inject it via
  * `startSigilBridge({ client })` to skip the default client boot and share a
  * single instance. Tests inject fakes with assertion hooks the same way.
+ *
+ * --- Type note ---
+ * The types below are defined inline to avoid requiring `@grafana/sigil-sdk-js`
+ * as a hard (dev) dependency. The package brings in many optional framework
+ * integrations (LangChain, Google ADK, Strands, …) with transitive peer dep
+ * requirements that conflict with this project's `@opentelemetry/*` versions.
+ * The inline types are intentionally minimal — only the API surface this bridge
+ * actually calls.
  */
 
-import type {
-  ContentCaptureMode,
-  GenerationRecorder,
-  GenerationResult,
-  SigilClient as SigilClientType,
-} from '@grafana/sigil-sdk-js';
 import type { SigilContentCaptureMode } from './config.js';
 import { SIGIL_CAPTURE_MODES } from './config.js';
 import { diagnosticChannels, type DiagnosticContext } from './diagnostics.js';
@@ -43,6 +50,59 @@ import { diagnosticChannels, type DiagnosticContext } from './diagnostics.js';
 // `agentVersion` accurate under `npx`/standalone bin invocations, where
 // `npm_package_version` from `npm run` is not set.
 declare const __PKG_VERSION__: string;
+
+// ---------------------------------------------------------------------------
+// Minimal inline types for the @grafana/sigil-sdk-js API surface we use.
+// These are structurally compatible with the real SDK types; the dynamic
+// import at runtime provides the actual implementation.
+// ---------------------------------------------------------------------------
+
+interface SigilModelRef {
+  provider: string;
+  name: string;
+}
+
+interface SigilTokenUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheWriteInputTokens?: number;
+}
+
+interface SigilGenerationStart {
+  id?: string;
+  conversationId?: string;
+  agentName?: string;
+  agentVersion?: string;
+  model: SigilModelRef;
+  contentCapture?: string;
+  startedAt?: Date;
+  metadata?: Record<string, unknown>;
+  tags?: Record<string, string>;
+}
+
+interface SigilGenerationResult {
+  usage?: SigilTokenUsage;
+  completedAt?: Date;
+  metadata?: Record<string, unknown>;
+}
+
+interface SigilGenerationRecorder {
+  setResult(result: SigilGenerationResult): void;
+  setCallError(error: unknown): void;
+  end(): void;
+}
+
+/** Minimal interface for the @grafana/sigil-sdk-js SigilClient. */
+export interface SigilClientLike {
+  startGeneration(start: SigilGenerationStart): SigilGenerationRecorder;
+  shutdown(): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 export interface SigilBridge {
   shutdown(): Promise<void>;
@@ -55,7 +115,7 @@ export interface SigilBridgeOptions {
    * fakes with assertion hooks; library callers with an existing client pass
    * it here to share a single instance.
    */
-  client?: SigilClientType;
+  client?: SigilClientLike;
   /**
    * Override the env source used for the opt-in check and capture-mode
    * resolution. Defaults to `process.env`.
@@ -80,13 +140,9 @@ export async function startSigilBridge(
   if (!isSigilEnabled(env)) return null;
 
   const captureMode = resolveCaptureMode(options.captureMode, env);
-  // Our SigilContentCaptureMode values are a strict subset of the SDK's
-  // ContentCaptureMode — the cast is safe.
-  const sdkMode = captureMode as ContentCaptureMode;
-
   const client = options.client ?? (await loadDefaultClient());
 
-  const openByRun = new Map<string, GenerationRecorder>();
+  const openByRun = new Map<string, SigilGenerationRecorder>();
 
   const handlers = {
     start: (ctx: DiagnosticContext) => {
@@ -99,7 +155,7 @@ export async function startSigilBridge(
           provider: provider || 'unknown',
           name: name || ctx.model || 'unknown',
         },
-        contentCapture: sdkMode,
+        contentCapture: captureMode,
         startedAt: ctx.startedAt ? new Date(ctx.startedAt) : undefined,
         metadata: buildStartMetadata(ctx),
       });
@@ -111,7 +167,7 @@ export async function startSigilBridge(
       const recorder = openByRun.get(ctx.runId);
       if (!recorder) return;
       openByRun.delete(ctx.runId);
-      const result: GenerationResult = {
+      const result: SigilGenerationResult = {
         completedAt: ctx.completedAt ? new Date(ctx.completedAt) : new Date(),
         metadata: buildResultMetadata(ctx),
       };
@@ -211,14 +267,15 @@ const noop = (): void => undefined;
 
 const SIGIL_PACKAGE = '@grafana/sigil-sdk-js';
 
-async function loadDefaultClient(): Promise<SigilClientType> {
-  let mod: { SigilClient: new () => SigilClientType };
+async function loadDefaultClient(): Promise<SigilClientLike> {
+  let mod: { SigilClient: new () => SigilClientLike };
   try {
     mod = (await import(SIGIL_PACKAGE)) as typeof mod;
   } catch (cause) {
     throw new Error(
-      `Failed to load the bundled ${SIGIL_PACKAGE}. ` +
-        `Reinstall @ikko-dev/gitlab-review or pass startSigilBridge({ client }) explicitly.`,
+      `@grafana/sigil-sdk-js is not installed. ` +
+        `Run: npm install @grafana/sigil-sdk-js\n` +
+        `Or pass startSigilBridge({ client }) to inject a pre-configured client.`,
       { cause },
     );
   }

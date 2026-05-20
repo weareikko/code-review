@@ -62,7 +62,6 @@
     "@earendil-works/pi-agent-core": "0.75.3",
     "@earendil-works/pi-ai": "0.75.3",
     "@earendil-works/pi-coding-agent": "0.75.3",
-    "@grafana/sigil-sdk-js": "^0.5.0",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/resources": "^2.7.1",
     "@opentelemetry/sdk-node": "^0.218.0",
@@ -81,6 +80,14 @@
     "vite": "^8.0.7",
     "vitest": "^4.1.0-beta.5",
     "vitest-evals": "^0.9.0"
+  },
+  "peerDependencies": {
+    "@grafana/sigil-sdk-js": "^0.5.0"
+  },
+  "peerDependenciesMeta": {
+    "@grafana/sigil-sdk-js": {
+      "optional": true
+    }
   },
   "lint-staged": {
     "*.{js,ts,json,md,yml,yaml}": "oxfmt --write"

@@ -7,6 +7,8 @@ const external = [
   ...builtinModules,
   ...builtinModules.map((moduleName) => `node:${moduleName}`),
   /^@earendil-works\//,
+  // Optional peer dep — not bundled; loaded at runtime if installed by the user.
+  '@grafana/sigil-sdk-js',
 ];
 
 const pkg = JSON.parse(

@@ -286,6 +286,12 @@ await startOtelBridge({
 
 `GITLAB_REVIEW_SIGIL=1` (or `--sigil`) enables a dedicated bridge that sends **generation-level records** to [Grafana AI Observability](https://grafana.com/docs/grafana-cloud/machine-learning/ai-observability/) via `@grafana/sigil-sdk-js`. This is a separate path from the OTel bridge above — it uses the Sigil ingest protocol, not OTLP.
 
+**`@grafana/sigil-sdk-js` is an optional peer dependency** — it is not bundled with `@ikko-dev/gitlab-review`. Install it in the project where `gitlab-review` runs before enabling the bridge:
+
+```bash
+npm install @grafana/sigil-sdk-js
+```
+
 **Required environment variables** — find all values in your Grafana Cloud stack under _AI Observability → Configuration_:
 
 | Variable               | Purpose                                                          |
