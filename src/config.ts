@@ -21,6 +21,7 @@ export interface Config {
   noPost: boolean;
   postSummary: boolean;
   forceReview: boolean;
+  verbose: boolean;
   cwd: string;
   skills: string[];
 }
@@ -32,6 +33,7 @@ const BOOLEAN_FLAGS = new Set([
   'no-post',
   'no-summary',
   'force-review',
+  'verbose',
   'help',
   'version',
 ]);
@@ -186,6 +188,7 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     noPost: toBoolean(args.noPost),
     postSummary: resolvePostSummary(args, env),
     forceReview: toBoolean(args.forceReview) || toBoolean(env.GITLAB_REVIEW_FORCE_REVIEW),
+    verbose: toBoolean(args.verbose) || toBoolean(env.GITLAB_REVIEW_VERBOSE),
     cwd: String(args.cwd ?? process.cwd()),
     skills: resolveSkills(args, env),
   };
