@@ -18,10 +18,7 @@
  * - `no_tool_content`: adds assistant text/thinking, omits tool args/results.
  * - `full`: everything included.
  *
- * @grafana/sigil-pi is an **optional peer dependency** and is not bundled with
- * this package. Install it separately when you need Sigil support:
- *
- *   npm install @grafana/sigil-pi
+ * `@grafana/sigil-pi` is a direct dependency — no extra install required.
  */
 
 import type { SigilContentCaptureMode } from './config.js';
@@ -58,8 +55,6 @@ function createMinimalEventBus() {
     },
   };
 }
-
-type MinimalEventBus = ReturnType<typeof createMinimalEventBus>;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -114,27 +109,13 @@ export async function startSigilBridge(
     process.env.SIGIL_CONTENT_CAPTURE_MODE = options.captureMode;
   }
 
-  // Dynamically load @grafana/sigil-pi. This package is an optional peer dep;
-  // if it is not installed the bridge silently disables itself.
-  let sigilPiMod: { default: (pi: MinimalEventBus) => void | Promise<void> };
-  try {
-    sigilPiMod = await import('@grafana/sigil-pi');
-    if (typeof sigilPiMod.default !== 'function') {
-      console.warn('[gitlab-review] @grafana/sigil-pi: default export is not a function');
-      return null;
-    }
-  } catch (err) {
-    console.warn(
-      '[gitlab-review] @grafana/sigil-pi is not installed. ' +
-        'Install it with: npm install @grafana/sigil-pi',
-      err,
-    );
-    return null;
-  }
+  // Dynamically import @grafana/sigil-pi so it is only loaded when the bridge
+  // is enabled. The package is a direct dependency so it is always available.
+  const { default: sigilPiFactory } = await import('@grafana/sigil-pi');
 
   const bus = createMinimalEventBus();
   // Register all sigil-pi event handlers onto our minimal bus.
-  await sigilPiMod.default(bus);
+  await sigilPiFactory(bus);
 
   // A context that satisfies sigil-pi's internal ctx.sessionManager.getSessionId()
   // call used to read the conversationId.
