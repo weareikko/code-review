@@ -16,7 +16,7 @@ export {
 } from './diagnostics.js';
 export type { OtelBridge, OtelBridgeOptions, OtelRuntime } from './otel.js';
 export { isOtelEnabled, startOtelBridge } from './otel.js';
-export type { SigilBridge, SigilBridgeOptions, SigilClientLike } from './sigil.js';
+export type { SigilBridge, SigilBridgeOptions } from './sigil.js';
 export { isSigilEnabled, startSigilBridge } from './sigil.js';
 export type { RunBridges, RunResult } from './cli.js';
 export { run } from './cli.js';
@@ -26,10 +26,6 @@ export type {
   CreateAgentParams,
   ReviewUsage,
   RunReviewOptions,
-  ToolTiming,
-  TurnContentBlock,
-  TurnData,
-  TurnToolResultContent,
   UsageBreakdown,
 } from './gitlab-review.js';
 export { runReview } from './gitlab-review.js';

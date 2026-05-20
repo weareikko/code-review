@@ -212,10 +212,10 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
         cwd: config.cwd,
         diff,
         logger,
-        conversationId: runId,
-        // Pass runId as the parent so per-turn generations link to the run-level
-        // generation (which is explicitly set to id: runId in startSigilBridge).
-        onTurnEnd: bridges?.sigil?.createTurnHandler(runId),
+        // Subscribe sigil-pi to the agent so per-turn events fire in real time.
+        attachTelemetry: bridges?.sigil
+          ? (agent) => bridges.sigil!.subscribeToAgent(agent, runId)
+          : undefined,
       });
       context.usage = result;
       return result;

@@ -9,10 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Grafana AI Observability (Sigil) bridge** (`src/sigil.ts`): optional generation-level telemetry export to Grafana AI Observability via `@grafana/sigil-sdk-js`. Enable with `GITLAB_REVIEW_SIGIL=1` or `--sigil`. The bridge subscribes to the `reviewer.run` diagnostics channel and forwards model identity, token usage, costs, timing, and project/MR metadata as a Sigil generation record.
-  - Content capture mode: `metadata_only` (default), `no_tool_content`, or `full` — set via `SIGIL_CONTENT_CAPTURE_MODE` or `--sigil-capture-mode`. All modes currently export metadata only since message content is not captured in the diagnostic context; the mode is passed to the SDK for forward compatibility.
+- **Grafana AI Observability (Sigil) bridge** (`src/sigil.ts`): optional per-turn telemetry export to Grafana AI Observability via `@grafana/sigil-pi`. Enable with `GITLAB_REVIEW_SIGIL=1` or `--sigil`. The bridge subscribes the `@grafana/sigil-pi` extension to the agent's event stream so every turn (including TTFT, tool spans, and message content) is exported in real time — no custom Sigil orchestration to maintain.
+  - Content capture mode: `metadata_only` (default), `no_tool_content`, or `full` — set via `SIGIL_CONTENT_CAPTURE_MODE` or `--sigil-capture-mode`.
+  - Agent identity defaults to `SIGIL_AGENT_NAME=gitlab-review` and `SIGIL_AGENT_VERSION=<package version>`; override by setting these env vars before starting.
   - `GITLAB_REVIEW_OTEL` sends generic OTLP spans and metrics; `GITLAB_REVIEW_SIGIL` sends generation records to Grafana AI Observability via the Sigil protocol and is not OTLP. Both bridges can run simultaneously.
-  - Required Sigil env vars (`SIGIL_ENDPOINT`, `SIGIL_AUTH_TENANT_ID`, `SIGIL_AUTH_TOKEN`) come from Grafana AI Observability Configuration. The `@grafana/sigil-sdk-js` package is loaded dynamically only when the bridge is enabled, so disabling it costs nothing at startup.
+  - Required Sigil env vars (`SIGIL_ENDPOINT`, `SIGIL_AUTH_TENANT_ID`, `SIGIL_AUTH_TOKEN`) come from Grafana AI Observability Configuration. `@grafana/sigil-pi` is loaded dynamically only when the bridge is enabled, so disabling it costs nothing at startup.
 
 ## [0.3.2] - 2026-05-20
 

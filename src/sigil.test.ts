@@ -1,686 +1,312 @@
-import { describe, expect, it, vi } from 'vitest';
-import type { Config, SigilContentCaptureMode } from './config.js';
-import { ReviewerError } from './errors.js';
-import type {
-  ToolTiming,
-  TurnContentBlock,
-  TurnData,
-  TurnToolResultContent,
-} from './gitlab-review.js';
-import {
-  createDiagnosticContext,
-  diagnosticChannels,
-  traceDiagnostic,
-  type DiagnosticContext,
-} from './review.js';
-import type { SigilBridgeOptions, SigilClientLike } from './sigil.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { isSigilEnabled, startSigilBridge } from './sigil.js';
 
-function makeTurnData(overrides: Partial<TurnData> = {}): TurnData {
-  const now = new Date('2025-01-01T00:00:00.000Z');
-  return {
-    conversationId: 'conv-1',
-    turnIndex: 1,
-    startedAt: now,
-    completedAt: new Date(now.getTime() + 3000),
-    firstTokenAt: new Date(now.getTime() + 500),
-    model: 'claude-sonnet-4-5',
-    provider: 'anthropic',
-    thinkingEnabled: false,
-    toolTimings: [],
-    contentBlocks: [],
-    toolResultContents: [],
-    usage: {
-      inputTokens: 1000,
-      outputTokens: 200,
-      cacheReadInputTokens: 50,
-      cacheWriteInputTokens: 10,
-      totalTokens: 1260, // all-in from provider
-    },
-    stopReason: 'end_turn',
-    ...overrides,
+// ---------------------------------------------------------------------------
+// Fake sigil-pi factory — records events dispatched through the event bus.
+// ---------------------------------------------------------------------------
+
+interface DispatchedEvent {
+  event: string;
+  data: unknown;
+  sessionId: string | undefined;
+}
+
+let dispatchedEvents: DispatchedEvent[] = [];
+
+/**
+ * A fake `@grafana/sigil-pi` factory that:
+ *   - Registers handlers via `pi.on(event, handler)`
+ *   - Records dispatched (event, sessionId) pairs so tests can assert behavior
+ */
+function createFakeSigilPiFactory() {
+  return (pi: {
+    on: (event: string, handler: (event: unknown, ctx: unknown) => Promise<void>) => void;
+  }) => {
+    const registerSpy = (event: string) => {
+      pi.on(event, async (data, ctx) => {
+        const sessionId = (
+          ctx as { sessionManager: { getSessionId(): string | undefined } }
+        ).sessionManager.getSessionId();
+        dispatchedEvents.push({ event, data, sessionId });
+      });
+    };
+    for (const evt of [
+      'session_start',
+      'session_shutdown',
+      'turn_start',
+      'turn_end',
+      'tool_execution_start',
+      'tool_execution_end',
+      'message_update',
+      'message_end',
+      'agent_end',
+    ]) {
+      registerSpy(evt);
+    }
   };
 }
 
-describe('Sigil bridge', () => {
-  interface SigilGenerationStart {
-    id?: string;
-    conversationId?: string;
-    agentName?: string;
-    agentVersion?: string;
-    model: { provider: string; name: string };
-    contentCapture?: string;
-    thinkingEnabled?: boolean;
-    tools?: Array<{ name: string }>;
-    parentGenerationIds?: string[];
-    startedAt?: Date;
-    metadata?: Record<string, unknown>;
-  }
+vi.mock('@grafana/sigil-pi', () => ({ default: createFakeSigilPiFactory() }));
 
-  interface SigilGenerationResult {
-    usage?: {
-      inputTokens?: number;
-      outputTokens?: number;
-      totalTokens?: number;
-      cacheReadInputTokens?: number;
-      cacheWriteInputTokens?: number;
-    };
-    completedAt?: Date;
-    stopReason?: string;
-    output?: Array<{ role: string; parts: Array<Record<string, unknown>> }>;
-    metadata?: Record<string, unknown>;
-  }
+// ---------------------------------------------------------------------------
+// Minimal AgentLike for tests.
+// ---------------------------------------------------------------------------
 
-  interface RecordedGeneration {
-    start: SigilGenerationStart;
-    result: SigilGenerationResult | undefined;
-    callError: unknown;
-    ended: boolean;
-    firstTokenAt: Date | undefined;
-    /** Whether this was opened via startStreamingGeneration (vs. startGeneration). */
-    streaming: boolean;
-  }
+type AgentListener = (event: { type: string; [key: string]: unknown }) => Promise<void> | void;
 
-  interface RecordedToolExecution {
-    toolName: string;
-    toolCallId?: string;
-    conversationId?: string;
-    requestModel?: string;
-    requestProvider?: string;
-    startedAt?: Date;
-    completedAt: Date | undefined;
-    callError: unknown;
-    ended: boolean;
-  }
-
-  function createFakeClient(): {
-    client: SigilClientLike;
-    generations: RecordedGeneration[];
-    toolExecutions: RecordedToolExecution[];
-    shutdown: ReturnType<typeof vi.fn>;
-  } {
-    const generations: RecordedGeneration[] = [];
-    const toolExecutions: RecordedToolExecution[] = [];
-    const shutdown = vi.fn(async () => undefined);
-
-    function makeGenerationRecorder(gen: RecordedGeneration) {
-      return {
-        setResult(result: SigilGenerationResult) {
-          gen.result = result;
-        },
-        setCallError(error: unknown) {
-          gen.callError = error;
-        },
-        setFirstTokenAt(date: Date) {
-          gen.firstTokenAt = date;
-        },
-        end() {
-          gen.ended = true;
-        },
+function makeAgent() {
+  const listeners: AgentListener[] = [];
+  return {
+    subscribe(listener: AgentListener): () => void {
+      listeners.push(listener);
+      return () => {
+        const idx = listeners.indexOf(listener);
+        if (idx !== -1) listeners.splice(idx, 1);
       };
-    }
-
-    const client: SigilClientLike = {
-      startGeneration(start: SigilGenerationStart) {
-        const gen: RecordedGeneration = {
-          start,
-          result: undefined,
-          callError: undefined,
-          ended: false,
-          firstTokenAt: undefined,
-          streaming: false,
-        };
-        generations.push(gen);
-        return makeGenerationRecorder(gen);
-      },
-      async startStreamingGeneration<T>(
-        start: SigilGenerationStart,
-        callback: (recorder: ReturnType<typeof makeGenerationRecorder>) => Promise<T>,
-      ): Promise<T> {
-        const gen: RecordedGeneration = {
-          start,
-          result: undefined,
-          callError: undefined,
-          ended: false,
-          firstTokenAt: undefined,
-          streaming: true,
-        };
-        generations.push(gen);
-        const recorder = makeGenerationRecorder(gen);
-        try {
-          return await callback(recorder);
-        } finally {
-          gen.ended = true;
-        }
-      },
-      startToolExecution(start: {
-        toolName: string;
-        toolCallId?: string;
-        conversationId?: string;
-        requestModel?: string;
-        requestProvider?: string;
-        startedAt?: Date;
-      }) {
-        const exec: RecordedToolExecution = {
-          toolName: start.toolName,
-          toolCallId: start.toolCallId,
-          conversationId: start.conversationId,
-          requestModel: start.requestModel,
-          requestProvider: start.requestProvider,
-          startedAt: start.startedAt,
-          completedAt: undefined,
-          callError: undefined,
-          ended: false,
-        };
-        toolExecutions.push(exec);
-        return {
-          setResult(result: { completedAt?: Date }) {
-            exec.completedAt = result.completedAt;
-          },
-          setCallError(error: unknown) {
-            exec.callError = error;
-          },
-          end() {
-            exec.ended = true;
-          },
-        };
-      },
-      shutdown,
-    };
-
-    return { client, generations, toolExecutions, shutdown };
-  }
-
-  const baseConfig: Config = {
-    project: 'proj',
-    mr: '1',
-    gitlabUrl: 'https://gitlab.example.com',
-    gitlabToken: 't',
-    gitlabAuthHeader: 'PRIVATE-TOKEN',
-    model: 'anthropic/claude-sonnet-4-5',
-    minSeverity: 'info',
-    thinkingLevel: 'off',
-    postingMode: 'direct',
-    apiKey: 'k',
-    reviewFile: 'gitlab-review.md',
-    output: 'review-comments.json',
-    dryRun: false,
-    noPost: false,
-    postSummary: false,
-    forceReview: false,
-    verbose: false,
-    cwd: '/tmp',
-    skills: [],
-    sigil: false,
-    sigilCaptureMode: 'metadata_only',
+    },
+    async emit(event: { type: string; [key: string]: unknown }) {
+      for (const l of listeners) await l(event);
+    },
+    listenerCount(): number {
+      return listeners.length;
+    },
   };
+}
 
-  async function runWithBridge(
-    work: (ctx: DiagnosticContext) => Promise<void>,
-    opts: { captureMode?: SigilContentCaptureMode; runId?: string } = {},
-  ): Promise<ReturnType<typeof createFakeClient>> {
-    const { startSigilBridge } = await import('./sigil.js');
-    const fake = createFakeClient();
-    const bridgeOptions: SigilBridgeOptions = {
-      client: fake.client,
-      env: { GITLAB_REVIEW_SIGIL: '1' },
-      captureMode: opts.captureMode,
-    };
-    const bridge = await startSigilBridge(bridgeOptions);
-    expect(bridge).not.toBeNull();
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
-    const runId = opts.runId ?? 'run-sigil';
-    const ctx = createDiagnosticContext('run', baseConfig, runId);
-    try {
-      await traceDiagnostic(diagnosticChannels.run, ctx, async (c) => {
-        await work(c);
-      });
-    } catch {
-      // Swallow — error-path tests assert on captured generations.
-    } finally {
-      await bridge?.shutdown();
-    }
-    return fake;
-  }
+const enabledEnv = { GITLAB_REVIEW_SIGIL: '1' };
 
-  it('returns false from isSigilEnabled unless GITLAB_REVIEW_SIGIL is opted in', async () => {
-    const { isSigilEnabled } = await import('./sigil.js');
-    expect(isSigilEnabled({})).toBe(false);
-    expect(isSigilEnabled({ GITLAB_REVIEW_SIGIL: '0' })).toBe(false);
-    expect(isSigilEnabled({ GITLAB_REVIEW_SIGIL: 'yes' })).toBe(false);
+describe('isSigilEnabled', () => {
+  it('returns true when GITLAB_REVIEW_SIGIL=1', () => {
     expect(isSigilEnabled({ GITLAB_REVIEW_SIGIL: '1' })).toBe(true);
+  });
+
+  it('returns true when GITLAB_REVIEW_SIGIL=true', () => {
     expect(isSigilEnabled({ GITLAB_REVIEW_SIGIL: 'true' })).toBe(true);
   });
 
-  it('returns null when disabled without touching the client', async () => {
-    const { startSigilBridge } = await import('./sigil.js');
-    const fake = createFakeClient();
-    const result = await startSigilBridge({ client: fake.client, env: {} });
-    expect(result).toBeNull();
-    expect(fake.generations).toHaveLength(0);
-    expect(fake.shutdown).not.toHaveBeenCalled();
+  it('returns false when env var is absent', () => {
+    expect(isSigilEnabled({})).toBe(false);
   });
 
-  it('calls startGeneration on reviewer.run start', async () => {
-    const { generations } = await runWithBridge(async (ctx) => {
-      ctx.usage = {
-        model: 'anthropic/claude-sonnet-4-5',
-        tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
-        cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
-      };
-    });
+  it('returns false when GITLAB_REVIEW_SIGIL=0', () => {
+    expect(isSigilEnabled({ GITLAB_REVIEW_SIGIL: '0' })).toBe(false);
+  });
+});
 
-    expect(generations).toHaveLength(1);
-    const gen = generations[0];
-    expect(gen.start.model).toEqual({ provider: 'anthropic', name: 'claude-sonnet-4-5' });
-    expect(gen.start.agentName).toBe('gitlab-review');
-    expect(gen.start.conversationId).toBe('run-sigil');
-    expect(gen.start.contentCapture).toBe('metadata_only');
+describe('startSigilBridge', () => {
+  beforeEach(() => {
+    dispatchedEvents = [];
   });
 
-  it('sets project and MR metadata in startGeneration', async () => {
-    const { generations } = await runWithBridge(async () => {});
-
-    const meta = generations[0].start.metadata;
-    expect(meta).toMatchObject({
-      'gitlab.project_id': 'proj',
-      'gitlab.mr_iid': '1',
-      'gitlab.server_url': 'https://gitlab.example.com',
-      'gitlab_review.run_id': 'run-sigil',
-      'gitlab_review.dry_run': false,
-      'gitlab_review.no_post': false,
-      'gitlab_review.min_severity': 'info',
-    });
+  it('returns null when GITLAB_REVIEW_SIGIL is not set', async () => {
+    const bridge = await startSigilBridge({ env: {} });
+    expect(bridge).toBeNull();
   });
 
-  it('sets result with usage and result metadata on asyncEnd', async () => {
-    const { generations } = await runWithBridge(async (ctx) => {
-      ctx.usage = {
-        model: 'anthropic/claude-sonnet-4-5',
-        tokens: { input: 1200, output: 340, cacheRead: 50, cacheWrite: 10, total: 1600 },
-        cost: { input: 0.012, output: 0.034, cacheRead: 0.001, cacheWrite: 0.002, total: 0.049 },
-      };
-      ctx.generated = 7;
-      ctx.newComments = 5;
-      ctx.duplicateComments = 2;
-    });
-
-    const gen = generations[0];
-    expect(gen.ended).toBe(true);
-    expect(gen.callError).toBeUndefined();
-    expect(gen.result?.usage).toMatchObject({
-      inputTokens: 1200,
-      outputTokens: 340,
-      // totalTokens = input + output only (OTel gen_ai convention); cache tokens
-      // are separate fields and must not inflate this value.
-      totalTokens: 1540,
-      cacheReadInputTokens: 50,
-      cacheWriteInputTokens: 10,
-    });
-    expect(gen.result?.metadata).toMatchObject({
-      'gitlab_review.comments.generated': 7,
-      'gitlab_review.comments.new': 5,
-      'gitlab_review.comments.duplicate': 2,
-    });
+  it('dispatches session_start after successful factory load', async () => {
+    const bridge = await startSigilBridge({ env: enabledEnv });
+    expect(bridge).not.toBeNull();
+    const sessionStarts = dispatchedEvents.filter((e) => e.event === 'session_start');
+    expect(sessionStarts).toHaveLength(1);
+    expect(sessionStarts[0].sessionId).toBeUndefined();
   });
 
-  it('omits zero cache token fields from usage', async () => {
-    const { generations } = await runWithBridge(async (ctx) => {
-      ctx.usage = {
-        model: 'anthropic/claude-sonnet-4-5',
-        tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
-        cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
-      };
-    });
-
-    const usage = generations[0].result?.usage;
-    expect(usage).toMatchObject({ inputTokens: 100, outputTokens: 50 });
-    expect(usage).not.toHaveProperty('cacheReadInputTokens');
-    expect(usage).not.toHaveProperty('cacheWriteInputTokens');
-  });
-
-  it('calls setCallError and ends on reviewer.run error', async () => {
-    const { generations } = await runWithBridge(async () => {
-      throw new ReviewerError('reviewer timed out');
-    });
-
-    const gen = generations[0];
-    expect(gen.ended).toBe(true);
-    expect(gen.result).toBeUndefined();
-    expect(gen.callError).toBeInstanceOf(Error);
-    expect((gen.callError as Error).message).toBe('reviewer timed out');
-    expect((gen.callError as Error).name).toBe('ReviewerError');
-  });
-
-  it('respects captureMode option and passes it to the SDK', async () => {
-    const { generations } = await runWithBridge(async () => {}, {
-      captureMode: 'no_tool_content',
-    });
-    expect(generations[0].start.contentCapture).toBe('no_tool_content');
-  });
-
-  it('reads captureMode from SIGIL_CONTENT_CAPTURE_MODE env when not overridden', async () => {
-    const { startSigilBridge } = await import('./sigil.js');
-    const fake = createFakeClient();
-    const bridge = await startSigilBridge({
-      client: fake.client,
-      env: { GITLAB_REVIEW_SIGIL: '1', SIGIL_CONTENT_CAPTURE_MODE: 'full' },
-    });
-    const ctx = createDiagnosticContext('run', baseConfig, 'run-env-mode');
-    await traceDiagnostic(diagnosticChannels.run, ctx, async () => {});
-    await bridge?.shutdown();
-
-    expect(fake.generations[0].start.contentCapture).toBe('full');
-  });
-
-  it('falls back to metadata_only for unknown capture mode values', async () => {
-    const { startSigilBridge } = await import('./sigil.js');
-    const fake = createFakeClient();
-    const bridge = await startSigilBridge({
-      client: fake.client,
-      env: { GITLAB_REVIEW_SIGIL: '1', SIGIL_CONTENT_CAPTURE_MODE: 'invalid-mode' },
-    });
-    const ctx = createDiagnosticContext('run', baseConfig, 'run-fallback');
-    await traceDiagnostic(diagnosticChannels.run, ctx, async () => {});
-    await bridge?.shutdown();
-
-    expect(fake.generations[0].start.contentCapture).toBe('metadata_only');
-  });
-
-  it('awaits client.shutdown when the bridge stops', async () => {
-    const { startSigilBridge } = await import('./sigil.js');
-    const fake = createFakeClient();
-    const bridge = await startSigilBridge({
-      client: fake.client,
-      env: { GITLAB_REVIEW_SIGIL: '1' },
-    });
-    await bridge?.shutdown();
-    expect(fake.shutdown).toHaveBeenCalledTimes(1);
-  });
-
-  it('handles model without provider prefix', async () => {
-    const configNoProvider: Config = { ...baseConfig, model: 'claude-sonnet-4-5' };
-    const { startSigilBridge } = await import('./sigil.js');
-    const fake = createFakeClient();
-    const bridge = await startSigilBridge({
-      client: fake.client,
-      env: { GITLAB_REVIEW_SIGIL: '1' },
-    });
-    const ctx = createDiagnosticContext('run', configNoProvider, 'run-no-provider');
-    await traceDiagnostic(diagnosticChannels.run, ctx, async () => {});
-    await bridge?.shutdown();
-
-    expect(fake.generations[0].start.model.provider).toBe('unknown');
-    expect(fake.generations[0].start.model.name).toBe('claude-sonnet-4-5');
-  });
-
-  // ---------------------------------------------------------------------------
-  // createTurnHandler — per-turn streaming generation and tool spans
-  // ---------------------------------------------------------------------------
-
-  async function startBridgeWithFake(opts: SigilBridgeOptions = {}) {
-    const { startSigilBridge } = await import('./sigil.js');
-    const fake = createFakeClient();
-    const bridge = await startSigilBridge({
-      client: fake.client,
-      env: { GITLAB_REVIEW_SIGIL: '1' },
-      ...opts,
-    });
-    return { fake, bridge };
-  }
-
-  it('createTurnHandler emits a streaming generation per turn', async () => {
-    const { fake, bridge } = await startBridgeWithFake();
-    const handler = bridge!.createTurnHandler('parent-run-id');
-    await handler(makeTurnData());
+  it('dispatches session_shutdown on bridge.shutdown()', async () => {
+    const bridge = await startSigilBridge({ env: enabledEnv });
     await bridge!.shutdown();
-
-    // Should have 0 run-level generations (none triggered) plus 1 streaming turn.
-    const streaming = fake.generations.filter((g) => g.streaming);
-    expect(streaming).toHaveLength(1);
-    const gen = streaming[0];
-    expect(gen.start.model).toEqual({ provider: 'anthropic', name: 'claude-sonnet-4-5' });
-    expect(gen.start.conversationId).toBe('conv-1');
-    expect(gen.start.agentName).toBe('gitlab-review');
-    expect(gen.start.contentCapture).toBe('metadata_only');
-    expect(gen.ended).toBe(true);
+    const shutdowns = dispatchedEvents.filter((e) => e.event === 'session_shutdown');
+    expect(shutdowns).toHaveLength(1);
   });
 
-  it('createTurnHandler sets TTFT on the generation recorder', async () => {
-    const { fake, bridge } = await startBridgeWithFake();
-    const firstTokenAt = new Date('2025-01-01T00:00:00.500Z');
-    await bridge!.createTurnHandler('parent-run-id')(makeTurnData({ firstTokenAt }));
-    await bridge!.shutdown();
-
-    const gen = fake.generations.find((g) => g.streaming)!;
-    expect(gen.firstTokenAt).toEqual(firstTokenAt);
+  it('injects SIGIL_AGENT_NAME when not already set', async () => {
+    const prev = process.env.SIGIL_AGENT_NAME;
+    delete process.env.SIGIL_AGENT_NAME;
+    try {
+      await startSigilBridge({ env: enabledEnv });
+      expect(process.env.SIGIL_AGENT_NAME).toBe('gitlab-review');
+    } finally {
+      if (prev !== undefined) process.env.SIGIL_AGENT_NAME = prev;
+      else delete process.env.SIGIL_AGENT_NAME;
+    }
   });
 
-  it('createTurnHandler omits setFirstTokenAt when firstTokenAt is absent', async () => {
-    const { fake, bridge } = await startBridgeWithFake();
-    await bridge!.createTurnHandler('parent-run-id')(makeTurnData({ firstTokenAt: undefined }));
-    await bridge!.shutdown();
-
-    const gen = fake.generations.find((g) => g.streaming)!;
-    expect(gen.firstTokenAt).toBeUndefined();
+  it('does not overwrite an existing SIGIL_AGENT_NAME', async () => {
+    const prev = process.env.SIGIL_AGENT_NAME;
+    process.env.SIGIL_AGENT_NAME = 'custom-agent';
+    try {
+      await startSigilBridge({ env: enabledEnv });
+      expect(process.env.SIGIL_AGENT_NAME).toBe('custom-agent');
+    } finally {
+      if (prev !== undefined) process.env.SIGIL_AGENT_NAME = prev;
+      else delete process.env.SIGIL_AGENT_NAME;
+    }
   });
 
-  it('createTurnHandler sets result with OTel-convention totalTokens', async () => {
-    const { fake, bridge } = await startBridgeWithFake();
-    await bridge!.createTurnHandler('parent-run-id')(
-      makeTurnData({
-        usage: {
-          inputTokens: 1000,
-          outputTokens: 200,
-          cacheReadInputTokens: 50,
-          cacheWriteInputTokens: 10,
-          totalTokens: 1260, // all-in; bridge should NOT use this
-        },
-      }),
-    );
-    await bridge!.shutdown();
+  it('injects captureMode into SIGIL_CONTENT_CAPTURE_MODE when not set', async () => {
+    const prev = process.env.SIGIL_CONTENT_CAPTURE_MODE;
+    delete process.env.SIGIL_CONTENT_CAPTURE_MODE;
+    try {
+      await startSigilBridge({ env: enabledEnv, captureMode: 'full' });
+      expect(process.env.SIGIL_CONTENT_CAPTURE_MODE).toBe('full');
+    } finally {
+      if (prev !== undefined) process.env.SIGIL_CONTENT_CAPTURE_MODE = prev;
+      else delete process.env.SIGIL_CONTENT_CAPTURE_MODE;
+    }
+  });
 
-    const gen = fake.generations.find((g) => g.streaming)!;
-    expect(gen.result?.usage).toMatchObject({
-      inputTokens: 1000,
-      outputTokens: 200,
-      // totalTokens = input + output (OTel convention), NOT the all-in 1260.
-      totalTokens: 1200,
-      cacheReadInputTokens: 50,
-      cacheWriteInputTokens: 10,
+  it('does not overwrite an existing SIGIL_CONTENT_CAPTURE_MODE', async () => {
+    const prev = process.env.SIGIL_CONTENT_CAPTURE_MODE;
+    process.env.SIGIL_CONTENT_CAPTURE_MODE = 'no_tool_content';
+    try {
+      await startSigilBridge({ env: enabledEnv, captureMode: 'full' });
+      expect(process.env.SIGIL_CONTENT_CAPTURE_MODE).toBe('no_tool_content');
+    } finally {
+      if (prev !== undefined) process.env.SIGIL_CONTENT_CAPTURE_MODE = prev;
+      else delete process.env.SIGIL_CONTENT_CAPTURE_MODE;
+    }
+  });
+});
+
+describe('subscribeToAgent', () => {
+  beforeEach(() => {
+    dispatchedEvents = [];
+  });
+
+  it('forwards agent events to sigil-pi handlers in real time', async () => {
+    const bridge = await startSigilBridge({ env: enabledEnv });
+    const agent = makeAgent();
+    const unsubscribe = bridge!.subscribeToAgent(agent, 'run-123');
+
+    await agent.emit({ type: 'turn_start', turnIndex: 1, timestamp: Date.now() });
+
+    const turnStarts = dispatchedEvents.filter((e) => e.event === 'turn_start');
+    expect(turnStarts).toHaveLength(1);
+    expect(turnStarts[0].data).toMatchObject({ type: 'turn_start', turnIndex: 1 });
+    unsubscribe();
+  });
+
+  it('passes conversationId via ctx.sessionManager.getSessionId()', async () => {
+    const bridge = await startSigilBridge({ env: enabledEnv });
+    const agent = makeAgent();
+    const unsubscribe = bridge!.subscribeToAgent(agent, 'my-run-id');
+
+    await agent.emit({ type: 'turn_start', turnIndex: 1, timestamp: Date.now() });
+
+    const turnStart = dispatchedEvents.find((e) => e.event === 'turn_start');
+    expect(turnStart?.sessionId).toBe('my-run-id');
+    unsubscribe();
+  });
+
+  it('unsubscribing stops event forwarding', async () => {
+    const bridge = await startSigilBridge({ env: enabledEnv });
+    const agent = makeAgent();
+    const unsubscribe = bridge!.subscribeToAgent(agent, 'run-xyz');
+    unsubscribe();
+
+    await agent.emit({ type: 'turn_start', turnIndex: 1, timestamp: Date.now() });
+
+    expect(dispatchedEvents.filter((e) => e.event === 'turn_start')).toHaveLength(0);
+  });
+
+  it('forwards tool_execution_start and tool_execution_end', async () => {
+    const bridge = await startSigilBridge({ env: enabledEnv });
+    const agent = makeAgent();
+    const unsubscribe = bridge!.subscribeToAgent(agent, 'run-tools');
+
+    await agent.emit({
+      type: 'tool_execution_start',
+      toolCallId: 'tc-1',
+      toolName: 'Read',
+      args: { file_path: 'foo.ts' },
     });
+    await agent.emit({
+      type: 'tool_execution_end',
+      toolCallId: 'tc-1',
+      toolName: 'Read',
+      result: 'content',
+      isError: false,
+    });
+
+    expect(dispatchedEvents.some((e) => e.event === 'tool_execution_start')).toBe(true);
+    expect(dispatchedEvents.some((e) => e.event === 'tool_execution_end')).toBe(true);
+    unsubscribe();
   });
 
-  it('createTurnHandler maps stop reason to OTel convention', async () => {
-    const { fake, bridge } = await startBridgeWithFake();
-    await bridge!.createTurnHandler('parent-run-id')(makeTurnData({ stopReason: 'stop' }));
-    await bridge!.shutdown();
+  it('forwards message_update events (TTFT)', async () => {
+    const bridge = await startSigilBridge({ env: enabledEnv });
+    const agent = makeAgent();
+    const unsubscribe = bridge!.subscribeToAgent(agent, 'run-ttft');
 
-    const gen = fake.generations.find((g) => g.streaming)!;
-    expect(gen.result?.stopReason).toBe('end_turn');
+    await agent.emit({
+      type: 'message_update',
+      message: { role: 'assistant' },
+      assistantMessageEvent: {},
+    });
+
+    expect(dispatchedEvents.some((e) => e.event === 'message_update')).toBe(true);
+    unsubscribe();
   });
 
-  it('createTurnHandler emits one tool span per tool timing', async () => {
-    const toolTimings: ToolTiming[] = [
-      {
-        toolCallId: 'tc-1',
-        toolName: 'read_file',
-        startedAt: new Date('2025-01-01T00:00:01Z'),
-        completedAt: new Date('2025-01-01T00:00:02Z'),
-        isError: false,
-      },
-      {
-        toolCallId: 'tc-2',
-        toolName: 'write_file',
-        startedAt: new Date('2025-01-01T00:00:02Z'),
-        completedAt: new Date('2025-01-01T00:00:03Z'),
-        isError: false,
-      },
-    ];
-    const { fake, bridge } = await startBridgeWithFake();
-    await bridge!.createTurnHandler('parent-run-id')(makeTurnData({ toolTimings }));
-    await bridge!.shutdown();
+  it('forwards turn_end with assistant message and toolResults', async () => {
+    const bridge = await startSigilBridge({ env: enabledEnv });
+    const agent = makeAgent();
+    const unsubscribe = bridge!.subscribeToAgent(agent, 'run-end');
 
-    expect(fake.toolExecutions).toHaveLength(2);
-    expect(fake.toolExecutions[0].toolName).toBe('read_file');
-    expect(fake.toolExecutions[0].toolCallId).toBe('tc-1');
-    expect(fake.toolExecutions[0].conversationId).toBe('conv-1');
-    expect(fake.toolExecutions[0].requestModel).toBe('claude-sonnet-4-5');
-    expect(fake.toolExecutions[0].requestProvider).toBe('anthropic');
-    expect(fake.toolExecutions[0].ended).toBe(true);
-    expect(fake.toolExecutions[0].callError).toBeUndefined();
-    expect(fake.toolExecutions[1].toolName).toBe('write_file');
-  });
-
-  it('createTurnHandler sets callError for errored tools', async () => {
-    const toolTimings: ToolTiming[] = [
-      {
-        toolCallId: 'tc-err',
-        toolName: 'bash',
-        startedAt: new Date(),
-        completedAt: new Date(),
-        isError: true,
-      },
-    ];
-    const { fake, bridge } = await startBridgeWithFake();
-    await bridge!.createTurnHandler('parent-run-id')(makeTurnData({ toolTimings }));
-    await bridge!.shutdown();
-
-    expect(fake.toolExecutions[0].callError).toBeInstanceOf(Error);
-    expect(fake.toolExecutions[0].completedAt).toBeUndefined();
-  });
-
-  it('createTurnHandler sets thinkingEnabled on streaming generation seed', async () => {
-    const { fake, bridge } = await startBridgeWithFake();
-    await bridge!.createTurnHandler('parent-run-id')(makeTurnData({ thinkingEnabled: true }));
-    await bridge!.shutdown();
-
-    const gen = fake.generations.find((g) => g.streaming)!;
-    expect(gen.start.thinkingEnabled).toBe(true);
-  });
-
-  it('createTurnHandler sets parentGenerationIds from the provided parent ID', async () => {
-    const { fake, bridge } = await startBridgeWithFake();
-    await bridge!.createTurnHandler('my-run-id')(makeTurnData());
-    await bridge!.shutdown();
-
-    const gen = fake.generations.find((g) => g.streaming)!;
-    expect(gen.start.parentGenerationIds).toEqual(['my-run-id']);
-  });
-
-  it('run-level startGeneration uses runId as explicit id for dependency linking', async () => {
-    const result = await runWithBridge(async () => {}, { runId: 'explicit-run-id' });
-
-    const runGen = result.generations.find((g) => !g.streaming)!;
-    expect(runGen.start.id).toBe('explicit-run-id');
-  });
-
-  it('createTurnHandler sets tools from unique tool names in toolTimings', async () => {
-    const toolTimings: ToolTiming[] = [
-      {
-        toolCallId: 'tc-1',
-        toolName: 'read_file',
-        startedAt: new Date(),
-        completedAt: new Date(),
-        isError: false,
-      },
-      {
-        toolCallId: 'tc-2',
-        toolName: 'grep',
-        startedAt: new Date(),
-        completedAt: new Date(),
-        isError: false,
-      },
-      {
-        toolCallId: 'tc-3',
-        toolName: 'read_file',
-        startedAt: new Date(),
-        completedAt: new Date(),
-        isError: false,
-      }, // duplicate
-    ];
-    const { fake, bridge } = await startBridgeWithFake();
-    await bridge!.createTurnHandler('parent-run-id')(makeTurnData({ toolTimings }));
-    await bridge!.shutdown();
-
-    const gen = fake.generations.find((g) => g.streaming)!;
-    expect(gen.start.tools).toEqual([{ name: 'read_file' }, { name: 'grep' }]);
-  });
-
-  it('createTurnHandler includes output messages in full capture mode', async () => {
-    const contentBlocks: TurnContentBlock[] = [
-      { type: 'text', text: 'Here is my analysis.' },
-      { type: 'toolCall', id: 'tc-1', name: 'read_file', arguments: { path: '/foo.ts' } },
-    ];
-    const toolResultContents: TurnToolResultContent[] = [
-      { toolCallId: 'tc-1', toolName: 'read_file', content: 'file content', isError: false },
-    ];
-    const { fake, bridge } = await startBridgeWithFake({ captureMode: 'full' });
-    await bridge!.createTurnHandler('parent-run-id')(
-      makeTurnData({ contentBlocks, toolResultContents }),
-    );
-    await bridge!.shutdown();
-
-    const gen = fake.generations.find((g) => g.streaming)!;
-    const output = gen.result?.output;
-    expect(output).toBeDefined();
-    // Text message
-    expect(output![0]).toMatchObject({
+    const fakeMsg = {
       role: 'assistant',
-      parts: [{ type: 'text', text: 'Here is my analysis.' }],
-    });
-    // Tool call with full inputJSON
-    expect(output![1]).toMatchObject({
-      role: 'assistant',
-      parts: [
-        {
-          type: 'tool_call',
-          toolCall: { name: 'read_file', inputJSON: JSON.stringify({ path: '/foo.ts' }) },
-        },
-      ],
-    });
-    // Tool result with content
-    expect(output![2]).toMatchObject({
-      role: 'tool',
-      parts: [{ type: 'tool_result', toolResult: { toolCallId: 'tc-1', content: 'file content' } }],
-    });
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-5',
+      content: [{ type: 'text', text: 'OK' }],
+      usage: {
+        input: 10,
+        output: 5,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 15,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: 'stop',
+      timestamp: Date.now(),
+    };
+    await agent.emit({ type: 'turn_end', turnIndex: 1, message: fakeMsg, toolResults: [] });
+
+    const turnEnds = dispatchedEvents.filter((e) => e.event === 'turn_end');
+    expect(turnEnds).toHaveLength(1);
+    expect((turnEnds[0].data as { message: unknown }).message).toEqual(fakeMsg);
+    unsubscribe();
   });
 
-  it('createTurnHandler omits output messages in metadata_only mode', async () => {
-    const contentBlocks: TurnContentBlock[] = [{ type: 'text', text: 'some text' }];
-    const { fake, bridge } = await startBridgeWithFake({ captureMode: 'metadata_only' });
-    await bridge!.createTurnHandler('parent-run-id')(makeTurnData({ contentBlocks }));
-    await bridge!.shutdown();
+  it('handles multiple concurrent subscriptions with different conversationIds', async () => {
+    const bridge = await startSigilBridge({ env: enabledEnv });
+    const agent = makeAgent();
+    const unsub1 = bridge!.subscribeToAgent(agent, 'run-A');
+    const unsub2 = bridge!.subscribeToAgent(agent, 'run-B');
 
-    const gen = fake.generations.find((g) => g.streaming)!;
-    expect(gen.result?.output).toBeUndefined();
+    await agent.emit({ type: 'turn_start', turnIndex: 1, timestamp: Date.now() });
+
+    const turnStarts = dispatchedEvents.filter((e) => e.event === 'turn_start');
+    expect(turnStarts).toHaveLength(2);
+    expect(
+      turnStarts.map((e) => e.sessionId).toSorted((a, b) => String(a).localeCompare(String(b))),
+    ).toEqual(['run-A', 'run-B']);
+
+    unsub1();
+    unsub2();
   });
 
-  it('createTurnHandler strips tool content bodies in no_tool_content mode', async () => {
-    const contentBlocks: TurnContentBlock[] = [
-      { type: 'text', text: 'analysis' },
-      { type: 'toolCall', id: 'tc-1', name: 'bash', arguments: { cmd: 'rm -rf /' } },
-    ];
-    const toolResultContents: TurnToolResultContent[] = [
-      { toolCallId: 'tc-1', toolName: 'bash', content: 'command output', isError: false },
-    ];
-    const { fake, bridge } = await startBridgeWithFake({ captureMode: 'no_tool_content' });
-    await bridge!.createTurnHandler('parent-run-id')(
-      makeTurnData({ contentBlocks, toolResultContents }),
-    );
-    await bridge!.shutdown();
+  it('works with undefined conversationId', async () => {
+    const bridge = await startSigilBridge({ env: enabledEnv });
+    const agent = makeAgent();
+    const unsubscribe = bridge!.subscribeToAgent(agent, undefined);
 
-    const gen = fake.generations.find((g) => g.streaming)!;
-    const output = gen.result?.output;
-    expect(output).toBeDefined();
-    // Text is included
-    expect(output![0]).toMatchObject({ parts: [{ type: 'text' }] });
-    // Tool call structure present but inputJSON empty
-    expect((output![1].parts[0] as { toolCall?: { inputJSON: string } }).toolCall?.inputJSON).toBe(
-      '',
-    );
-    // Tool result present but content empty
-    expect((output![2].parts[0] as { toolResult?: { content: string } }).toolResult?.content).toBe(
-      '',
-    );
+    await agent.emit({ type: 'turn_start', turnIndex: 1, timestamp: Date.now() });
+
+    const turnStart = dispatchedEvents.find((e) => e.event === 'turn_start');
+    expect(turnStart?.sessionId).toBeUndefined();
+    unsubscribe();
   });
 });
