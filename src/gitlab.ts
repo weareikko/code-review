@@ -275,9 +275,12 @@ export class GitLabClient {
   }
 
   createDraftNote(project: string, mr: string, payload: unknown): Promise<DraftNote> {
+    // The draft notes API uses `note` instead of `body` for the comment text.
+    const { body, ...rest } = payload as Record<string, unknown>;
+    const draftPayload = body !== undefined ? { note: body, ...rest } : payload;
     return this.request(
       `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/draft_notes`,
-      { method: 'POST', body: JSON.stringify(payload) },
+      { method: 'POST', body: JSON.stringify(draftPayload) },
     );
   }
 
