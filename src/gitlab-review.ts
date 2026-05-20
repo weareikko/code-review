@@ -54,6 +54,27 @@ export interface ToolTiming {
   isError: boolean;
 }
 
+/**
+ * A single content block from the assistant message, in a provider-agnostic form.
+ * Mirrors the pi-ai content block union with only the fields needed for telemetry.
+ */
+export type TurnContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'thinking'; thinking: string; redacted?: boolean }
+  | { type: 'toolCall'; id: string; name: string; arguments: Record<string, unknown> };
+
+/**
+ * Text content extracted from a single tool result message in this turn.
+ * Non-text (image) content parts are omitted.
+ */
+export interface TurnToolResultContent {
+  toolCallId: string;
+  toolName: string;
+  /** Joined text from all text-type content items. Empty string when none. */
+  content: string;
+  isError: boolean;
+}
+
 export interface TurnData {
   /** The conversation (run) ID — matches the diagnostics runId for this review. */
   conversationId: string | undefined;
@@ -73,6 +94,16 @@ export interface TurnData {
   thinkingEnabled: boolean;
   /** Tool executions that ran during this turn, in completion order. */
   toolTimings: ToolTiming[];
+  /**
+   * Content blocks from the assistant message (text, thinking, tool calls).
+   * Use these to populate output messages in telemetry.
+   */
+  contentBlocks: TurnContentBlock[];
+  /**
+   * Tool results returned to the LLM for this turn.
+   * Non-text content parts (images) are stripped.
+   */
+  toolResultContents: TurnToolResultContent[];
   /** Raw token counts from the provider for this turn. */
   usage: {
     inputTokens: number;
@@ -541,6 +572,27 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
           const assistant = event.message as AssistantMessage;
           if (options.onTurnEnd) {
             const thinkingEnabled = assistant.content.some((b) => b.type === 'thinking');
+            const contentBlocks: TurnContentBlock[] = assistant.content.map((block) => {
+              if (block.type === 'text') return { type: 'text', text: block.text };
+              if (block.type === 'thinking')
+                return { type: 'thinking', thinking: block.thinking, redacted: block.redacted };
+              // toolCall
+              return {
+                type: 'toolCall',
+                id: block.id,
+                name: block.name,
+                arguments: block.arguments,
+              };
+            });
+            const toolResultContents: TurnToolResultContent[] = event.toolResults.map((tr) => ({
+              toolCallId: tr.toolCallId,
+              toolName: tr.toolName,
+              content: tr.content
+                .filter((c): c is { type: 'text'; text: string } => c.type === 'text' && !!c.text)
+                .map((c) => c.text)
+                .join('\n'),
+              isError: tr.isError,
+            }));
             try {
               await options.onTurnEnd({
                 conversationId: options.conversationId,
@@ -552,6 +604,8 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
                 provider: assistant.provider,
                 thinkingEnabled,
                 toolTimings: turnToolTimings.slice(),
+                contentBlocks,
+                toolResultContents,
                 usage: {
                   inputTokens: assistant.usage.input,
                   outputTokens: assistant.usage.output,

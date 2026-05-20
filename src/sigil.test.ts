@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Config, SigilContentCaptureMode } from './config.js';
 import { ReviewerError } from './errors.js';
-import type { ToolTiming, TurnData } from './gitlab-review.js';
+import type {
+  ToolTiming,
+  TurnContentBlock,
+  TurnData,
+  TurnToolResultContent,
+} from './gitlab-review.js';
 import {
   createDiagnosticContext,
   diagnosticChannels,
@@ -22,6 +27,8 @@ function makeTurnData(overrides: Partial<TurnData> = {}): TurnData {
     provider: 'anthropic',
     thinkingEnabled: false,
     toolTimings: [],
+    contentBlocks: [],
+    toolResultContents: [],
     usage: {
       inputTokens: 1000,
       outputTokens: 200,
@@ -36,12 +43,15 @@ function makeTurnData(overrides: Partial<TurnData> = {}): TurnData {
 
 describe('Sigil bridge', () => {
   interface SigilGenerationStart {
+    id?: string;
     conversationId?: string;
     agentName?: string;
     agentVersion?: string;
     model: { provider: string; name: string };
     contentCapture?: string;
     thinkingEnabled?: boolean;
+    tools?: Array<{ name: string }>;
+    parentGenerationIds?: string[];
     startedAt?: Date;
     metadata?: Record<string, unknown>;
   }
@@ -56,6 +66,7 @@ describe('Sigil bridge', () => {
     };
     completedAt?: Date;
     stopReason?: string;
+    output?: Array<{ role: string; parts: Array<Record<string, unknown>> }>;
     metadata?: Record<string, unknown>;
   }
 
@@ -419,7 +430,7 @@ describe('Sigil bridge', () => {
 
   it('createTurnHandler emits a streaming generation per turn', async () => {
     const { fake, bridge } = await startBridgeWithFake();
-    const handler = bridge!.createTurnHandler();
+    const handler = bridge!.createTurnHandler('parent-run-id');
     await handler(makeTurnData());
     await bridge!.shutdown();
 
@@ -437,7 +448,7 @@ describe('Sigil bridge', () => {
   it('createTurnHandler sets TTFT on the generation recorder', async () => {
     const { fake, bridge } = await startBridgeWithFake();
     const firstTokenAt = new Date('2025-01-01T00:00:00.500Z');
-    await bridge!.createTurnHandler()(makeTurnData({ firstTokenAt }));
+    await bridge!.createTurnHandler('parent-run-id')(makeTurnData({ firstTokenAt }));
     await bridge!.shutdown();
 
     const gen = fake.generations.find((g) => g.streaming)!;
@@ -446,7 +457,7 @@ describe('Sigil bridge', () => {
 
   it('createTurnHandler omits setFirstTokenAt when firstTokenAt is absent', async () => {
     const { fake, bridge } = await startBridgeWithFake();
-    await bridge!.createTurnHandler()(makeTurnData({ firstTokenAt: undefined }));
+    await bridge!.createTurnHandler('parent-run-id')(makeTurnData({ firstTokenAt: undefined }));
     await bridge!.shutdown();
 
     const gen = fake.generations.find((g) => g.streaming)!;
@@ -455,7 +466,7 @@ describe('Sigil bridge', () => {
 
   it('createTurnHandler sets result with OTel-convention totalTokens', async () => {
     const { fake, bridge } = await startBridgeWithFake();
-    await bridge!.createTurnHandler()(
+    await bridge!.createTurnHandler('parent-run-id')(
       makeTurnData({
         usage: {
           inputTokens: 1000,
@@ -481,7 +492,7 @@ describe('Sigil bridge', () => {
 
   it('createTurnHandler maps stop reason to OTel convention', async () => {
     const { fake, bridge } = await startBridgeWithFake();
-    await bridge!.createTurnHandler()(makeTurnData({ stopReason: 'stop' }));
+    await bridge!.createTurnHandler('parent-run-id')(makeTurnData({ stopReason: 'stop' }));
     await bridge!.shutdown();
 
     const gen = fake.generations.find((g) => g.streaming)!;
@@ -506,7 +517,7 @@ describe('Sigil bridge', () => {
       },
     ];
     const { fake, bridge } = await startBridgeWithFake();
-    await bridge!.createTurnHandler()(makeTurnData({ toolTimings }));
+    await bridge!.createTurnHandler('parent-run-id')(makeTurnData({ toolTimings }));
     await bridge!.shutdown();
 
     expect(fake.toolExecutions).toHaveLength(2);
@@ -531,7 +542,7 @@ describe('Sigil bridge', () => {
       },
     ];
     const { fake, bridge } = await startBridgeWithFake();
-    await bridge!.createTurnHandler()(makeTurnData({ toolTimings }));
+    await bridge!.createTurnHandler('parent-run-id')(makeTurnData({ toolTimings }));
     await bridge!.shutdown();
 
     expect(fake.toolExecutions[0].callError).toBeInstanceOf(Error);
@@ -540,10 +551,136 @@ describe('Sigil bridge', () => {
 
   it('createTurnHandler sets thinkingEnabled on streaming generation seed', async () => {
     const { fake, bridge } = await startBridgeWithFake();
-    await bridge!.createTurnHandler()(makeTurnData({ thinkingEnabled: true }));
+    await bridge!.createTurnHandler('parent-run-id')(makeTurnData({ thinkingEnabled: true }));
     await bridge!.shutdown();
 
     const gen = fake.generations.find((g) => g.streaming)!;
     expect(gen.start.thinkingEnabled).toBe(true);
+  });
+
+  it('createTurnHandler sets parentGenerationIds from the provided parent ID', async () => {
+    const { fake, bridge } = await startBridgeWithFake();
+    await bridge!.createTurnHandler('my-run-id')(makeTurnData());
+    await bridge!.shutdown();
+
+    const gen = fake.generations.find((g) => g.streaming)!;
+    expect(gen.start.parentGenerationIds).toEqual(['my-run-id']);
+  });
+
+  it('run-level startGeneration uses runId as explicit id for dependency linking', async () => {
+    const result = await runWithBridge(async () => {}, { runId: 'explicit-run-id' });
+
+    const runGen = result.generations.find((g) => !g.streaming)!;
+    expect(runGen.start.id).toBe('explicit-run-id');
+  });
+
+  it('createTurnHandler sets tools from unique tool names in toolTimings', async () => {
+    const toolTimings: ToolTiming[] = [
+      {
+        toolCallId: 'tc-1',
+        toolName: 'read_file',
+        startedAt: new Date(),
+        completedAt: new Date(),
+        isError: false,
+      },
+      {
+        toolCallId: 'tc-2',
+        toolName: 'grep',
+        startedAt: new Date(),
+        completedAt: new Date(),
+        isError: false,
+      },
+      {
+        toolCallId: 'tc-3',
+        toolName: 'read_file',
+        startedAt: new Date(),
+        completedAt: new Date(),
+        isError: false,
+      }, // duplicate
+    ];
+    const { fake, bridge } = await startBridgeWithFake();
+    await bridge!.createTurnHandler('parent-run-id')(makeTurnData({ toolTimings }));
+    await bridge!.shutdown();
+
+    const gen = fake.generations.find((g) => g.streaming)!;
+    expect(gen.start.tools).toEqual([{ name: 'read_file' }, { name: 'grep' }]);
+  });
+
+  it('createTurnHandler includes output messages in full capture mode', async () => {
+    const contentBlocks: TurnContentBlock[] = [
+      { type: 'text', text: 'Here is my analysis.' },
+      { type: 'toolCall', id: 'tc-1', name: 'read_file', arguments: { path: '/foo.ts' } },
+    ];
+    const toolResultContents: TurnToolResultContent[] = [
+      { toolCallId: 'tc-1', toolName: 'read_file', content: 'file content', isError: false },
+    ];
+    const { fake, bridge } = await startBridgeWithFake({ captureMode: 'full' });
+    await bridge!.createTurnHandler('parent-run-id')(
+      makeTurnData({ contentBlocks, toolResultContents }),
+    );
+    await bridge!.shutdown();
+
+    const gen = fake.generations.find((g) => g.streaming)!;
+    const output = gen.result?.output;
+    expect(output).toBeDefined();
+    // Text message
+    expect(output![0]).toMatchObject({
+      role: 'assistant',
+      parts: [{ type: 'text', text: 'Here is my analysis.' }],
+    });
+    // Tool call with full inputJSON
+    expect(output![1]).toMatchObject({
+      role: 'assistant',
+      parts: [
+        {
+          type: 'tool_call',
+          toolCall: { name: 'read_file', inputJSON: JSON.stringify({ path: '/foo.ts' }) },
+        },
+      ],
+    });
+    // Tool result with content
+    expect(output![2]).toMatchObject({
+      role: 'tool',
+      parts: [{ type: 'tool_result', toolResult: { toolCallId: 'tc-1', content: 'file content' } }],
+    });
+  });
+
+  it('createTurnHandler omits output messages in metadata_only mode', async () => {
+    const contentBlocks: TurnContentBlock[] = [{ type: 'text', text: 'some text' }];
+    const { fake, bridge } = await startBridgeWithFake({ captureMode: 'metadata_only' });
+    await bridge!.createTurnHandler('parent-run-id')(makeTurnData({ contentBlocks }));
+    await bridge!.shutdown();
+
+    const gen = fake.generations.find((g) => g.streaming)!;
+    expect(gen.result?.output).toBeUndefined();
+  });
+
+  it('createTurnHandler strips tool content bodies in no_tool_content mode', async () => {
+    const contentBlocks: TurnContentBlock[] = [
+      { type: 'text', text: 'analysis' },
+      { type: 'toolCall', id: 'tc-1', name: 'bash', arguments: { cmd: 'rm -rf /' } },
+    ];
+    const toolResultContents: TurnToolResultContent[] = [
+      { toolCallId: 'tc-1', toolName: 'bash', content: 'command output', isError: false },
+    ];
+    const { fake, bridge } = await startBridgeWithFake({ captureMode: 'no_tool_content' });
+    await bridge!.createTurnHandler('parent-run-id')(
+      makeTurnData({ contentBlocks, toolResultContents }),
+    );
+    await bridge!.shutdown();
+
+    const gen = fake.generations.find((g) => g.streaming)!;
+    const output = gen.result?.output;
+    expect(output).toBeDefined();
+    // Text is included
+    expect(output![0]).toMatchObject({ parts: [{ type: 'text' }] });
+    // Tool call structure present but inputJSON empty
+    expect((output![1].parts[0] as { toolCall?: { inputJSON: string } }).toolCall?.inputJSON).toBe(
+      '',
+    );
+    // Tool result present but content empty
+    expect((output![2].parts[0] as { toolResult?: { content: string } }).toolResult?.content).toBe(
+      '',
+    );
   });
 });

@@ -27,7 +27,9 @@ export type {
   ReviewUsage,
   RunReviewOptions,
   ToolTiming,
+  TurnContentBlock,
   TurnData,
+  TurnToolResultContent,
   UsageBreakdown,
 } from './gitlab-review.js';
 export { runReview } from './gitlab-review.js';

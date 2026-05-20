@@ -45,7 +45,7 @@
 import type { SigilContentCaptureMode } from './config.js';
 import { SIGIL_CAPTURE_MODES } from './config.js';
 import { diagnosticChannels, type DiagnosticContext } from './diagnostics.js';
-import type { TurnData } from './gitlab-review.js';
+import type { TurnContentBlock, TurnData, TurnToolResultContent } from './gitlab-review.js';
 
 // Inlined at build time by Vite's `define` (see vite.config.ts). Keeps
 // `agentVersion` accurate under `npx`/standalone bin invocations, where
@@ -71,6 +71,10 @@ interface SigilTokenUsage {
   cacheWriteInputTokens?: number;
 }
 
+interface SigilToolDef {
+  name: string;
+}
+
 interface SigilGenerationStart {
   id?: string;
   conversationId?: string;
@@ -79,15 +83,42 @@ interface SigilGenerationStart {
   model: SigilModelRef;
   contentCapture?: string;
   thinkingEnabled?: boolean;
+  tools?: SigilToolDef[];
+  parentGenerationIds?: string[];
   startedAt?: Date;
   metadata?: Record<string, unknown>;
   tags?: Record<string, string>;
+}
+
+// Sigil output message types — structurally compatible with Message / MessagePart
+// in @grafana/sigil-sdk-js. Defined inline to avoid the hard dep.
+interface SigilTextPart {
+  type: 'text';
+  text: string;
+}
+interface SigilThinkingPart {
+  type: 'thinking';
+  thinking: string;
+}
+interface SigilToolCallPart {
+  type: 'tool_call';
+  toolCall: { id: string; name: string; inputJSON: string };
+}
+interface SigilToolResultPart {
+  type: 'tool_result';
+  toolResult: { toolCallId: string; name: string; content: string; isError: boolean };
+}
+type SigilMessagePart = SigilTextPart | SigilThinkingPart | SigilToolCallPart | SigilToolResultPart;
+interface SigilMessage {
+  role: 'user' | 'assistant' | 'tool';
+  parts: SigilMessagePart[];
 }
 
 interface SigilGenerationResult {
   usage?: SigilTokenUsage;
   completedAt?: Date;
   stopReason?: string;
+  output?: SigilMessage[];
   metadata?: Record<string, unknown>;
 }
 
@@ -138,8 +169,11 @@ export interface SigilBridge {
    * Creates a per-turn telemetry handler suitable for `RunReviewOptions.onTurnEnd`.
    * The handler emits one `startStreamingGeneration` record per agent turn and one
    * `startToolExecution` span for each tool call within that turn.
+   *
+   * @param parentGenerationId The ID of the run-level generation (= diagnostics runId)
+   *   to link each turn as a child. Pass the same `runId` used when starting the bridge.
    */
-  createTurnHandler(): (data: TurnData) => Promise<void>;
+  createTurnHandler(parentGenerationId: string): (data: TurnData) => Promise<void>;
 }
 
 export interface SigilBridgeOptions {
@@ -182,6 +216,9 @@ export async function startSigilBridge(
     start: (ctx: DiagnosticContext) => {
       const { provider, name } = parseModel(ctx.model ?? '');
       const recorder = client.startGeneration({
+        // Use runId as the generation's explicit ID so per-turn handlers can
+        // reference it via parentGenerationIds for dependency linking.
+        id: ctx.runId,
         conversationId: ctx.runId,
         agentName: 'gitlab-review',
         agentVersion: __PKG_VERSION__,
@@ -254,9 +291,18 @@ export async function startSigilBridge(
       await client.shutdown();
     },
 
-    createTurnHandler(): (data: TurnData) => Promise<void> {
+    createTurnHandler(parentGenerationId: string): (data: TurnData) => Promise<void> {
       return async (data: TurnData) => {
         const { provider, name } = parseModel(data.model ?? '');
+        // Derive tool definitions from unique tool names actually executed this turn.
+        const toolsSeen = new Set<string>();
+        const tools: SigilToolDef[] = [];
+        for (const t of data.toolTimings) {
+          if (!toolsSeen.has(t.toolName)) {
+            toolsSeen.add(t.toolName);
+            tools.push({ name: t.toolName });
+          }
+        }
         await client.startStreamingGeneration(
           {
             conversationId: data.conversationId,
@@ -269,6 +315,8 @@ export async function startSigilBridge(
             contentCapture: captureMode,
             startedAt: data.startedAt,
             thinkingEnabled: data.thinkingEnabled || undefined,
+            ...(tools.length > 0 ? { tools } : {}),
+            parentGenerationIds: [parentGenerationId],
           },
           async (recorder) => {
             if (data.firstTokenAt) {
@@ -297,6 +345,11 @@ export async function startSigilBridge(
             }
             const { inputTokens, outputTokens, cacheReadInputTokens, cacheWriteInputTokens } =
               data.usage;
+            const output = buildOutputMessages(
+              data.contentBlocks,
+              data.toolResultContents,
+              captureMode,
+            );
             recorder.setResult({
               completedAt: data.completedAt,
               stopReason: mapTurnStopReason(data.stopReason),
@@ -308,6 +361,7 @@ export async function startSigilBridge(
                 ...(cacheReadInputTokens > 0 ? { cacheReadInputTokens } : {}),
                 ...(cacheWriteInputTokens > 0 ? { cacheWriteInputTokens } : {}),
               },
+              ...(output ? { output } : {}),
             });
           },
         );
@@ -381,6 +435,80 @@ function mapTurnStopReason(reason: string): string {
     default:
       return reason;
   }
+}
+
+/**
+ * Serialise per-turn content blocks and tool results to the Sigil Message format.
+ *
+ * Mirrors the logic in @grafana/sigil-pi `mappers.ts`:
+ * - `metadata_only`: returns undefined (no message bodies exported).
+ * - `no_tool_content`: includes assistant text/thinking but omits tool call args
+ *   and tool result bodies.
+ * - `full`: everything included.
+ *
+ * Tool call and tool result parts are always emitted (structure needed for the
+ * SDK's tool_calls_per_operation metric); bodies are conditionally included.
+ */
+function buildOutputMessages(
+  contentBlocks: TurnContentBlock[],
+  toolResultContents: TurnToolResultContent[],
+  captureMode: SigilContentCaptureMode,
+): SigilMessage[] | undefined {
+  if (captureMode === 'metadata_only') return undefined;
+
+  const messages: SigilMessage[] = [];
+  const includeBodies = true; // captureMode is no_tool_content or full
+  const includeToolBodies = captureMode === 'full';
+
+  for (const block of contentBlocks) {
+    if (block.type === 'text') {
+      if (includeBodies && block.text.trim().length > 0) {
+        messages.push({ role: 'assistant', parts: [{ type: 'text', text: block.text }] });
+      }
+    } else if (block.type === 'thinking') {
+      if (block.redacted) continue;
+      if (includeBodies && block.thinking.trim().length > 0) {
+        messages.push({
+          role: 'assistant',
+          parts: [{ type: 'thinking', thinking: block.thinking }],
+        });
+      }
+    } else {
+      // toolCall — always emit structure; inputJSON only in full mode
+      messages.push({
+        role: 'assistant',
+        parts: [
+          {
+            type: 'tool_call',
+            toolCall: {
+              id: block.id,
+              name: block.name,
+              inputJSON: includeToolBodies ? JSON.stringify(block.arguments) : '',
+            },
+          },
+        ],
+      });
+    }
+  }
+
+  for (const tr of toolResultContents) {
+    messages.push({
+      role: 'tool',
+      parts: [
+        {
+          type: 'tool_result',
+          toolResult: {
+            toolCallId: tr.toolCallId,
+            name: tr.toolName,
+            content: includeToolBodies ? tr.content : '',
+            isError: tr.isError,
+          },
+        },
+      ],
+    });
+  }
+
+  return messages.length > 0 ? messages : undefined;
 }
 
 const noop = (): void => undefined;

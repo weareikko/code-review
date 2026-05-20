@@ -213,7 +213,9 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
         diff,
         logger,
         conversationId: runId,
-        onTurnEnd: bridges?.sigil?.createTurnHandler(),
+        // Pass runId as the parent so per-turn generations link to the run-level
+        // generation (which is explicitly set to id: runId in startSigilBridge).
+        onTurnEnd: bridges?.sigil?.createTurnHandler(runId),
       });
       context.usage = result;
       return result;
