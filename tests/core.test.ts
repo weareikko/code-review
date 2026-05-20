@@ -319,7 +319,7 @@ describe('GitLab draft notes endpoints', () => {
     );
     const init = fetchImpl.mock.calls[0][1];
     expect(init.method).toBe('POST');
-    expect(init.body).toBe(JSON.stringify(payload));
+    expect(init.body).toBe(JSON.stringify({ note: 'x', position: { position_type: 'text' } }));
     expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
   });
 
@@ -887,9 +887,9 @@ describe('postGeneratedComments strategies', () => {
       'POST /draft_notes': (init) => {
         const body = JSON.parse(String(init?.body ?? '{}'));
         const id = createdId++;
-        const fp = body.body.includes('aaaa') ? 'aaaa' : 'bbbb';
+        const fp = body.note.includes('aaaa') ? 'aaaa' : 'bbbb';
         createdToFp.set(id, fp);
-        return new Response(JSON.stringify({ id, author_id: 1, note: body.body }));
+        return new Response(JSON.stringify({ id, author_id: 1, note: body.note }));
       },
       'GET /discussions': () =>
         new Response(
