@@ -54,7 +54,7 @@ export interface RunReviewOptions {
   logger?: Logger;
   /**
    * Called with the agent after it is created, before the first prompt.
-   * Use this to attach telemetry (e.g. pass `sigilBridge.subscribeToAgent`).
+   * Use this to attach telemetry (e.g. `otelBridge.createAgentTelemetry(runId)`).
    * The returned function, if any, is called after the review completes.
    */
   attachTelemetry?: (agent: AgentLike) => (() => void) | undefined;
@@ -446,7 +446,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   let turnCount = 0;
   let toolCallCount = 0;
 
-  // Attach telemetry (e.g. sigil-pi) before the first prompt so all events fire.
+  // Attach telemetry before the first prompt so all events fire.
   const detachTelemetry = options.attachTelemetry?.(agent);
 
   const timeoutMs = options.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS;

@@ -1,18 +1,25 @@
 /**
- * Optional OpenTelemetry bridge over `diagnostics_channel`.
+ * Optional OpenTelemetry bridge over `diagnostics_channel` and the agent
+ * event stream.
  *
  * Subscribes to every `@ikko-dev/gitlab-review:*` tracing channel, opens an
  * OTel span on `start`, and closes it on `asyncEnd`/`error`. The `reviewer.run`
  * phase additionally carries OpenTelemetry GenAI semantic-convention
  * attributes (`gen_ai.*`) and emits the standardized GenAI client metrics
- * (`gen_ai.client.operation.duration`, `gen_ai.client.token.usage`) so
- * metrics-driven AI observability surfaces (Grafana Application Observability,
- * Datadog LLM Observability, …) auto-discover the service.
+ * (`gen_ai.client.operation.duration`, `gen_ai.client.token.usage`,
+ * `gen_ai.client.cost`, `gen_ai.client.time_to_first_token`) so
+ * metrics-driven AI observability surfaces auto-discover the service.
+ *
+ * Per-turn and per-tool-call telemetry is captured via `createAgentTelemetry`,
+ * which subscribes to the agent's live event stream and emits:
+ *   - `gen_ai.agent.turn` child spans under `invoke_agent gitlab-review`
+ *   - `execute_tool <name>` grandchild spans under each turn
+ *   - Per-turn `gen_ai.client.token.usage` and `gen_ai.client.cost` metrics
+ *   - `gen_ai.client.time_to_first_token` when streaming events fire
  *
  * Opt-in: set `GITLAB_REVIEW_OTEL=1`. Exporter selection and endpoint follow
  * the standard `OTEL_*` env vars (`OTEL_EXPORTER_OTLP_ENDPOINT`,
- * `OTEL_EXPORTER_OTLP_HEADERS`, …). For Grafana Sigil, set the endpoint and
- * the `OTEL_EXPORTER_OTLP_HEADERS` to carry the Cloud Access Policy Token.
+ * `OTEL_EXPORTER_OTLP_HEADERS`, …).
  *
  * The OTel SDK runtime is bundled but loaded via dynamic `import()` behind the
  * env check, so disabling the bridge skips the SDK boot entirely. Library
@@ -32,6 +39,7 @@ import type {
 } from '@opentelemetry/api';
 import { context, metrics, SpanKind, SpanStatusCode, trace } from '@opentelemetry/api';
 import { diagnosticChannels, type DiagnosticContext, type DiagnosticPhase } from './diagnostics.js';
+import type { AgentLike } from './gitlab-review.js';
 
 // Inlined at build time by Vite's `define` (see vite.config.ts). Keeps
 // `service.version` accurate under `npx`/standalone bin invocations, where
@@ -40,6 +48,14 @@ declare const __PKG_VERSION__: string;
 
 export interface OtelBridge {
   shutdown(): Promise<void>;
+  /**
+   * Returns a function that, when called with an agent, subscribes to its live
+   * event stream and emits per-turn and per-tool-call OTel spans/metrics.
+   * Must be called after the `reviewer.run` diagnostic span is open (i.e. from
+   * inside `traceDiagnosticPhase('reviewer.run', ...)`). Returns `undefined`
+   * when the span is not yet open or OTel is disabled.
+   */
+  createAgentTelemetry(runId: string): ((agent: AgentLike) => () => void) | undefined;
 }
 
 export interface OtelRuntime {
@@ -76,6 +92,12 @@ const DURATION_BUCKETS_S = [
 const TOKEN_BUCKETS = [
   1, 4, 16, 64, 256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864,
 ];
+const TTFT_BUCKETS_S = [
+  0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
+];
+const COST_BUCKETS_USD = [
+  0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0,
+];
 
 const OTEL_SDK_PACKAGES = [
   '@opentelemetry/sdk-node',
@@ -88,6 +110,21 @@ const noop = (): void => undefined;
 interface OpenSpan {
   span: Span;
   closed: boolean;
+}
+
+// Minimal shape of a per-turn assistant message we need for telemetry.
+// Avoids importing AssistantMessage from @earendil-works/pi-ai in this module.
+interface TurnMessage {
+  role?: string;
+  model?: string;
+  stopReason?: string;
+  usage?: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    cost?: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
+  };
 }
 
 export function isOtelEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -111,6 +148,16 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     description: 'Measures number of input and output tokens used',
     unit: '{token}',
     advice: { explicitBucketBoundaries: TOKEN_BUCKETS },
+  });
+  const operationCost = meter.createHistogram('gen_ai.client.cost', {
+    description: 'GenAI operation cost in USD',
+    unit: 'usd',
+    advice: { explicitBucketBoundaries: COST_BUCKETS_USD },
+  });
+  const timeToFirstToken = meter.createHistogram('gen_ai.client.time_to_first_token', {
+    description: 'Time to first token from the LLM',
+    unit: 's',
+    advice: { explicitBucketBoundaries: TTFT_BUCKETS_S },
   });
 
   const openByRun = new Map<string, Map<DiagnosticPhase, OpenSpan>>();
@@ -140,7 +187,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     if (!entry || entry.closed) return;
     if (ctx.phase === GEN_AI_PHASE) {
       applyGenAiAttributes(entry.span, ctx);
-      recordGenAiMetrics(operationDuration, tokenUsage, ctx, isError);
+      recordGenAiMetrics(operationDuration, tokenUsage, operationCost, ctx, isError);
     }
     applyResultAttributes(entry.span, ctx);
     if (isError && ctx.errorInfo) {
@@ -183,6 +230,131 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
       openByRun.clear();
       await runtime.shutdown();
     },
+
+    createAgentTelemetry(runId: string): ((agent: AgentLike) => () => void) | undefined {
+      const reviewerEntry = openByRun.get(runId)?.get(GEN_AI_PHASE);
+      if (!reviewerEntry || reviewerEntry.closed) return undefined;
+      const reviewerSpanCtx = trace.setSpan(context.active(), reviewerEntry.span);
+      return buildAgentSubscriber(
+        tracer,
+        tokenUsage,
+        operationCost,
+        timeToFirstToken,
+        reviewerSpanCtx,
+      );
+    },
+  };
+}
+
+function buildAgentSubscriber(
+  tracer: Tracer,
+  tokenUsage: Histogram,
+  operationCost: Histogram,
+  timeToFirstToken: Histogram,
+  reviewerSpanCtx: ReturnType<typeof trace.setSpan>,
+): (agent: AgentLike) => () => void {
+  return (agent: AgentLike): (() => void) => {
+    let currentTurn: { span: Span; startMs: number; firstTokenMs?: number } | undefined;
+    const openTools = new Map<string, Span>();
+
+    return agent.subscribe(async (event) => {
+      const type = (event as { type?: string }).type;
+      if (!type) return;
+
+      if (type === 'turn_start') {
+        if (currentTurn) currentTurn.span.end(); // close any orphaned turn
+        const turnIndex = (event as { turnIndex?: number }).turnIndex;
+        const span = tracer.startSpan(
+          'gen_ai.agent.turn',
+          { kind: SpanKind.INTERNAL },
+          reviewerSpanCtx,
+        );
+        span.setAttribute('gen_ai.operation.name', 'invoke_agent');
+        if (typeof turnIndex === 'number') span.setAttribute('gen_ai.agent.turn.index', turnIndex);
+        currentTurn = { span, startMs: Date.now() };
+      }
+
+      if (type === 'message_update' && currentTurn && !currentTurn.firstTokenMs) {
+        currentTurn.firstTokenMs = Date.now();
+      }
+
+      if (type === 'message_end') {
+        const msg = (event as { message?: TurnMessage }).message;
+        if (!msg || msg.role !== 'assistant' || !currentTurn) return;
+        const { span, startMs, firstTokenMs } = currentTurn;
+        currentTurn = undefined;
+
+        const rawModel = String(msg.model ?? '');
+        const modelId = rawModel.includes('/') ? rawModel.split('/')[1] : rawModel || undefined;
+        const metricAttrs: Attributes = { 'gen_ai.operation.name': 'invoke_agent' };
+        if (modelId) {
+          metricAttrs['gen_ai.request.model'] = modelId;
+          metricAttrs['gen_ai.response.model'] = modelId;
+          span.setAttribute('gen_ai.response.model', modelId);
+        }
+        if (msg.stopReason) span.setAttribute('gen_ai.response.stop_reason', msg.stopReason);
+
+        if (firstTokenMs !== undefined) {
+          const ttftS = (firstTokenMs - startMs) / 1000;
+          timeToFirstToken.record(ttftS, metricAttrs);
+          span.setAttribute('gen_ai.client.time_to_first_token_s', ttftS);
+        }
+
+        if (msg.usage) {
+          const u = msg.usage;
+          tokenUsage.record(u.input, { ...metricAttrs, 'gen_ai.token.type': 'input' });
+          tokenUsage.record(u.output, { ...metricAttrs, 'gen_ai.token.type': 'output' });
+          span.setAttribute('gen_ai.usage.input_tokens', u.input);
+          span.setAttribute('gen_ai.usage.output_tokens', u.output);
+          if (u.cacheRead) span.setAttribute('gen_ai.usage.cache_read.input_tokens', u.cacheRead);
+          if (u.cacheWrite)
+            span.setAttribute('gen_ai.usage.cache_creation.input_tokens', u.cacheWrite);
+          if (u.cost) {
+            operationCost.record(u.cost.total, metricAttrs);
+            span.setAttribute('gen_ai.usage.cost.input_usd', u.cost.input);
+            span.setAttribute('gen_ai.usage.cost.output_usd', u.cost.output);
+            span.setAttribute('gen_ai.usage.cost.total_usd', u.cost.total);
+          }
+        }
+        span.end();
+      }
+
+      if (type === 'tool_execution_start') {
+        const { toolName, toolCallId } = event as { toolName?: string; toolCallId?: string };
+        if (!toolName || !toolCallId) return;
+        const toolParentCtx = currentTurn
+          ? trace.setSpan(context.active(), currentTurn.span)
+          : reviewerSpanCtx;
+        const toolSpan = tracer.startSpan(
+          `execute_tool ${toolName}`,
+          { kind: SpanKind.INTERNAL },
+          toolParentCtx,
+        );
+        toolSpan.setAttribute('gen_ai.operation.name', 'execute_tool');
+        toolSpan.setAttribute('gen_ai.tool.name', toolName);
+        toolSpan.setAttribute('gen_ai.tool.call.id', toolCallId);
+        openTools.set(toolCallId, toolSpan);
+      }
+
+      if (type === 'tool_execution_end') {
+        const { toolCallId, isError } = event as { toolCallId?: string; isError?: boolean };
+        if (!toolCallId) return;
+        const span = openTools.get(toolCallId);
+        if (!span) return;
+        if (isError) span.setStatus({ code: SpanStatusCode.ERROR });
+        span.end();
+        openTools.delete(toolCallId);
+      }
+
+      if (type === 'agent_end') {
+        if (currentTurn) {
+          currentTurn.span.end();
+          currentTurn = undefined;
+        }
+        for (const span of openTools.values()) span.end();
+        openTools.clear();
+      }
+    });
   };
 }
 
@@ -317,6 +489,7 @@ function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
 function recordGenAiMetrics(
   durationHist: Histogram,
   tokenHist: Histogram,
+  costHist: Histogram,
   ctx: DiagnosticContext,
   isError: boolean,
 ): void {
@@ -336,5 +509,6 @@ function recordGenAiMetrics(
   if (ctx.usage) {
     tokenHist.record(ctx.usage.tokens.input, { ...attrs, 'gen_ai.token.type': 'input' });
     tokenHist.record(ctx.usage.tokens.output, { ...attrs, 'gen_ai.token.type': 'output' });
+    costHist.record(ctx.usage.cost.total, attrs);
   }
 }

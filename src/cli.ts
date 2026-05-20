@@ -16,6 +16,7 @@ import type { ReviewUsage } from './gitlab-review.js';
 import { runReview } from './gitlab-review.js';
 import { GitLabClient } from './gitlab.js';
 import { createLogger } from './logger.js';
+import type { OtelBridge } from './otel.js';
 import { startOtelBridge } from './otel.js';
 import { parseReviewMarkdownWithWarnings } from './parser.js';
 import { buildGeneratedComments } from './payloads.js';
@@ -25,8 +26,6 @@ import {
   postGeneratedComments,
   upsertSummaryNote,
 } from './posting.js';
-import type { SigilBridge } from './sigil.js';
-import { startSigilBridge } from './sigil.js';
 import type { DiffRefs, GeneratedComment } from './types.js';
 
 export type {
@@ -75,12 +74,6 @@ Options:
                           (env: GITLAB_REVIEW_FORCE_REVIEW=true)
   --verbose               Enable debug-level logging
                           (env: GITLAB_REVIEW_VERBOSE=true)
-  --sigil                 Enable Grafana AI Observability (Sigil) generation export
-                          (env: GITLAB_REVIEW_SIGIL=1). Configure the endpoint and
-                          auth via SIGIL_* env vars from Grafana AI Observability
-                          Configuration. Not OTLP — separate from --otel.
-  --sigil-capture-mode    metadata_only (default), no_tool_content, or full
-                          (env: SIGIL_CONTENT_CAPTURE_MODE)
   --help, -h              Show help
   --version, -v           Show version
 `;
@@ -129,8 +122,8 @@ function refsFromVersion(version: {
 }
 
 export interface RunBridges {
-  /** Pre-started Sigil bridge for per-turn generation telemetry. */
-  sigil?: SigilBridge;
+  /** Pre-started OTel bridge for per-turn and per-tool-call agent telemetry. */
+  otel?: OtelBridge;
 }
 
 export async function run(config: Config, bridges?: RunBridges): Promise<RunResult> {
@@ -212,10 +205,9 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
         cwd: config.cwd,
         diff,
         logger,
-        // Subscribe sigil-pi to the agent so per-turn events fire in real time.
-        attachTelemetry: bridges?.sigil
-          ? (agent) => bridges.sigil!.subscribeToAgent(agent, runId)
-          : undefined,
+        // Subscribe the OTel bridge to the agent's event stream so per-turn
+        // and per-tool-call spans/metrics fire in real time.
+        attachTelemetry: bridges?.otel?.createAgentTelemetry(runId),
       });
       context.usage = result;
       return result;
@@ -395,18 +387,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   assertNodeVersion();
   const config = resolveConfig(argv);
   const otel = await startOtelBridge();
-  // When --sigil is set on the CLI, ensure the env check inside the bridge
-  // sees it as enabled even if GITLAB_REVIEW_SIGIL is not set in the shell.
-  const sigilEnv = config.sigil ? { ...process.env, GITLAB_REVIEW_SIGIL: '1' } : process.env;
-  const sigil = await startSigilBridge({
-    env: sigilEnv,
-    captureMode: config.sigilCaptureMode,
-  });
   try {
-    await run(config, { sigil: sigil ?? undefined });
+    await run(config, { otel: otel ?? undefined });
   } finally {
     await otel?.shutdown();
-    await sigil?.shutdown();
   }
 }
 

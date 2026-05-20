@@ -9,11 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Grafana AI Observability (Sigil) bridge** (`src/sigil.ts`): optional per-turn telemetry export to Grafana AI Observability via `@grafana/sigil-pi`. Enable with `GITLAB_REVIEW_SIGIL=1` or `--sigil`. The bridge subscribes the `@grafana/sigil-pi` extension to the agent's event stream so every turn (including TTFT, tool spans, and message content) is exported in real time — no custom Sigil orchestration to maintain.
-  - Content capture mode: `metadata_only` (default), `no_tool_content`, or `full` — set via `SIGIL_CONTENT_CAPTURE_MODE` or `--sigil-capture-mode`.
-  - Agent identity defaults to `SIGIL_AGENT_NAME=gitlab-review` and `SIGIL_AGENT_VERSION=<package version>`; override by setting these env vars before starting.
-  - `GITLAB_REVIEW_OTEL` sends generic OTLP spans and metrics; `GITLAB_REVIEW_SIGIL` sends generation records to Grafana AI Observability via the Sigil protocol and is not OTLP. Both bridges can run simultaneously.
-  - Required Sigil env vars (`SIGIL_ENDPOINT`, `SIGIL_AUTH_TENANT_ID`, `SIGIL_AUTH_TOKEN`) come from Grafana AI Observability Configuration. `@grafana/sigil-pi` is loaded dynamically only when the bridge is enabled, so disabling it costs nothing at startup.
+- **Per-turn and per-tool OTel telemetry** via `OtelBridge.createAgentTelemetry(runId)`: when `GITLAB_REVIEW_OTEL=1` is set, the bridge now subscribes to the agent's live event stream and emits:
+  - `gen_ai.agent.turn` child spans under `invoke_agent gitlab-review`, with `gen_ai.agent.turn.index`, per-turn token counts, per-turn cost, model, and stop reason.
+  - `execute_tool <name>` grandchild spans under each turn span, with `gen_ai.tool.name`, `gen_ai.tool.call.id`, and ERROR status on failures — gives a full tool-use timeline in Tempo.
+  - `gen_ai.client.time_to_first_token` histogram (seconds, per turn) recorded when streaming `message_update` events fire.
+  - Per-turn `gen_ai.client.token.usage` and `gen_ai.client.cost` metrics so dashboards can break down token spend and USD cost by turn, model, and operation.
+- **`gen_ai.client.cost` histogram** (unit `usd`) on the aggregate `invoke_agent` span — enables $/review and $/model dashboards in Prometheus/Grafana without custom queries.
+
+### Removed
+
+- **Grafana AI Observability (Sigil) bridge**: removed `src/sigil.ts`, `@grafana/sigil-pi` dependency, `--sigil` / `--sigil-capture-mode` CLI flags, and all related config fields. The equivalent observability (per-turn spans, tool calls, TTFT, cost metrics) is now handled directly by the OTel bridge.
 
 ## [0.3.2] - 2026-05-20
 
