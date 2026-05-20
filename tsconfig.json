@@ -15,7 +15,8 @@
     "sourceMap": true,
     "outDir": "./dist",
     "rootDir": "./src",
-    "types": ["node"]
+    "types": ["node"],
+    "erasableSyntaxOnly": true
   },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts", "tests/**/*.ts"]

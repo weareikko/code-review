@@ -2,7 +2,6 @@ import { execFile, type ExecFileException } from 'node:child_process';
 import { unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-
 import { GitError } from './errors.js';
 
 const exec = promisify(execFile);

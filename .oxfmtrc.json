@@ -10,17 +10,16 @@
   "bracketSameLine": true,
   "arrowParens": "always",
   "endOfLine": "lf",
-  "experimentalSortImports": {
+  "sortImports": {
     "groups": [
-      "type-import",
-      ["value-builtin", "value-external"],
-      "type-internal",
-      "value-internal",
-      ["type-parent", "type-sibling", "type-index"],
-      ["value-parent", "value-sibling", "value-index"],
+      "builtin",
+      "external",
+      ["internal", "subpath"],
+      ["parent", "sibling", "index"],
+      "style",
       "unknown"
     ],
-    "newlinesBetween": true,
+    "newlinesBetween": false,
     "ignoreCase": true,
     "order": "asc"
   },

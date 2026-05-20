@@ -1,7 +1,6 @@
+import { extractExistingFingerprints } from './fingerprints.js';
 import type { Discussion, GitLabClient } from './gitlab.js';
 import type { Fingerprints, GeneratedComment } from './types.js';
-
-import { extractExistingFingerprints } from './fingerprints.js';
 
 export const SUMMARY_MARKER = '<!-- gitlab-review:summary -->';
 export const SUMMARY_HISTORY_START = '<!-- gitlab-review:summary-history:start -->';

@@ -1,11 +1,10 @@
+import { appendFingerprintMarkers, extractDiffHunkContext, fingerprints } from './fingerprints.js';
 import type {
   DiffRefs,
   GeneratedComment,
   GitLabDiscussionPayload,
   ReviewComment,
 } from './types.js';
-
-import { appendFingerprintMarkers, extractDiffHunkContext, fingerprints } from './fingerprints.js';
 
 export function buildPayload(
   comment: ReviewComment,

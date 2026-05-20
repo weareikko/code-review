@@ -16,18 +16,48 @@
     "typescript/no-implied-eval": "error",
     "unicorn/no-new-buffer": "error",
     "typescript/no-deprecated": "warn",
-    "complexity": ["warn", { "max": 50 }],
-    "max-depth": ["warn", { "max": 5 }],
+    "complexity": [
+      "warn",
+      {
+        "max": 50
+      }
+    ],
+    "max-depth": [
+      "warn",
+      {
+        "max": 5
+      }
+    ],
     "max-lines-per-function": [
       "warn",
-      { "max": 200, "skipBlankLines": true, "skipComments": true }
+      {
+        "max": 200,
+        "skipBlankLines": true,
+        "skipComments": true
+      }
     ],
-    "max-nested-callbacks": ["warn", { "max": 4 }],
-    "max-params": ["warn", { "max": 6 }],
+    "max-nested-callbacks": [
+      "warn",
+      {
+        "max": 4
+      }
+    ],
+    "max-params": [
+      "warn",
+      {
+        "max": 6
+      }
+    ],
     "no-console": "off",
     "no-control-regex": "off",
     "no-useless-escape": "off",
-    "eqeqeq": ["warn", "always", { "null": "ignore" }],
+    "eqeqeq": [
+      "warn",
+      "always",
+      {
+        "null": "ignore"
+      }
+    ],
     "no-var": "error",
     "prefer-const": "warn",
     "typescript/no-explicit-any": "warn",
@@ -44,7 +74,19 @@
     "vitest/no-conditional-tests": "error",
     "vitest/no-import-node-test": "error",
     "vitest/prefer-to-be-truthy": "off",
-    "vitest/prefer-to-be-falsy": "off"
+    "vitest/prefer-to-be-falsy": "off",
+    "typescript/await-thenable": "error",
+    "typescript/no-floating-promises": "error",
+    "typescript/no-for-in-array": "error",
+    "typescript/no-misused-promises": "error",
+    "node/no-process-exit": "error",
+    "node/no-sync": "off",
+    "node/prefer-node-protocol": "error",
+    "promise/no-multiple-resolved": "error",
+    "typescript/no-base-to-string": "off",
+    "typescript/no-unsafe-type-assertion": "off",
+    "typescript/no-unnecessary-type-arguments": "off",
+    "typescript/no-unnecessary-type-assertion": "off"
   },
   "overrides": [
     {
@@ -64,5 +106,8 @@
       }
     }
   ],
-  "ignorePatterns": ["dist", "node_modules", "coverage", "*.config.js", "*.config.ts"]
+  "ignorePatterns": ["dist", "node_modules", "coverage", "*.config.js", "*.config.ts"],
+  "options": {
+    "typeAware": true
+  }
 }

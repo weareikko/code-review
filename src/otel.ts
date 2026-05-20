@@ -30,9 +30,7 @@ import type {
   Tracer,
   TracerProvider,
 } from '@opentelemetry/api';
-
 import { context, metrics, SpanKind, SpanStatusCode, trace } from '@opentelemetry/api';
-
 import { diagnosticChannels, type DiagnosticContext, type DiagnosticPhase } from './diagnostics.js';
 
 // Inlined at build time by Vite's `define` (see vite.config.ts). Keeps
