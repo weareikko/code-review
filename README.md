@@ -77,26 +77,29 @@ review:
 
 The CLI auto-resolves values from CI variables and common token/key names.
 
-| Variable                       | Purpose                                                                     |
-| ------------------------------ | --------------------------------------------------------------------------- |
-| `CI_PROJECT_ID`                | Default for `--project`                                                     |
-| `CI_MERGE_REQUEST_IID`         | Default for `--mr`                                                          |
-| `CI_SERVER_URL`                | Default for `--gitlab-url`                                                  |
-| `CI_SERVER_HOST`               | Fallback for `--gitlab-url` as `https://$CI_SERVER_HOST`                    |
-| `GITLAB_TOKEN`                 | Preferred GitLab API token (`PRIVATE-TOKEN`)                                |
-| `GLAB_CLI_TOKEN`               | Fallback GitLab API token (`PRIVATE-TOKEN`)                                 |
-| `CI_JOB_TOKEN`                 | Fallback token (`JOB-TOKEN`)                                                |
-| `GITLAB_PRIVATE_TOKEN`         | Fallback token (`PRIVATE-TOKEN`)                                            |
-| `GITLAB_REVIEW_API_KEY`        | Preferred AI API key                                                        |
-| `ANTHROPIC_API_KEY`            | Fallback AI API key                                                         |
-| `CLAUDE_API_KEY`               | Fallback AI API key                                                         |
-| `GITLAB_REVIEW_MODEL`          | Default for `--model`                                                       |
-| `GITLAB_REVIEW_MIN_SEVERITY`   | Default for `--min-severity`                                                |
-| `GITLAB_REVIEW_THINKING_LEVEL` | Default for `--thinking`                                                    |
-| `GITLAB_REVIEW_POSTING_MODE`   | Default for `--posting-mode`                                                |
-| `GITLAB_REVIEW_POST_SUMMARY`   | Set to `false`/`0` to skip the MR-level summary note                        |
-| `GITLAB_REVIEW_FORCE_REVIEW`   | Set to `true`/`1` to review even if the commit was already reviewed         |
-| `GITLAB_REVIEW_SKILLS`         | Comma-separated list of built-in skill names to enable (e.g. `code-review`) |
+| Variable                       | Purpose                                                                         |
+| ------------------------------ | ------------------------------------------------------------------------------- |
+| `CI_PROJECT_ID`                | Default for `--project`                                                         |
+| `CI_MERGE_REQUEST_IID`         | Default for `--mr`                                                              |
+| `CI_SERVER_URL`                | Default for `--gitlab-url`                                                      |
+| `CI_SERVER_HOST`               | Fallback for `--gitlab-url` as `https://$CI_SERVER_HOST`                        |
+| `GITLAB_TOKEN`                 | Preferred GitLab API token (`PRIVATE-TOKEN`)                                    |
+| `GLAB_CLI_TOKEN`               | Fallback GitLab API token (`PRIVATE-TOKEN`)                                     |
+| `CI_JOB_TOKEN`                 | Fallback token (`JOB-TOKEN`)                                                    |
+| `GITLAB_PRIVATE_TOKEN`         | Fallback token (`PRIVATE-TOKEN`)                                                |
+| `GITLAB_REVIEW_API_KEY`        | Preferred AI API key                                                            |
+| `ANTHROPIC_API_KEY`            | Fallback AI API key                                                             |
+| `CLAUDE_API_KEY`               | Fallback AI API key                                                             |
+| `GITLAB_REVIEW_MODEL`          | Default for `--model`                                                           |
+| `GITLAB_REVIEW_MIN_SEVERITY`   | Default for `--min-severity`                                                    |
+| `GITLAB_REVIEW_THINKING_LEVEL` | Default for `--thinking`                                                        |
+| `GITLAB_REVIEW_POSTING_MODE`   | Default for `--posting-mode`                                                    |
+| `GITLAB_REVIEW_POST_SUMMARY`   | Set to `false`/`0` to skip the MR-level summary note                            |
+| `GITLAB_REVIEW_FORCE_REVIEW`   | Set to `true`/`1` to review even if the commit was already reviewed             |
+| `GITLAB_REVIEW_SKILLS`         | Comma-separated list of built-in skill names to enable (e.g. `code-review`)     |
+| `GITLAB_REVIEW_OTEL`           | Set to `1` to enable the OpenTelemetry bridge (generic OTLP spans + metrics)    |
+| `GITLAB_REVIEW_SIGIL`          | Set to `1` to enable Grafana AI Observability (Sigil) generation export         |
+| `SIGIL_CONTENT_CAPTURE_MODE`   | Default for `--sigil-capture-mode` (`metadata_only`, `no_tool_content`, `full`) |
 
 ## Flags
 
@@ -119,6 +122,8 @@ The CLI auto-resolves values from CI variables and common token/key names.
 | `--skill <name>`         | Enable a built-in skill by name (repeatable)           | `GITLAB_REVIEW_SKILLS` or none                                           |
 | `--dry-run`              | Generate artifacts and skip posting                    | `false`                                                                  |
 | `--no-post`              | Same behavior as `--dry-run`                           | `false`                                                                  |
+| `--sigil`                | Enable Grafana AI Observability generation export      | `GITLAB_REVIEW_SIGIL` or `false`                                         |
+| `--sigil-capture-mode`   | `metadata_only`, `no_tool_content`, or `full`          | `SIGIL_CONTENT_CAPTURE_MODE` or `metadata_only`                          |
 | `--help`, `-h`           | Show help                                              | -                                                                        |
 | `--version`, `-v`        | Show version                                           | -                                                                        |
 
@@ -246,21 +251,13 @@ await run(config);
 
 ### OpenTelemetry bridge
 
-The CLI ships an opt-in bridge that subscribes to the same diagnostics channels and emits OpenTelemetry spans **and** the standardized GenAI client metrics tagged with the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (`gen_ai.*`). Set `GITLAB_REVIEW_OTEL=1` to enable it — the OTel runtime is bundled, no extra installs required.
+`GITLAB_REVIEW_OTEL=1` enables a bridge that subscribes to the diagnostics channels and emits generic **OTLP** spans and the standardized GenAI client metrics tagged with the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (`gen_ai.*`). The OTel runtime is bundled — no extra installs required.
 
-The bridge records `gen_ai.client.operation.duration` and `gen_ai.client.token.usage` histograms alongside the spans, so Grafana Application Observability / AI Observability (and any other OTel-compliant LLM observability surface that's driven off these metric names) auto-discovers the service from its metrics without any dashboard import.
+The bridge records `gen_ai.client.operation.duration` and `gen_ai.client.token.usage` histograms alongside the spans, so Grafana Application Observability (and any other OTel-compliant LLM observability surface driven off these metric names) auto-discovers the service from its metrics without any dashboard import.
 
-Exporter selection follows the standard `OTEL_*` env vars (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_PROTOCOL`, …). Anything that ingests OTLP works: Tempo, Mimir, Jaeger, Datadog, Honeycomb, SigNoz, or [Grafana Cloud AI Observability (Sigil)](https://grafana.com/docs/grafana-cloud/machine-learning/ai-observability/).
+Exporter selection follows the standard `OTEL_*` env vars (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_PROTOCOL`, …). Anything that ingests OTLP works: Tempo, Mimir, Jaeger, Datadog, Honeycomb, SigNoz, and so on.
 
-Example pointing at Grafana Sigil:
-
-```yml
-variables:
-  GITLAB_REVIEW_OTEL: '1'
-  OTEL_EXPORTER_OTLP_ENDPOINT: '$SIGIL_ENDPOINT'
-  OTEL_EXPORTER_OTLP_HEADERS: 'Authorization=Bearer $SIGIL_TOKEN'
-  OTEL_SEMCONV_STABILITY_OPT_IN: 'gen_ai_latest_experimental'
-```
+> **Note:** `GITLAB_REVIEW_OTEL` sends generic OTLP spans/metrics. It is separate from `GITLAB_REVIEW_SIGIL` (see below), which sends generation-level records to [Grafana AI Observability](https://grafana.com/docs/grafana-cloud/machine-learning/ai-observability/) via the Sigil protocol and is **not** OTLP.
 
 Span shape:
 
@@ -282,6 +279,53 @@ await startOtelBridge({
     meterProvider: metrics.getMeterProvider(),
     shutdown: async () => {},
   },
+});
+```
+
+### Grafana AI Observability (Sigil)
+
+`GITLAB_REVIEW_SIGIL=1` (or `--sigil`) enables a dedicated bridge that sends **generation-level records** to [Grafana AI Observability](https://grafana.com/docs/grafana-cloud/machine-learning/ai-observability/) via `@grafana/sigil-sdk-js`. This is a separate path from the OTel bridge above — it uses the Sigil ingest protocol, not OTLP.
+
+**Required environment variables** — find all values in your Grafana Cloud stack under _AI Observability → Configuration_:
+
+| Variable               | Purpose                                                          |
+| ---------------------- | ---------------------------------------------------------------- |
+| `SIGIL_ENDPOINT`       | Generation ingest URL from AI Observability Configuration        |
+| `SIGIL_AUTH_TENANT_ID` | Instance ID (numeric stack ID) for `basic` or `tenant` auth mode |
+| `SIGIL_AUTH_TOKEN`     | Cloud Access Policy token (scopes: `sigil:write`)                |
+
+GitLab CI example:
+
+```yml
+variables:
+  GITLAB_REVIEW_SIGIL: '1'
+  SIGIL_ENDPOINT: 'https://your-stack.grafana.net/ai-observability'
+  SIGIL_AUTH_TENANT_ID: '$GRAFANA_INSTANCE_ID'
+  SIGIL_AUTH_TOKEN: '$GRAFANA_CLOUD_TOKEN'
+```
+
+**Content capture** is controlled by `SIGIL_CONTENT_CAPTURE_MODE` (or `--sigil-capture-mode`):
+
+| Mode              | What is exported                                                                                                                                           |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `metadata_only`   | _(default)_ Token counts, costs, model name, timing, project/MR IDs.                                                                                       |
+| `no_tool_content` | Full messages but no tool-call bodies. Currently behaves like `metadata_only` because message content is not yet forwarded through the diagnostic context. |
+| `full`            | Complete content with built-in redaction. Same current limitation as above.                                                                                |
+
+The bridge subscribes only to the `reviewer.run` diagnostic phase. No diff content, prompts, or review bodies are included in the `metadata_only` default.
+
+When `GITLAB_REVIEW_SIGIL` is not set, `@grafana/sigil-sdk-js` is never imported.
+
+Library callers can inject a pre-configured client:
+
+```js
+import { SigilClient } from '@grafana/sigil-sdk-js';
+import { startSigilBridge } from '@ikko-dev/gitlab-review';
+
+await startSigilBridge({
+  client: new SigilClient({
+    /* … */
+  }),
 });
 ```
 

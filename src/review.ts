@@ -16,6 +16,8 @@ export {
 } from './diagnostics.js';
 export type { OtelBridge, OtelBridgeOptions, OtelRuntime } from './otel.js';
 export { isOtelEnabled, startOtelBridge } from './otel.js';
+export type { SigilBridge, SigilBridgeOptions } from './sigil.js';
+export { isSigilEnabled, startSigilBridge } from './sigil.js';
 export type {
   DiffRefs,
   Fingerprints,

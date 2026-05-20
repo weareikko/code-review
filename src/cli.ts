@@ -25,6 +25,7 @@ import {
   postGeneratedComments,
   upsertSummaryNote,
 } from './posting.js';
+import { startSigilBridge } from './sigil.js';
 import type { DiffRefs, GeneratedComment } from './types.js';
 
 export type {
@@ -73,6 +74,12 @@ Options:
                           (env: GITLAB_REVIEW_FORCE_REVIEW=true)
   --verbose               Enable debug-level logging
                           (env: GITLAB_REVIEW_VERBOSE=true)
+  --sigil                 Enable Grafana AI Observability (Sigil) generation export
+                          (env: GITLAB_REVIEW_SIGIL=1). Configure the endpoint and
+                          auth via SIGIL_* env vars from Grafana AI Observability
+                          Configuration. Not OTLP — separate from --otel.
+  --sigil-capture-mode    metadata_only (default), no_tool_content, or full
+                          (env: SIGIL_CONTENT_CAPTURE_MODE)
   --help, -h              Show help
   --version, -v           Show version
 `;
@@ -374,10 +381,18 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   assertNodeVersion();
   const config = resolveConfig(argv);
   const otel = await startOtelBridge();
+  // When --sigil is set on the CLI, ensure the env check inside the bridge
+  // sees it as enabled even if GITLAB_REVIEW_SIGIL is not set in the shell.
+  const sigilEnv = config.sigil ? { ...process.env, GITLAB_REVIEW_SIGIL: '1' } : process.env;
+  const sigil = await startSigilBridge({
+    env: sigilEnv,
+    captureMode: config.sigilCaptureMode,
+  });
   try {
     await run(config);
   } finally {
     await otel?.shutdown();
+    await sigil?.shutdown();
   }
 }
 

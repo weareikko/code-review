@@ -2,6 +2,14 @@ import { ConfigError } from './errors.js';
 import { POSTING_MODES, type PostingMode } from './posting.js';
 import { THINKING_LEVELS, type Severity, type ThinkingLevel } from './types.js';
 
+export type SigilContentCaptureMode = 'metadata_only' | 'no_tool_content' | 'full';
+
+export const SIGIL_CAPTURE_MODES: readonly SigilContentCaptureMode[] = [
+  'metadata_only',
+  'no_tool_content',
+  'full',
+];
+
 export type GitLabAuthHeader = 'PRIVATE-TOKEN' | 'JOB-TOKEN';
 
 export interface Config {
@@ -24,6 +32,10 @@ export interface Config {
   verbose: boolean;
   cwd: string;
   skills: string[];
+  /** Enable Grafana AI Observability (Sigil) generation export. */
+  sigil: boolean;
+  /** Content capture mode for the Sigil bridge. */
+  sigilCaptureMode: SigilContentCaptureMode;
 }
 
 export type ParsedArgs = Record<string, string | boolean | string[]>;
@@ -34,6 +46,7 @@ const BOOLEAN_FLAGS = new Set([
   'no-summary',
   'force-review',
   'verbose',
+  'sigil',
   'help',
   'version',
 ]);
@@ -123,6 +136,13 @@ function resolvePostingMode(value: unknown): string {
     .toLowerCase();
 }
 
+function resolveSigilCaptureMode(value: unknown): SigilContentCaptureMode {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase() as SigilContentCaptureMode;
+  return SIGIL_CAPTURE_MODES.includes(normalized) ? normalized : 'metadata_only';
+}
+
 function resolveSkills(args: ParsedArgs, env: NodeJS.ProcessEnv): string[] {
   const argSkill = args.skill;
   if (Array.isArray(argSkill) && argSkill.length > 0) return argSkill;
@@ -191,6 +211,10 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     verbose: toBoolean(args.verbose) || toBoolean(env.GITLAB_REVIEW_VERBOSE),
     cwd: String(args.cwd ?? process.cwd()),
     skills: resolveSkills(args, env),
+    sigil: toBoolean(args.sigil) || toBoolean(env.GITLAB_REVIEW_SIGIL),
+    sigilCaptureMode: resolveSigilCaptureMode(
+      args.sigilCaptureMode ?? env.SIGIL_CONTENT_CAPTURE_MODE ?? 'metadata_only',
+    ),
   };
 }
 
