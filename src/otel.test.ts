@@ -294,7 +294,10 @@ describe('OpenTelemetry bridge', () => {
     });
   });
 
-  it('records gen_ai client metrics from DiagnosticUsage on the success path', async () => {
+  it('records gen_ai.client.operation.duration from reviewer phase context', async () => {
+    // gen_ai.client.operation.duration is emitted by recordGenAiMetrics at
+    // reviewer-phase close. Token usage and cost are emitted per-turn by
+    // buildAgentSubscriber — confirmed absent here (no agent events fired).
     const { metricsRecorded } = await runWithBridge(async (ctx) => {
       ctx.usage = {
         model: 'anthropic/claude-sonnet-4-5',
@@ -315,17 +318,9 @@ describe('OpenTelemetry bridge', () => {
     });
     expect(duration!.attributes).not.toHaveProperty('error.type');
 
-    const tokens = metricsRecorded.filter((m) => m.name === 'gen_ai.client.token.usage');
-    expect(tokens).toHaveLength(2);
-    const byType = new Map(tokens.map((t) => [t.attributes['gen_ai.token.type'], t]));
-    expect(byType.get('input')?.value).toBe(1200);
-    expect(byType.get('output')?.value).toBe(340);
-    expect(byType.get('input')?.attributes).toMatchObject({
-      'service.name': '@ikko-dev/gitlab-review',
-      'gen_ai.operation.name': 'invoke_agent',
-      'gen_ai.system': 'anthropic',
-      'gen_ai.request.model': 'claude-sonnet-4-5',
-    });
+    // No token or cost metrics from phase-close — those are per-turn only.
+    expect(metricsRecorded.filter((m) => m.name === 'gen_ai.client.token.usage')).toHaveLength(0);
+    expect(metricsRecorded.filter((m) => m.name === 'gen_ai.client.cost')).toHaveLength(0);
   });
 
   it('records exceptions and ERROR status on rejected phases', async () => {
@@ -447,7 +442,12 @@ describe('OpenTelemetry bridge', () => {
     }
   });
 
-  it('records gen_ai.client.cost on the aggregate reviewer span', async () => {
+  it('does not emit gen_ai.client.cost from phase close alone (prevents double-count)', async () => {
+    // Regression test for Gap 1: cost was previously emitted from BOTH
+    // recordGenAiMetrics (phase-close) and buildAgentSubscriber (per-turn),
+    // creating two Prometheus series that differed only by gen_ai_system and
+    // summed to 2× the real cost in Grafana. Now only buildAgentSubscriber emits
+    // cost. Confirm the phase-close path emits zero cost metrics.
     const { metricsRecorded } = await runWithBridge(async (ctx) => {
       ctx.usage = {
         model: 'anthropic/claude-sonnet-4-5',
@@ -455,15 +455,8 @@ describe('OpenTelemetry bridge', () => {
         cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
       };
     });
-    const cost = metricsRecorded.find((m) => m.name === 'gen_ai.client.cost');
-    expect(cost).toBeDefined();
-    expect(cost!.value).toBeCloseTo(0.03);
-    expect(cost!.attributes).toMatchObject({
-      'service.name': '@ikko-dev/gitlab-review',
-      'gen_ai.operation.name': 'invoke_agent',
-      'gen_ai.system': 'anthropic',
-      'gen_ai.request.model': 'claude-sonnet-4-5',
-    });
+    const costMetrics = metricsRecorded.filter((m) => m.name === 'gen_ai.client.cost');
+    expect(costMetrics).toHaveLength(0);
   });
 
   // ---------------------------------------------------------------------------
@@ -616,7 +609,7 @@ describe('OpenTelemetry bridge', () => {
     });
 
     const tokenMetrics = metricsRecorded.filter((m) => m.name === 'gen_ai.client.token.usage');
-    // One per-turn input + output (plus aggregate from diagnosticChannel close)
+    // Per-turn token metrics (sole source — phase-close no longer emits tokens).
     const perTurnInput = tokenMetrics.find(
       (m) => m.attributes['gen_ai.token.type'] === 'input' && m.value === 400,
     );
@@ -634,6 +627,144 @@ describe('OpenTelemetry bridge', () => {
       'gen_ai.system': 'anthropic',
       'gen_ai.request.model': 'claude-haiku-4-5',
     });
+  });
+
+  it('records cache_read and cache_creation token metrics per turn (Gap 2 fix)', async () => {
+    // Regression test for Gap 2: cache_read and cache_creation token counts were
+    // previously absent from gen_ai_client_token_usage_sum even though they
+    // dominate cache-heavy workloads (cache_write ~86% of cost in practice).
+    const fakeMsg = {
+      role: 'assistant',
+      model: 'anthropic/claude-sonnet-4-5',
+      stopReason: 'end_turn',
+      usage: {
+        input: 10,
+        output: 302,
+        cacheRead: 11334,
+        cacheWrite: 13242,
+        cost: {
+          input: 0.00003,
+          output: 0.00453,
+          cacheRead: 0.0034,
+          cacheWrite: 0.049658,
+          total: 0.0576177,
+        },
+      },
+    };
+    const { metricsRecorded } = await runWithAgentTelemetry(async (agent) => {
+      await agent.emit({ type: 'turn_start', turnIndex: 1 });
+      await agent.emit({ type: 'message_end', message: fakeMsg });
+    });
+
+    const tokenMetrics = metricsRecorded.filter((m) => m.name === 'gen_ai.client.token.usage');
+    const byType = new Map(tokenMetrics.map((t) => [t.attributes['gen_ai.token.type'], t]));
+
+    expect(byType.get('input')?.value).toBe(10);
+    expect(byType.get('output')?.value).toBe(302);
+    expect(byType.get('cache_read')?.value).toBe(11334);
+    expect(byType.get('cache_creation')?.value).toBe(13242);
+
+    // All four token metrics share a consistent label set (gen_ai.system present).
+    for (const metric of tokenMetrics) {
+      expect(metric.attributes).toMatchObject({
+        'service.name': '@ikko-dev/gitlab-review',
+        'gen_ai.operation.name': 'invoke_agent',
+        'gen_ai.system': 'anthropic',
+        'gen_ai.request.model': 'claude-sonnet-4-5',
+      });
+    }
+  });
+
+  it('derives gen_ai.system from configuredModel when msg.model has no provider prefix', async () => {
+    // The Anthropic SDK sometimes returns bare model IDs ('claude-haiku-4-5')
+    // without a provider prefix. buildAgentSubscriber must fall back to the
+    // configured model string to populate gen_ai.system so all per-turn metrics
+    // have a consistent, complete label set. runWithAgentTelemetry uses
+    // config.model = 'anthropic/claude-haiku-4-5' as the configured model.
+    const fakeMsg = {
+      role: 'assistant',
+      model: 'claude-haiku-4-5', // No 'anthropic/' prefix — simulates SDK behaviour
+      stopReason: 'end_turn',
+      usage: {
+        input: 50,
+        output: 20,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: { input: 0.001, output: 0.002, cacheRead: 0, cacheWrite: 0, total: 0.003 },
+      },
+    };
+    const { metricsRecorded } = await runWithAgentTelemetry(async (agent) => {
+      await agent.emit({ type: 'turn_start', turnIndex: 1 });
+      await agent.emit({ type: 'message_end', message: fakeMsg });
+    });
+
+    const costMetric = metricsRecorded.find((m) => m.name === 'gen_ai.client.cost');
+    expect(costMetric).toBeDefined();
+    // gen_ai.system must be populated from configuredModel even though msg.model
+    // had no slash.
+    expect(costMetric!.attributes['gen_ai.system']).toBe('anthropic');
+    expect(costMetric!.attributes['gen_ai.request.model']).toBe('claude-haiku-4-5');
+
+    const tokenInput = metricsRecorded.find(
+      (m) =>
+        m.name === 'gen_ai.client.token.usage' && m.attributes['gen_ai.token.type'] === 'input',
+    );
+    expect(tokenInput!.attributes['gen_ai.system']).toBe('anthropic');
+  });
+
+  it('emits gen_ai.client.cost exactly once when reviewer phase and agent both fire', async () => {
+    // Full regression test for Gap 1: when both ctx.usage (phase result) and
+    // agent message_end (per-turn events) carry cost data, cost must appear
+    // exactly once in Prometheus — not twice as two series differing by
+    // gen_ai_system that sum to 2× in a Grafana sum() query.
+    const fakeMsg = {
+      role: 'assistant',
+      model: 'anthropic/claude-haiku-4-5',
+      stopReason: 'end_turn',
+      usage: {
+        input: 100,
+        output: 30,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: { input: 0.001, output: 0.003, cacheRead: 0, cacheWrite: 0, total: 0.004 },
+      },
+    };
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig({ model: 'anthropic/claude-haiku-4-5' });
+    const runId = 'run-no-double-cost';
+    const runContext = createDiagnosticContext('run', config, runId);
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      const reviewerContext = createDiagnosticContext('reviewer.run', config, runId);
+      await traceDiagnostic(diagnosticChannels.runReviewer, reviewerContext, async (ctx) => {
+        const attach = bridge!.createAgentTelemetry(runId);
+        expect(attach).toBeDefined();
+        const agent = makeAgent();
+        const detach = attach!(agent);
+        await agent.emit({ type: 'turn_start', turnIndex: 1 });
+        await agent.emit({ type: 'message_end', message: fakeMsg });
+        detach();
+        // Simulate the real production path where ctx.usage is also populated
+        // from the runReview result alongside the live agent events.
+        ctx.usage = {
+          model: 'anthropic/claude-haiku-4-5',
+          tokens: { input: 100, output: 30, cacheRead: 0, cacheWrite: 0, total: 130 },
+          cost: { input: 0.001, output: 0.003, cacheRead: 0, cacheWrite: 0, total: 0.004 },
+        };
+      });
+    });
+    await bridge!.shutdown();
+
+    const costMetrics = fake.metricsRecorded.filter((m) => m.name === 'gen_ai.client.cost');
+    // Exactly one emission — no double-count from phase-close.
+    expect(costMetrics).toHaveLength(1);
+    expect(costMetrics[0].value).toBeCloseTo(0.004);
+    expect(costMetrics[0].attributes['gen_ai.system']).toBe('anthropic');
   });
 
   it('records TTFT metric when message_update fires before message_end', async () => {
@@ -971,11 +1102,13 @@ describe('OpenTelemetry bridge', () => {
       };
     });
     // runWithBridge passes env: { GITLAB_REVIEW_OTEL: '1' } with no CI_* vars.
-    const cost = metricsRecorded.find((m) => m.name === 'gen_ai.client.cost');
-    expect(cost?.attributes).not.toHaveProperty('gitlab.project_path');
-    expect(cost?.attributes).not.toHaveProperty('gitlab.project_namespace');
-    expect(cost?.attributes).not.toHaveProperty('gitlab.mr_target_branch');
-    expect(cost?.attributes).not.toHaveProperty('gitlab.pipeline_source');
+    // The operation duration metric (still from recordGenAiMetrics) must have no
+    // CI attributes when CI env vars are absent.
+    const duration = metricsRecorded.find((m) => m.name === 'gen_ai.client.operation.duration');
+    expect(duration?.attributes).not.toHaveProperty('gitlab.project_path');
+    expect(duration?.attributes).not.toHaveProperty('gitlab.project_namespace');
+    expect(duration?.attributes).not.toHaveProperty('gitlab.mr_target_branch');
+    expect(duration?.attributes).not.toHaveProperty('gitlab.pipeline_source');
   });
 
   it('logComments truncates comment body at 500 chars', async () => {

@@ -213,7 +213,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
   const openByRun = new Map<string, Map<DiagnosticPhase, OpenSpan>>();
 
   // Per-run metadata cached from the ROOT_PHASE context for use in the review
-  // completion log and in logComments attribute enrichment.
+  // completion log, per-turn agent telemetry (configuredModel), and logComments.
   const runMeta = new Map<string, RunMeta>();
 
   const parentContext = (runId: string) => {
@@ -234,14 +234,15 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
       parentContext(ctx.runId),
     );
     phases.set(ctx.phase, { span, closed: false });
-    // Seed run metadata so logComments and the review completion log can enrich
-    // records with project/mr context even before the run phase closes.
+    // Seed run metadata for logComments, completion log, and per-turn agent
+    // telemetry (model feeds gen_ai.system derivation in buildAgentSubscriber).
     if (ctx.phase === ROOT_PHASE) {
       runMeta.set(ctx.runId, {
         project: ctx.project,
         mr: ctx.mr,
         gitlabUrl: ctx.gitlabUrl,
         ciAttrs,
+        model: ctx.model,
       });
     }
   };
@@ -251,7 +252,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     if (!entry || entry.closed) return;
     if (ctx.phase === GEN_AI_PHASE) {
       applyGenAiAttributes(entry.span, ctx);
-      recordGenAiMetrics(operationDuration, tokenUsage, operationCost, ctx, isError, ciAttrs);
+      recordGenAiMetrics(operationDuration, ctx, isError, ciAttrs);
       // Cache usage so the ROOT_PHASE completion log can include cost/token totals.
       if (ctx.usage) {
         const meta = runMeta.get(ctx.runId);
@@ -397,11 +398,27 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         operationCost,
         timeToFirstToken,
         reviewerSpanCtx,
-        ciAttrs,
-        runId,
+        {
+          ciAttrs,
+          runId,
+          // Pass the configured model so the per-turn subscriber can derive
+          // gen_ai.system when msg.model carries a bare ID without a provider prefix.
+          configuredModel: runMeta.get(runId)?.model,
+        },
       );
     },
   };
+}
+
+interface AgentSubscriberOptions {
+  ciAttrs?: Record<string, string>;
+  runId?: string;
+  /**
+   * Full configured model string (e.g. `'anthropic/claude-sonnet-4-5'`). Used
+   * as a fallback to derive `gen_ai.system` when the agent event stream emits
+   * bare model IDs without a provider prefix (common with the Anthropic SDK).
+   */
+  configuredModel?: string;
 }
 
 function buildAgentSubscriber(
@@ -410,9 +427,9 @@ function buildAgentSubscriber(
   operationCost: Histogram,
   timeToFirstToken: Histogram,
   reviewerSpanCtx: ReturnType<typeof trace.setSpan>,
-  ciAttrs: Record<string, string> = {},
-  runId?: string,
+  options: AgentSubscriberOptions = {},
 ): (agent: AgentLike) => () => void {
+  const { ciAttrs = {}, runId, configuredModel } = options;
   return (agent: AgentLike): (() => void) => {
     let currentTurn: { span: Span; startMs: number; firstTokenMs?: number } | undefined;
     const openTools = new Map<string, Span>();
@@ -446,10 +463,25 @@ function buildAgentSubscriber(
         const { span, startMs, firstTokenMs } = currentTurn;
         currentTurn = undefined;
 
+        // Extract provider and model ID from msg.model. The Anthropic SDK may
+        // emit bare IDs like 'claude-sonnet-4-5' without a provider prefix; in
+        // that case fall back to the configured model string to populate
+        // gen_ai.system so all per-turn metrics share a consistent label set.
         const rawModel = String(msg.model ?? '');
         const slashIdx = rawModel.indexOf('/');
-        const provider = slashIdx >= 0 ? rawModel.slice(0, slashIdx) : undefined;
-        const modelId = slashIdx >= 0 ? rawModel.slice(slashIdx + 1) : rawModel || undefined;
+        let provider: string | undefined;
+        let modelId: string | undefined;
+        if (slashIdx >= 0) {
+          provider = rawModel.slice(0, slashIdx);
+          modelId = rawModel.slice(slashIdx + 1);
+        } else {
+          modelId = rawModel || undefined;
+          if (configuredModel) {
+            const cfgSlash = configuredModel.indexOf('/');
+            if (cfgSlash >= 0) provider = configuredModel.slice(0, cfgSlash);
+          }
+        }
+
         const metricAttrs: Attributes = {
           'gen_ai.operation.name': 'invoke_agent',
           ...REVIEW_SERVICE_ATTRS,
@@ -474,14 +506,31 @@ function buildAgentSubscriber(
 
         if (msg.usage) {
           const u = msg.usage;
+          // Emit all four token type measurements per OTel GenAI semconv.
+          // These are the canonical source for gen_ai.client.token.usage —
+          // recordGenAiMetrics only emits phase duration to avoid double-count.
           tokenUsage.record(u.input, { ...metricAttrs, 'gen_ai.token.type': 'input' });
           tokenUsage.record(u.output, { ...metricAttrs, 'gen_ai.token.type': 'output' });
+          if (u.cacheRead) {
+            tokenUsage.record(u.cacheRead, { ...metricAttrs, 'gen_ai.token.type': 'cache_read' });
+          }
+          if (u.cacheWrite) {
+            tokenUsage.record(u.cacheWrite, {
+              ...metricAttrs,
+              'gen_ai.token.type': 'cache_creation',
+            });
+          }
           span.setAttribute('gen_ai.usage.input_tokens', u.input);
           span.setAttribute('gen_ai.usage.output_tokens', u.output);
           if (u.cacheRead) span.setAttribute('gen_ai.usage.cache_read.input_tokens', u.cacheRead);
           if (u.cacheWrite)
             span.setAttribute('gen_ai.usage.cache_creation.input_tokens', u.cacheWrite);
           if (u.cost) {
+            // Emit cost here (per-turn) — this is the sole emission point for
+            // gen_ai.client.cost to prevent the double-count that arises when
+            // recordGenAiMetrics also records the phase-aggregate cost with a
+            // different label set (missing gen_ai.system when msg.model has no
+            // provider prefix).
             operationCost.record(u.cost.total, metricAttrs);
             span.setAttribute('gen_ai.usage.cost.input_usd', u.cost.input);
             span.setAttribute('gen_ai.usage.cost.output_usd', u.cost.output);
@@ -594,6 +643,13 @@ interface RunMeta {
   mr: string;
   gitlabUrl: string;
   ciAttrs: Record<string, string>;
+  /**
+   * Configured model string from the ROOT_PHASE context (e.g.
+   * `'anthropic/claude-sonnet-4-5'`). Passed to `buildAgentSubscriber` so it
+   * can derive `gen_ai.system` when `msg.model` from the agent event stream
+   * carries a bare model ID without a provider prefix.
+   */
+  model?: string;
   usage?: DiagnosticUsage;
   /** Cached from the `gitlab.post_comments` phase for the drafts-published metric. */
   draftsPublished?: number;
@@ -812,10 +868,18 @@ function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
   span.setAttribute('gen_ai.usage.cost.total_usd', usage.cost.total);
 }
 
+/**
+ * Records `gen_ai.client.operation.duration` for the `reviewer.run` phase.
+ *
+ * Token usage (`gen_ai.client.token.usage`) and cost (`gen_ai.client.cost`) are
+ * intentionally NOT recorded here. They are emitted per-turn by
+ * `buildAgentSubscriber` from the live agent event stream. Keeping a single
+ * emission point for each metric prevents the double-count that previously
+ * occurred (two Prometheus series per run, one with and one without
+ * `gen_ai_system`, summing to 2× the real value in Grafana).
+ */
 function recordGenAiMetrics(
   durationHist: Histogram,
-  tokenHist: Histogram,
-  costHist: Histogram,
   ctx: DiagnosticContext,
   isError: boolean,
   ciAttrs: Record<string, string> = {},
@@ -836,10 +900,5 @@ function recordGenAiMetrics(
   }
   if (typeof ctx.durationMs === 'number') {
     durationHist.record(ctx.durationMs / 1000, attrs);
-  }
-  if (ctx.usage) {
-    tokenHist.record(ctx.usage.tokens.input, { ...attrs, 'gen_ai.token.type': 'input' });
-    tokenHist.record(ctx.usage.tokens.output, { ...attrs, 'gen_ai.token.type': 'output' });
-    costHist.record(ctx.usage.cost.total, attrs);
   }
 }
