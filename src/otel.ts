@@ -40,6 +40,7 @@
 
 import type {
   Attributes,
+  Counter,
   Histogram,
   Meter,
   MeterProvider,
@@ -108,6 +109,7 @@ export interface OtelBridgeOptions {
 
 const ROOT_PHASE: DiagnosticPhase = 'run';
 const GEN_AI_PHASE: DiagnosticPhase = 'reviewer.run';
+const POST_COMMENTS_PHASE: DiagnosticPhase = 'gitlab.post_comments';
 const SERVICE_NAME = '@ikko-dev/gitlab-review';
 
 // Advisory histogram bucket boundaries from the OTel GenAI metrics semconv.
@@ -124,6 +126,10 @@ const TTFT_BUCKETS_S = [
 const COST_BUCKETS_USD = [
   0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0,
 ];
+// Review-level histogram boundaries — one observation per complete run or per phase.
+const REVIEW_RUN_DURATION_BUCKETS_S = [5, 15, 30, 60, 120, 180, 300, 600];
+const REVIEW_TOTAL_COST_BUCKETS_USD = [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0];
+const REVIEW_PHASE_DURATION_BUCKETS_S = [1, 5, 15, 30, 60, 120, 300];
 
 const OTEL_SDK_PACKAGES = [
   '@opentelemetry/sdk-node',
@@ -189,6 +195,15 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     advice: { explicitBucketBoundaries: TTFT_BUCKETS_S },
   });
 
+  // Review-level metrics — one observation per complete run or per phase.
+  const {
+    reviewRunDuration,
+    reviewTotalCost,
+    reviewCommentsTotal,
+    reviewDraftsPublishedTotal,
+    reviewPhaseDuration,
+  } = createReviewInstruments(meter);
+
   const openByRun = new Map<string, Map<DiagnosticPhase, OpenSpan>>();
 
   // Per-run metadata cached from the ROOT_PHASE context for use in the review
@@ -237,6 +252,12 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         if (meta) meta.usage = ctx.usage;
       }
     }
+    // Cache posting results from the post_comments phase so they are available when
+    // the root phase closes and emits the review-level drafts metric.
+    if (ctx.phase === POST_COMMENTS_PHASE && typeof ctx.draftsPublished === 'number') {
+      const meta = runMeta.get(ctx.runId);
+      if (meta) meta.draftsPublished = ctx.draftsPublished;
+    }
     applyResultAttributes(entry.span, ctx);
     if (isError && ctx.errorInfo) {
       entry.span.recordException(ctx.errorInfo);
@@ -247,8 +268,52 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     }
     entry.span.end();
     entry.closed = true;
+
+    const status = resolveRunStatus(ctx, isError);
+    const projectPath = ciAttrs['gitlab.project_path'] ?? '';
+
+    // Emit a phase-duration observation for every phase that has a measured duration.
+    if (typeof ctx.durationMs === 'number') {
+      reviewPhaseDuration.record(ctx.durationMs / 1000, {
+        'gitlab.project_path': projectPath,
+        'gitlab_review.phase': ctx.phase,
+        'gitlab_review.status': status,
+      });
+    }
+
     if (ctx.phase === ROOT_PHASE) {
-      emitReviewCompletedLog(logger, ctx, runMeta.get(ctx.runId), isError);
+      const meta = runMeta.get(ctx.runId);
+      const pipelineSource = ciAttrs['gitlab.pipeline_source'] ?? '';
+
+      if (typeof ctx.durationMs === 'number') {
+        reviewRunDuration.record(ctx.durationMs / 1000, {
+          'gitlab.project_path': projectPath,
+          'gitlab.pipeline_source': pipelineSource,
+          'gitlab_review.dry_run': ctx.dryRun,
+          'gitlab_review.status': status,
+        });
+      }
+
+      const totalCostUsd = meta?.usage?.cost.total ?? ctx.usage?.cost.total;
+      if (totalCostUsd !== undefined) {
+        reviewTotalCost.record(totalCostUsd, {
+          'gitlab.project_path': projectPath,
+          'gitlab_review.dry_run': ctx.dryRun,
+          'gitlab_review.status': status,
+        });
+      }
+
+      reviewCommentsTotal.add(ctx.posted ?? 0, {
+        'gitlab.project_path': projectPath,
+        'gitlab_review.dry_run': ctx.dryRun,
+      });
+
+      reviewDraftsPublishedTotal.add(meta?.draftsPublished ?? 0, {
+        'gitlab.project_path': projectPath,
+        'gitlab_review.dry_run': ctx.dryRun,
+      });
+
+      emitReviewCompletedLog(logger, ctx, meta, isError);
       runMeta.delete(ctx.runId);
       openByRun.delete(ctx.runId);
     }
@@ -504,6 +569,8 @@ interface RunMeta {
   gitlabUrl: string;
   ciAttrs: Record<string, string>;
   usage?: DiagnosticUsage;
+  /** Cached from the `gitlab.post_comments` phase for the drafts-published metric. */
+  draftsPublished?: number;
 }
 
 function emitReviewCompletedLog(
@@ -559,6 +626,63 @@ function spanNameFor(phase: DiagnosticPhase): string {
   if (phase === ROOT_PHASE) return 'invoke_workflow gitlab-review';
   if (phase === GEN_AI_PHASE) return 'invoke_agent gitlab-review';
   return `gitlab-review.${phase}`;
+}
+
+interface ReviewInstruments {
+  reviewRunDuration: Histogram;
+  reviewTotalCost: Histogram;
+  reviewCommentsTotal: Counter;
+  reviewDraftsPublishedTotal: Counter;
+  reviewPhaseDuration: Histogram;
+}
+
+/** Creates the five review-level OTel metric instruments on the given meter. */
+function createReviewInstruments(meter: Meter): ReviewInstruments {
+  return {
+    reviewRunDuration: meter.createHistogram('gitlab_review_run_duration_seconds', {
+      description: 'Duration of a complete gitlab-review run',
+      unit: 's',
+      advice: { explicitBucketBoundaries: REVIEW_RUN_DURATION_BUCKETS_S },
+    }),
+    reviewTotalCost: meter.createHistogram('gitlab_review_total_cost_usd', {
+      description: 'Total LLM cost in USD for a complete gitlab-review run',
+      unit: 'usd',
+      advice: { explicitBucketBoundaries: REVIEW_TOTAL_COST_BUCKETS_USD },
+    }),
+    reviewCommentsTotal: meter.createCounter('gitlab_review_comments_total', {
+      description: 'Total number of MR comments posted by gitlab-review',
+    }),
+    reviewDraftsPublishedTotal: meter.createCounter('gitlab_review_drafts_published_total', {
+      description: 'Total number of draft notes published by gitlab-review',
+    }),
+    reviewPhaseDuration: meter.createHistogram('gitlab_review_phase_duration_seconds', {
+      description: 'Duration of individual gitlab-review workflow phases',
+      unit: 's',
+      advice: { explicitBucketBoundaries: REVIEW_PHASE_DURATION_BUCKETS_S },
+    }),
+  };
+}
+
+/**
+ * Derives the `gitlab_review.status` label used by review-level OTel metrics.
+ * Distinguishes timeouts (AbortError / ETIMEDOUT) from generic errors so
+ * Grafana alerts can treat deadline-exceeded runs separately.
+ */
+function resolveRunStatus(
+  ctx: DiagnosticContext,
+  isError: boolean,
+): 'success' | 'error' | 'timeout' {
+  if (!isError) return 'success';
+  const { errorInfo } = ctx;
+  if (
+    errorInfo?.name === 'AbortError' ||
+    errorInfo?.name === 'TimeoutError' ||
+    errorInfo?.code === 'ABORT_ERR' ||
+    errorInfo?.code === 'ETIMEDOUT'
+  ) {
+    return 'timeout';
+  }
+  return 'error';
 }
 
 /**
