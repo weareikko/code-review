@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-05-21
+
+### Added
+
+- **GitLab CI project attributes on OTel metrics, spans, and logs**: when running inside a GitLab CI pipeline, four CI environment variables are now automatically included as attributes on every metric data point, span, and log record emitted by the OTel bridge. `gitlab.project_path` (`CI_PROJECT_PATH`, e.g. `group/my-project`), `gitlab.project_namespace` (`CI_PROJECT_NAMESPACE`), `gitlab.mr_target_branch` (`CI_MERGE_REQUEST_TARGET_BRANCH_NAME`), and `gitlab.pipeline_source` (`CI_PIPELINE_SOURCE`) are captured once at bridge startup and spread into all emission sites — run-level histograms, per-turn metrics, phase spans, comment logs, and the `gitlab_review.completed` log record. Attributes are omitted gracefully when the vars are not set (local runs). Enables Prometheus/Mimir queries like `sum by (gitlab_project_path) (increase(gen_ai_client_cost_sum[7d]))` to compare token spend and cost across projects.
+
 ## [0.3.3] - 2026-05-21
 
 ### Added

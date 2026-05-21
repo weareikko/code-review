@@ -161,6 +161,8 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
   const env = options.env ?? process.env;
   if (!isOtelEnabled(env)) return null;
 
+  const ciAttrs = buildCiAttrs(env);
+
   const runtime = options.runtime ?? (await loadDefaultRuntime());
   const tracer: Tracer = runtime.tracerProvider.getTracer(SERVICE_NAME);
   const meter: Meter = runtime.meterProvider.getMeter(SERVICE_NAME);
@@ -207,7 +209,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     if (phases.has(ctx.phase)) return;
     const span = tracer.startSpan(
       spanNameFor(ctx.phase),
-      { kind: SpanKind.INTERNAL, attributes: baseAttributes(ctx) },
+      { kind: SpanKind.INTERNAL, attributes: { ...baseAttributes(ctx), ...ciAttrs } },
       parentContext(ctx.runId),
     );
     phases.set(ctx.phase, { span, closed: false });
@@ -218,6 +220,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         project: ctx.project,
         mr: ctx.mr,
         gitlabUrl: ctx.gitlabUrl,
+        ciAttrs,
       });
     }
   };
@@ -227,7 +230,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     if (!entry || entry.closed) return;
     if (ctx.phase === GEN_AI_PHASE) {
       applyGenAiAttributes(entry.span, ctx);
-      recordGenAiMetrics(operationDuration, tokenUsage, operationCost, ctx, isError);
+      recordGenAiMetrics(operationDuration, tokenUsage, operationCost, ctx, isError, ciAttrs);
       // Cache usage so the ROOT_PHASE completion log can include cost/token totals.
       if (ctx.usage) {
         const meta = runMeta.get(ctx.runId);
@@ -300,6 +303,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
               'gitlab.project_id': meta.project,
               'gitlab.mr_iid': meta.mr,
               'gitlab.server_url': meta.gitlabUrl,
+              ...meta.ciAttrs,
             }),
           },
         });
@@ -316,6 +320,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         operationCost,
         timeToFirstToken,
         reviewerSpanCtx,
+        ciAttrs,
       );
     },
   };
@@ -327,6 +332,7 @@ function buildAgentSubscriber(
   operationCost: Histogram,
   timeToFirstToken: Histogram,
   reviewerSpanCtx: ReturnType<typeof trace.setSpan>,
+  ciAttrs: Record<string, string> = {},
 ): (agent: AgentLike) => () => void {
   return (agent: AgentLike): (() => void) => {
     let currentTurn: { span: Span; startMs: number; firstTokenMs?: number } | undefined;
@@ -361,7 +367,7 @@ function buildAgentSubscriber(
 
         const rawModel = String(msg.model ?? '');
         const modelId = rawModel.includes('/') ? rawModel.split('/')[1] : rawModel || undefined;
-        const metricAttrs: Attributes = { 'gen_ai.operation.name': 'invoke_agent' };
+        const metricAttrs: Attributes = { 'gen_ai.operation.name': 'invoke_agent', ...ciAttrs };
         if (modelId) {
           metricAttrs['gen_ai.request.model'] = modelId;
           metricAttrs['gen_ai.response.model'] = modelId;
@@ -496,6 +502,7 @@ interface RunMeta {
   project: string;
   mr: string;
   gitlabUrl: string;
+  ciAttrs: Record<string, string>;
   usage?: DiagnosticUsage;
 }
 
@@ -520,6 +527,7 @@ function emitReviewCompletedLog(
       'gitlab.project_id': ctx.project,
       'gitlab.mr_iid': ctx.mr,
       'gitlab.server_url': ctx.gitlabUrl,
+      ...(meta?.ciAttrs ?? {}),
       'gitlab_review.run_id': ctx.runId,
       'gitlab_review.duration_ms': ctx.durationMs ?? 0,
       'gitlab_review.dry_run': ctx.dryRun,
@@ -551,6 +559,21 @@ function spanNameFor(phase: DiagnosticPhase): string {
   if (phase === ROOT_PHASE) return 'invoke_workflow gitlab-review';
   if (phase === GEN_AI_PHASE) return 'invoke_agent gitlab-review';
   return `gitlab-review.${phase}`;
+}
+
+/**
+ * Extracts GitLab CI environment variables that add project/pipeline context
+ * to every metric, span, and log record. Only populated when running inside a
+ * GitLab CI pipeline; callers spread the result so missing vars add nothing.
+ */
+function buildCiAttrs(env: NodeJS.ProcessEnv): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  if (env.CI_PROJECT_PATH) attrs['gitlab.project_path'] = env.CI_PROJECT_PATH;
+  if (env.CI_PROJECT_NAMESPACE) attrs['gitlab.project_namespace'] = env.CI_PROJECT_NAMESPACE;
+  if (env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME)
+    attrs['gitlab.mr_target_branch'] = env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME;
+  if (env.CI_PIPELINE_SOURCE) attrs['gitlab.pipeline_source'] = env.CI_PIPELINE_SOURCE;
+  return attrs;
 }
 
 function baseAttributes(ctx: DiagnosticContext): Record<string, string | number | boolean> {
@@ -634,9 +657,10 @@ function recordGenAiMetrics(
   costHist: Histogram,
   ctx: DiagnosticContext,
   isError: boolean,
+  ciAttrs: Record<string, string> = {},
 ): void {
   const [provider, modelId] = (ctx.model ?? '').split('/');
-  const attrs: Attributes = { 'gen_ai.operation.name': 'invoke_agent' };
+  const attrs: Attributes = { 'gen_ai.operation.name': 'invoke_agent', ...ciAttrs };
   if (provider) attrs['gen_ai.provider.name'] = provider;
   if (modelId) {
     attrs['gen_ai.request.model'] = modelId;

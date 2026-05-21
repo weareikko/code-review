@@ -73,7 +73,11 @@ describe('OpenTelemetry bridge', () => {
     };
 
     const tracer = {
-      startSpan(name: string, _opts?: unknown, ctx?: unknown): RecordedSpan {
+      startSpan(
+        name: string,
+        opts?: { attributes?: Record<string, unknown> },
+        ctx?: unknown,
+      ): RecordedSpan {
         // The bridge wires parent context through the real `@opentelemetry/api`
         // `trace.setSpan(context, span)` helper, so fetch the parent back out
         // with the real `trace.getSpan` rather than threading a symbol key.
@@ -83,6 +87,13 @@ describe('OpenTelemetry bridge', () => {
             ? (parentRaw as unknown as RecordedSpan)
             : undefined;
         const span = makeSpan(name, parent);
+        // Seed initial attributes from the options so assertions on span.attributes
+        // see attributes that were passed at span creation time (not only via setAttribute).
+        if (opts?.attributes) {
+          for (const [key, value] of Object.entries(opts.attributes)) {
+            span.attributes.push({ key, value: value as string | number | boolean });
+          }
+        }
         return Object.assign(span, {
           setAttribute(key: string, value: string | number | boolean) {
             span.attributes.push({ key, value });
@@ -813,6 +824,95 @@ describe('OpenTelemetry bridge', () => {
       'gitlab_review.comment.is_duplicate': false,
     });
     expect(utils.attributes['gitlab_review.comment.is_duplicate']).toBe(true);
+  });
+
+  it('propagates CI_* env vars as gitlab.* attributes on spans, metrics, and logs', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: {
+        GITLAB_REVIEW_OTEL: '1',
+        CI_PROJECT_PATH: 'my-group/my-project',
+        CI_PROJECT_NAMESPACE: 'my-group',
+        CI_MERGE_REQUEST_TARGET_BRANCH_NAME: 'main',
+        CI_PIPELINE_SOURCE: 'merge_request_event',
+      },
+    });
+
+    const config: Config = {
+      project: 'proj',
+      mr: '1',
+      gitlabUrl: 'https://gitlab.example.com',
+      gitlabToken: 't',
+      gitlabAuthHeader: 'PRIVATE-TOKEN',
+      model: 'anthropic/claude-sonnet-4-5',
+      minSeverity: 'info',
+      thinkingLevel: 'off',
+      postingMode: 'direct',
+      apiKey: 'k',
+      reviewFile: 'gitlab-review.md',
+      output: 'review-comments.json',
+      dryRun: false,
+      noPost: false,
+      postSummary: false,
+      forceReview: false,
+      verbose: false,
+      cwd: '/tmp',
+      skills: [],
+    };
+    const runContext = createDiagnosticContext('run', config, 'run-ci');
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      const reviewerContext = createDiagnosticContext('reviewer.run', config, 'run-ci');
+      await traceDiagnostic(diagnosticChannels.runReviewer, reviewerContext, async (ctx) => {
+        ctx.usage = {
+          model: 'anthropic/claude-sonnet-4-5',
+          tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+          cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+        };
+      });
+    });
+    await bridge!.shutdown();
+
+    const expectedCiAttrs = {
+      'gitlab.project_path': 'my-group/my-project',
+      'gitlab.project_namespace': 'my-group',
+      'gitlab.mr_target_branch': 'main',
+      'gitlab.pipeline_source': 'merge_request_event',
+    };
+
+    // All phase spans carry CI attrs.
+    for (const span of fake.spans) {
+      const attrs = Object.fromEntries(span.attributes.map((a) => [a.key, a.value]));
+      expect(attrs).toMatchObject(expectedCiAttrs);
+    }
+
+    // Run-level metrics (token.usage, cost, duration) carry CI attrs.
+    for (const metric of fake.metricsRecorded) {
+      expect(metric.attributes).toMatchObject(expectedCiAttrs);
+    }
+
+    // Review completion log carries CI attrs.
+    const completedLog = fake.logsEmitted.find(
+      (l) => l.attributes['event.name'] === 'gitlab_review.completed',
+    );
+    expect(completedLog?.attributes).toMatchObject(expectedCiAttrs);
+  });
+
+  it('omits gitlab.project_path and siblings when CI vars are absent', async () => {
+    const { metricsRecorded } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-sonnet-4-5',
+        tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+        cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+      };
+    });
+    // runWithBridge passes env: { GITLAB_REVIEW_OTEL: '1' } with no CI_* vars.
+    const cost = metricsRecorded.find((m) => m.name === 'gen_ai.client.cost');
+    expect(cost?.attributes).not.toHaveProperty('gitlab.project_path');
+    expect(cost?.attributes).not.toHaveProperty('gitlab.project_namespace');
+    expect(cost?.attributes).not.toHaveProperty('gitlab.mr_target_branch');
+    expect(cost?.attributes).not.toHaveProperty('gitlab.pipeline_source');
   });
 
   it('logComments truncates comment body at 500 chars', async () => {
