@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-05-21
+
 ### Added
 
 - **Richer OTel agent telemetry** (`GITLAB_REVIEW_OTEL=1`): per-turn `gen_ai.agent.turn` spans and per-call `execute_tool <name>` grandchild spans now appear under `invoke_agent gitlab-review` in Tempo, giving a full tool-use timeline. Per-turn `gen_ai.client.token.usage`, `gen_ai.client.cost`, and `gen_ai.client.time_to_first_token` metrics break down spend and latency by turn ([#35]).
@@ -181,6 +183,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
 [Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.3.2...HEAD
+[0.3.3]: https://github.com/ikko-dev/gitlab-review/compare/0.3.2...0.3.3
 [0.3.2]: https://github.com/ikko-dev/gitlab-review/compare/0.3.1...0.3.2
 [0.3.1]: https://github.com/ikko-dev/gitlab-review/compare/0.3.0...0.3.1
 [0.3.0]: https://github.com/ikko-dev/gitlab-review/compare/0.2.0...0.3.0
