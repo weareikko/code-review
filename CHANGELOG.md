@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-05-21
+
+### Fixed
+
+- **OTel metric data quality** (`GITLAB_REVIEW_OTEL=1`): several label gaps in the metrics and log records emitted by the OTel bridge have been closed.
+  - `service.name="@ikko-dev/gitlab-review"` is now included as an explicit data-point attribute on every `gitlab_review_*` and `gen_ai.*` metric observation. The SDK-level `service.name` resource attribute only populates `target_info` in Prometheus/Mimir; without it on each data point these metrics were invisible to provider-scoped queries and Grafana GenAI dashboards.
+  - `gen_ai.system` replaces the non-standard `gen_ai.provider.name` attribute on the aggregate `invoke_agent gitlab-review` span and on all `gen_ai.client.*` metric observations emitted by `recordGenAiMetrics`. `gen_ai.system` is the required attribute in the OTel GenAI semantic conventions.
+  - `gen_ai.system` is now also set on per-turn `gen_ai.agent.turn` spans and per-turn `gen_ai.client.token.usage`, `gen_ai.client.cost`, and `gen_ai.client.time_to_first_token` metric observations. Previously the provider portion of the model string was extracted but discarded.
+  - `gen_ai.agent.name="gitlab-review"` is now set on per-turn `gen_ai.agent.turn` spans (it was already set on the parent `invoke_agent` span).
+  - `gitlab_review.warnings`, `gitlab_review.drafts.abandoned`, and `gitlab_review.drafts.deleted_pre_publish` span attributes are now emitted from `applyResultAttributes`. These three `DiagnosticContext` fields were populated by the posting phases but never written to OTel spans.
+  - `service.name="@ikko-dev/gitlab-review"` is now included as an explicit attribute on `gitlab_review.comment` and `gitlab_review.completed` log records for consistent label presence alongside metrics.
+
 ## [0.3.6] - 2026-05-21
 
 ### Added

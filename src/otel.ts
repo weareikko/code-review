@@ -112,6 +112,12 @@ const GEN_AI_PHASE: DiagnosticPhase = 'reviewer.run';
 const POST_COMMENTS_PHASE: DiagnosticPhase = 'gitlab.post_comments';
 const SERVICE_NAME = '@ikko-dev/gitlab-review';
 
+// Added as a data-point attribute on every gitlab_review_* metric so that
+// Prometheus/Mimir surfaces it as a label (service_name="…"). The SDK-level
+// service.name resource attribute only populates target_info, not per-metric
+// labels, so we need to include it explicitly here.
+const REVIEW_SERVICE_ATTRS = { 'service.name': SERVICE_NAME } as const;
+
 // Advisory histogram bucket boundaries from the OTel GenAI metrics semconv.
 // https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-metrics/
 const DURATION_BUCKETS_S = [
@@ -275,6 +281,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     // Emit a phase-duration observation for every phase that has a measured duration.
     if (typeof ctx.durationMs === 'number') {
       reviewPhaseDuration.record(ctx.durationMs / 1000, {
+        ...REVIEW_SERVICE_ATTRS,
         'gitlab.project_path': projectPath,
         'gitlab_review.phase': ctx.phase,
         'gitlab_review.status': status,
@@ -287,6 +294,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
 
       if (typeof ctx.durationMs === 'number') {
         reviewRunDuration.record(ctx.durationMs / 1000, {
+          ...REVIEW_SERVICE_ATTRS,
           'gitlab.project_path': projectPath,
           'gitlab.pipeline_source': pipelineSource,
           'gitlab_review.dry_run': ctx.dryRun,
@@ -297,6 +305,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
       const totalCostUsd = meta?.usage?.cost.total ?? ctx.usage?.cost.total;
       if (totalCostUsd !== undefined) {
         reviewTotalCost.record(totalCostUsd, {
+          ...REVIEW_SERVICE_ATTRS,
           'gitlab.project_path': projectPath,
           'gitlab_review.dry_run': ctx.dryRun,
           'gitlab_review.status': status,
@@ -304,11 +313,13 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
       }
 
       reviewCommentsTotal.add(ctx.posted ?? 0, {
+        ...REVIEW_SERVICE_ATTRS,
         'gitlab.project_path': projectPath,
         'gitlab_review.dry_run': ctx.dryRun,
       });
 
       reviewDraftsPublishedTotal.add(meta?.draftsPublished ?? 0, {
+        ...REVIEW_SERVICE_ATTRS,
         'gitlab.project_path': projectPath,
         'gitlab_review.dry_run': ctx.dryRun,
       });
@@ -358,6 +369,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
           severityText: 'INFO',
           body: `[${comment.severity}] ${comment.file}:${comment.line} — ${preview}`,
           attributes: {
+            'service.name': SERVICE_NAME,
             'event.name': 'gitlab_review.comment',
             'gitlab_review.run_id': runId,
             'gitlab_review.comment.file': comment.file,
@@ -418,6 +430,7 @@ function buildAgentSubscriber(
           reviewerSpanCtx,
         );
         span.setAttribute('gen_ai.operation.name', 'invoke_agent');
+        span.setAttribute('gen_ai.agent.name', 'gitlab-review');
         if (runId) span.setAttribute('gen_ai.conversation.id', runId);
         if (typeof turnIndex === 'number') span.setAttribute('gen_ai.agent.turn.index', turnIndex);
         currentTurn = { span, startMs: Date.now() };
@@ -434,8 +447,18 @@ function buildAgentSubscriber(
         currentTurn = undefined;
 
         const rawModel = String(msg.model ?? '');
-        const modelId = rawModel.includes('/') ? rawModel.split('/')[1] : rawModel || undefined;
-        const metricAttrs: Attributes = { 'gen_ai.operation.name': 'invoke_agent', ...ciAttrs };
+        const slashIdx = rawModel.indexOf('/');
+        const provider = slashIdx >= 0 ? rawModel.slice(0, slashIdx) : undefined;
+        const modelId = slashIdx >= 0 ? rawModel.slice(slashIdx + 1) : rawModel || undefined;
+        const metricAttrs: Attributes = {
+          'gen_ai.operation.name': 'invoke_agent',
+          ...REVIEW_SERVICE_ATTRS,
+          ...ciAttrs,
+        };
+        if (provider) {
+          metricAttrs['gen_ai.system'] = provider;
+          span.setAttribute('gen_ai.system', provider);
+        }
         if (modelId) {
           metricAttrs['gen_ai.request.model'] = modelId;
           metricAttrs['gen_ai.response.model'] = modelId;
@@ -593,6 +616,7 @@ function emitReviewCompletedLog(
     severityText: isError ? 'ERROR' : 'INFO',
     body: `review completed: ${ctx.project} MR#${ctx.mr}${commentStr}${costStr}`,
     attributes: {
+      'service.name': SERVICE_NAME,
       'event.name': 'gitlab_review.completed',
       'gitlab.project_id': ctx.project,
       'gitlab.mr_iid': ctx.mr,
@@ -745,6 +769,15 @@ function applyResultAttributes(span: Span, ctx: DiagnosticContext): void {
   if (typeof ctx.summaryNoteId === 'number') {
     span.setAttribute('gitlab_review.summary.note_id', ctx.summaryNoteId);
   }
+  if (typeof ctx.warnings === 'number') {
+    span.setAttribute('gitlab_review.warnings', ctx.warnings);
+  }
+  if (typeof ctx.draftsAbandoned === 'number') {
+    span.setAttribute('gitlab_review.drafts.abandoned', ctx.draftsAbandoned);
+  }
+  if (typeof ctx.draftsDeletedPrePublish === 'number') {
+    span.setAttribute('gitlab_review.drafts.deleted_pre_publish', ctx.draftsDeletedPrePublish);
+  }
 }
 
 function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
@@ -752,7 +785,7 @@ function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
   // via OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental.
   // Spec: https://opentelemetry.io/docs/specs/semconv/gen-ai/
   const [provider, modelId] = (ctx.model ?? '').split('/');
-  if (provider) span.setAttribute('gen_ai.provider.name', provider);
+  if (provider) span.setAttribute('gen_ai.system', provider);
   if (modelId) {
     span.setAttribute('gen_ai.request.model', modelId);
     span.setAttribute('gen_ai.response.model', modelId);
@@ -788,8 +821,12 @@ function recordGenAiMetrics(
   ciAttrs: Record<string, string> = {},
 ): void {
   const [provider, modelId] = (ctx.model ?? '').split('/');
-  const attrs: Attributes = { 'gen_ai.operation.name': 'invoke_agent', ...ciAttrs };
-  if (provider) attrs['gen_ai.provider.name'] = provider;
+  const attrs: Attributes = {
+    'gen_ai.operation.name': 'invoke_agent',
+    ...REVIEW_SERVICE_ATTRS,
+    ...ciAttrs,
+  };
+  if (provider) attrs['gen_ai.system'] = provider;
   if (modelId) {
     attrs['gen_ai.request.model'] = modelId;
     attrs['gen_ai.response.model'] = modelId;

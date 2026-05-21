@@ -281,7 +281,7 @@ describe('OpenTelemetry bridge', () => {
     const attrs = Object.fromEntries(reviewer!.attributes.map((a) => [a.key, a.value]));
     expect(attrs).toMatchObject({
       'gen_ai.conversation.id': 'run-otel',
-      'gen_ai.provider.name': 'anthropic',
+      'gen_ai.system': 'anthropic',
       'gen_ai.request.model': 'claude-sonnet-4-5',
       'gen_ai.response.model': 'claude-sonnet-4-5',
       'gen_ai.operation.name': 'invoke_agent',
@@ -307,8 +307,9 @@ describe('OpenTelemetry bridge', () => {
     expect(duration).toBeDefined();
     expect(typeof duration!.value).toBe('number');
     expect(duration!.attributes).toMatchObject({
+      'service.name': '@ikko-dev/gitlab-review',
       'gen_ai.operation.name': 'invoke_agent',
-      'gen_ai.provider.name': 'anthropic',
+      'gen_ai.system': 'anthropic',
       'gen_ai.request.model': 'claude-sonnet-4-5',
       'gen_ai.response.model': 'claude-sonnet-4-5',
     });
@@ -320,8 +321,9 @@ describe('OpenTelemetry bridge', () => {
     expect(byType.get('input')?.value).toBe(1200);
     expect(byType.get('output')?.value).toBe(340);
     expect(byType.get('input')?.attributes).toMatchObject({
+      'service.name': '@ikko-dev/gitlab-review',
       'gen_ai.operation.name': 'invoke_agent',
-      'gen_ai.provider.name': 'anthropic',
+      'gen_ai.system': 'anthropic',
       'gen_ai.request.model': 'claude-sonnet-4-5',
     });
   });
@@ -374,7 +376,9 @@ describe('OpenTelemetry bridge', () => {
       (m) => m.name === 'gen_ai.client.operation.duration',
     );
     expect(duration?.attributes).toMatchObject({
+      'service.name': '@ikko-dev/gitlab-review',
       'gen_ai.operation.name': 'invoke_agent',
+      'gen_ai.system': 'anthropic',
       // `error.type` prefers the typed-error `code` over the class name —
       // ReviewerError sets code='REVIEWER_ERROR'.
       'error.type': 'REVIEWER_ERROR',
@@ -400,6 +404,9 @@ describe('OpenTelemetry bridge', () => {
       ctx.posted = 4;
       ctx.draftsCreated = 6;
       ctx.draftsPublished = 6;
+      ctx.warnings = 1;
+      ctx.draftsAbandoned = 2;
+      ctx.draftsDeletedPrePublish = 3;
     });
     const reviewer = spans.find((s) => s.name === 'invoke_agent gitlab-review');
     const attrs = Object.fromEntries(reviewer!.attributes.map((a) => [a.key, a.value]));
@@ -413,6 +420,9 @@ describe('OpenTelemetry bridge', () => {
       'gitlab_review.comments.posted': 4,
       'gitlab_review.drafts.created': 6,
       'gitlab_review.drafts.published': 6,
+      'gitlab_review.warnings': 1,
+      'gitlab_review.drafts.abandoned': 2,
+      'gitlab_review.drafts.deleted_pre_publish': 3,
     });
   });
 
@@ -449,7 +459,9 @@ describe('OpenTelemetry bridge', () => {
     expect(cost).toBeDefined();
     expect(cost!.value).toBeCloseTo(0.03);
     expect(cost!.attributes).toMatchObject({
+      'service.name': '@ikko-dev/gitlab-review',
       'gen_ai.operation.name': 'invoke_agent',
+      'gen_ai.system': 'anthropic',
       'gen_ai.request.model': 'claude-sonnet-4-5',
     });
   });
@@ -550,6 +562,7 @@ describe('OpenTelemetry bridge', () => {
     const idx = Object.fromEntries(turnSpans[0].attributes.map((a) => [a.key, a.value]));
     expect(idx['gen_ai.conversation.id']).toBe('run-agent');
     expect(idx['gen_ai.agent.turn.index']).toBe(1);
+    expect(idx['gen_ai.agent.name']).toBe('gitlab-review');
   });
 
   it('stamps per-turn token usage and cost on turn spans', async () => {
@@ -573,12 +586,14 @@ describe('OpenTelemetry bridge', () => {
     const turn = spans.find((s) => s.name === 'gen_ai.agent.turn');
     const attrs = Object.fromEntries(turn!.attributes.map((a) => [a.key, a.value]));
     expect(attrs).toMatchObject({
+      'gen_ai.system': 'anthropic',
       'gen_ai.usage.input_tokens': 300,
       'gen_ai.usage.output_tokens': 80,
       'gen_ai.usage.cache_read.input_tokens': 50,
       'gen_ai.usage.cost.total_usd': 0.0115,
       'gen_ai.response.model': 'claude-haiku-4-5',
       'gen_ai.response.stop_reason': 'end_turn',
+      'gen_ai.agent.name': 'gitlab-review',
     });
   });
 
@@ -614,7 +629,11 @@ describe('OpenTelemetry bridge', () => {
     const costMetrics = metricsRecorded.filter((m) => m.name === 'gen_ai.client.cost');
     const perTurnCost = costMetrics.find((m) => Math.abs(m.value - 0.014) < 0.0001);
     expect(perTurnCost).toBeDefined();
-    expect(perTurnCost!.attributes).toMatchObject({ 'gen_ai.request.model': 'claude-haiku-4-5' });
+    expect(perTurnCost!.attributes).toMatchObject({
+      'service.name': '@ikko-dev/gitlab-review',
+      'gen_ai.system': 'anthropic',
+      'gen_ai.request.model': 'claude-haiku-4-5',
+    });
   });
 
   it('records TTFT metric when message_update fires before message_end', async () => {
@@ -747,6 +766,7 @@ describe('OpenTelemetry bridge', () => {
     expect(completedLog).toBeDefined();
     expect(completedLog!.body).toMatch(/review completed: proj MR#1/);
     expect(completedLog!.attributes).toMatchObject({
+      'service.name': '@ikko-dev/gitlab-review',
       'event.name': 'gitlab_review.completed',
       'gitlab.project_id': 'proj',
       'gitlab.mr_iid': '1',
@@ -850,6 +870,7 @@ describe('OpenTelemetry bridge', () => {
     const [auth, utils] = commentLogs;
     expect(auth.body).toContain('[critical] src/auth.ts:42');
     expect(auth.attributes).toMatchObject({
+      'service.name': '@ikko-dev/gitlab-review',
       'gitlab.project_id': 'acme/web',
       'gitlab.mr_iid': '42',
       'gitlab_review.run_id': 'run-logs',
@@ -1060,6 +1081,7 @@ describe('OpenTelemetry bridge', () => {
     expect(typeof runDuration!.value).toBe('number');
     expect(runDuration!.value).toBeGreaterThanOrEqual(0);
     expect(runDuration!.attributes).toMatchObject({
+      'service.name': '@ikko-dev/gitlab-review',
       'gitlab_review.dry_run': false,
       'gitlab_review.status': 'success',
     });
@@ -1068,6 +1090,7 @@ describe('OpenTelemetry bridge', () => {
     expect(totalCost).toBeDefined();
     expect(totalCost!.value).toBeCloseTo(0.03);
     expect(totalCost!.attributes).toMatchObject({
+      'service.name': '@ikko-dev/gitlab-review',
       'gitlab_review.dry_run': false,
       'gitlab_review.status': 'success',
     });
@@ -1098,14 +1121,20 @@ describe('OpenTelemetry bridge', () => {
     const comments = fake.metricsRecorded.find((m) => m.name === 'gitlab_review_comments_total');
     expect(comments).toBeDefined();
     expect(comments!.value).toBe(6);
-    expect(comments!.attributes).toMatchObject({ 'gitlab_review.dry_run': false });
+    expect(comments!.attributes).toMatchObject({
+      'service.name': '@ikko-dev/gitlab-review',
+      'gitlab_review.dry_run': false,
+    });
 
     const drafts = fake.metricsRecorded.find(
       (m) => m.name === 'gitlab_review_drafts_published_total',
     );
     expect(drafts).toBeDefined();
     expect(drafts!.value).toBe(4);
-    expect(drafts!.attributes).toMatchObject({ 'gitlab_review.dry_run': false });
+    expect(drafts!.attributes).toMatchObject({
+      'service.name': '@ikko-dev/gitlab-review',
+      'gitlab_review.dry_run': false,
+    });
   });
 
   it('emits gitlab_review_phase_duration_seconds for every measured phase', async () => {
@@ -1129,10 +1158,12 @@ describe('OpenTelemetry bridge', () => {
     expect(reviewerPhase).toBeDefined();
     expect(typeof reviewerPhase!.value).toBe('number');
     expect(reviewerPhase!.value).toBeGreaterThanOrEqual(0);
+    expect(reviewerPhase!.attributes['service.name']).toBe('@ikko-dev/gitlab-review');
     expect(reviewerPhase!.attributes['gitlab_review.status']).toBe('success');
 
     const runPhase = phaseDurations.find((m) => m.attributes['gitlab_review.phase'] === 'run');
     expect(runPhase).toBeDefined();
+    expect(runPhase!.attributes['service.name']).toBe('@ikko-dev/gitlab-review');
     expect(runPhase!.attributes['gitlab_review.status']).toBe('success');
   });
 
