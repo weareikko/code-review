@@ -527,7 +527,7 @@ function emitReviewCompletedLog(
       'gitlab.project_id': ctx.project,
       'gitlab.mr_iid': ctx.mr,
       'gitlab.server_url': ctx.gitlabUrl,
-      ...(meta?.ciAttrs ?? {}),
+      ...meta?.ciAttrs,
       'gitlab_review.run_id': ctx.runId,
       'gitlab_review.duration_ms': ctx.durationMs ?? 0,
       'gitlab_review.dry_run': ctx.dryRun,
