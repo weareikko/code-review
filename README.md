@@ -274,16 +274,30 @@ invoke_workflow gitlab-review
 
 #### Metrics
 
-The bridge emits the standardized GenAI client metrics tagged with the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (`gen_ai.*`):
+The bridge emits two sets of metrics.
+
+**GenAI client metrics** follow the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (`gen_ai.*`) and are emitted per LLM call:
 
 | Metric                              | Unit    | Purpose                                           |
 | ----------------------------------- | ------- | ------------------------------------------------- |
 | `gen_ai.client.operation.duration`  | s       | Overall agent call duration                       |
 | `gen_ai.client.token.usage`         | {token} | Token counts per turn by type                     |
-| `gen_ai.client.cost`                | usd     | Cost per turn and total per review                |
+| `gen_ai.client.cost`                | usd     | Cost per turn                                     |
 | `gen_ai.client.time_to_first_token` | s       | TTFT per turn (recorded on first streaming event) |
 
-Grafana Application Observability auto-discovers the service from its `gen_ai.*` metrics without any dashboard import.
+**Review-level metrics** are emitted once per complete run (success or failure):
+
+| Metric                                 | Type      | Labels                                                                                           |
+| -------------------------------------- | --------- | ------------------------------------------------------------------------------------------------ |
+| `gitlab_review_run_duration_seconds`   | Histogram | `gitlab.project_path`, `gitlab.pipeline_source`, `gitlab_review.dry_run`, `gitlab_review.status` |
+| `gitlab_review_total_cost_usd`         | Histogram | `gitlab.project_path`, `gitlab_review.dry_run`, `gitlab_review.status`                           |
+| `gitlab_review_comments_total`         | Counter   | `gitlab.project_path`, `gitlab_review.dry_run`                                                   |
+| `gitlab_review_drafts_published_total` | Counter   | `gitlab.project_path`, `gitlab_review.dry_run`                                                   |
+| `gitlab_review_phase_duration_seconds` | Histogram | `gitlab.project_path`, `gitlab_review.phase`, `gitlab_review.status`                             |
+
+`gitlab_review.status` is `success`, `error`, or `timeout` (AbortError / ETIMEDOUT). `gitlab.project_path` is populated from `CI_PROJECT_PATH` when running inside a GitLab CI pipeline.
+
+Grafana Application Observability auto-discovers the service from its `gen_ai.*` metrics without any dashboard import. The `gitlab_review_*` metrics enable project-level Mimir queries such as `sum by (gitlab_project_path) (increase(gitlab_review_total_cost_usd_sum[7d]))` to track spend per repository.
 
 #### Structured log records
 

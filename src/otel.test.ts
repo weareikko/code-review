@@ -12,6 +12,32 @@ import {
   type DiagnosticContext,
 } from './review.js';
 
+/** Builds a minimal but complete Config for inline test helpers that need it. */
+function makeConfig(overrides: Partial<Config> = {}): Config {
+  return {
+    project: 'mygroup/myrepo',
+    mr: '7',
+    gitlabUrl: 'https://gitlab.example.com',
+    gitlabToken: 't',
+    gitlabAuthHeader: 'PRIVATE-TOKEN',
+    model: 'anthropic/claude-sonnet-4-5',
+    minSeverity: 'info',
+    thinkingLevel: 'off',
+    postingMode: 'direct',
+    apiKey: 'k',
+    reviewFile: 'gitlab-review.md',
+    output: 'review-comments.json',
+    dryRun: false,
+    noPost: false,
+    postSummary: false,
+    forceReview: false,
+    verbose: false,
+    cwd: '/tmp',
+    skills: [],
+    ...overrides,
+  };
+}
+
 function makeAgent(): AgentLike & { emit: (event: Record<string, unknown>) => Promise<void> } {
   type Listener = (event: Record<string, unknown>) => void | Promise<void>;
   const listeners: Listener[] = [];
@@ -121,6 +147,13 @@ describe('OpenTelemetry bridge', () => {
       createHistogram(name: string) {
         return {
           record(value: number, attributes: Record<string, unknown> = {}) {
+            metricsRecorded.push({ name, value, attributes });
+          },
+        };
+      },
+      createCounter(name: string) {
+        return {
+          add(value: number, attributes: Record<string, unknown> = {}) {
             metricsRecorded.push({ name, value, attributes });
           },
         };
@@ -887,9 +920,16 @@ describe('OpenTelemetry bridge', () => {
       expect(attrs).toMatchObject(expectedCiAttrs);
     }
 
-    // Run-level metrics (token.usage, cost, duration) carry CI attrs.
-    for (const metric of fake.metricsRecorded) {
+    // gen_ai.* metrics carry all CI attrs (they spread ciAttrs wholesale).
+    const genAiMetrics = fake.metricsRecorded.filter((m) => m.name.startsWith('gen_ai.'));
+    for (const metric of genAiMetrics) {
       expect(metric.attributes).toMatchObject(expectedCiAttrs);
+    }
+    // Review-level metrics carry at least gitlab.project_path (the primary
+    // grouping dimension); other CI attrs are omitted per the metric spec.
+    const reviewMetrics = fake.metricsRecorded.filter((m) => m.name.startsWith('gitlab_review_'));
+    for (const metric of reviewMetrics) {
+      expect(metric.attributes['gitlab.project_path']).toBe('my-group/my-project');
     }
 
     // Review completion log carries CI attrs.
@@ -982,5 +1022,211 @@ describe('OpenTelemetry bridge', () => {
     expect(log!.body).toContain('…');
     // Total body should not exceed ~520 chars (prefix + 500 content chars + ellipsis)
     expect(log!.body.length).toBeLessThan(520);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Review-level OTel metrics (gitlab_review_* instruments)
+  // ---------------------------------------------------------------------------
+
+  it('emits gitlab_review_run_duration_seconds and gitlab_review_total_cost_usd on success', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig();
+    const runId = 'run-review-metrics';
+    const runContext = createDiagnosticContext('run', config, runId);
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      const reviewerContext = createDiagnosticContext('reviewer.run', config, runId);
+      await traceDiagnostic(diagnosticChannels.runReviewer, reviewerContext, async (ctx) => {
+        ctx.usage = {
+          model: 'anthropic/claude-sonnet-4-5',
+          tokens: { input: 1000, output: 200, cacheRead: 0, cacheWrite: 0, total: 1200 },
+          cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+        };
+      });
+    });
+    await bridge!.shutdown();
+
+    const runDuration = fake.metricsRecorded.find(
+      (m) => m.name === 'gitlab_review_run_duration_seconds',
+    );
+    expect(runDuration).toBeDefined();
+    expect(typeof runDuration!.value).toBe('number');
+    expect(runDuration!.value).toBeGreaterThanOrEqual(0);
+    expect(runDuration!.attributes).toMatchObject({
+      'gitlab_review.dry_run': false,
+      'gitlab_review.status': 'success',
+    });
+
+    const totalCost = fake.metricsRecorded.find((m) => m.name === 'gitlab_review_total_cost_usd');
+    expect(totalCost).toBeDefined();
+    expect(totalCost!.value).toBeCloseTo(0.03);
+    expect(totalCost!.attributes).toMatchObject({
+      'gitlab_review.dry_run': false,
+      'gitlab_review.status': 'success',
+    });
+  });
+
+  it('emits gitlab_review_comments_total and gitlab_review_drafts_published_total', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig();
+    const runId = 'run-counters';
+    const runContext = createDiagnosticContext('run', config, runId);
+    await traceDiagnostic(diagnosticChannels.run, runContext, async (ctx) => {
+      // Simulate the post_comments phase populating draftsPublished.
+      const postContext = createDiagnosticContext('gitlab.post_comments', config, runId);
+      await traceDiagnostic(diagnosticChannels.postComments, postContext, async (pCtx) => {
+        pCtx.draftsPublished = 4;
+      });
+      // Root context carries the comments-posted count.
+      ctx.posted = 6;
+    });
+    await bridge!.shutdown();
+
+    const comments = fake.metricsRecorded.find((m) => m.name === 'gitlab_review_comments_total');
+    expect(comments).toBeDefined();
+    expect(comments!.value).toBe(6);
+    expect(comments!.attributes).toMatchObject({ 'gitlab_review.dry_run': false });
+
+    const drafts = fake.metricsRecorded.find(
+      (m) => m.name === 'gitlab_review_drafts_published_total',
+    );
+    expect(drafts).toBeDefined();
+    expect(drafts!.value).toBe(4);
+    expect(drafts!.attributes).toMatchObject({ 'gitlab_review.dry_run': false });
+  });
+
+  it('emits gitlab_review_phase_duration_seconds for every measured phase', async () => {
+    const { metricsRecorded } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-sonnet-4-5',
+        tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+        cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+      };
+    });
+
+    const phaseDurations = metricsRecorded.filter(
+      (m) => m.name === 'gitlab_review_phase_duration_seconds',
+    );
+    // runWithBridge opens `run` and `reviewer.run` phases — both must emit.
+    expect(phaseDurations.length).toBeGreaterThanOrEqual(2);
+
+    const reviewerPhase = phaseDurations.find(
+      (m) => m.attributes['gitlab_review.phase'] === 'reviewer.run',
+    );
+    expect(reviewerPhase).toBeDefined();
+    expect(typeof reviewerPhase!.value).toBe('number');
+    expect(reviewerPhase!.value).toBeGreaterThanOrEqual(0);
+    expect(reviewerPhase!.attributes['gitlab_review.status']).toBe('success');
+
+    const runPhase = phaseDurations.find((m) => m.attributes['gitlab_review.phase'] === 'run');
+    expect(runPhase).toBeDefined();
+    expect(runPhase!.attributes['gitlab_review.status']).toBe('success');
+  });
+
+  it('sets gitlab_review.status=error on run-level metrics when the run throws', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig();
+    const runId = 'run-error-status';
+    const runContext = createDiagnosticContext('run', config, runId);
+    await expect(
+      traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+        throw new Error('something broke');
+      }),
+    ).rejects.toThrow('something broke');
+    await bridge!.shutdown();
+
+    const runDuration = fake.metricsRecorded.find(
+      (m) => m.name === 'gitlab_review_run_duration_seconds',
+    );
+    expect(runDuration).toBeDefined();
+    expect(runDuration!.attributes['gitlab_review.status']).toBe('error');
+
+    const phaseDuration = fake.metricsRecorded.find(
+      (m) =>
+        m.name === 'gitlab_review_phase_duration_seconds' &&
+        m.attributes['gitlab_review.phase'] === 'run',
+    );
+    expect(phaseDuration!.attributes['gitlab_review.status']).toBe('error');
+  });
+
+  it('sets gitlab_review.status=timeout when the run is aborted', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig();
+    const runId = 'run-timeout-status';
+    const runContext = createDiagnosticContext('run', config, runId);
+    const abortError = Object.assign(new Error('operation aborted'), {
+      name: 'AbortError',
+      code: 'ABORT_ERR',
+    });
+    await expect(
+      traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+        throw abortError;
+      }),
+    ).rejects.toThrow('operation aborted');
+    await bridge!.shutdown();
+
+    const runDuration = fake.metricsRecorded.find(
+      (m) => m.name === 'gitlab_review_run_duration_seconds',
+    );
+    expect(runDuration).toBeDefined();
+    expect(runDuration!.attributes['gitlab_review.status']).toBe('timeout');
+  });
+
+  it('omits gitlab_review_total_cost_usd when no usage is recorded', async () => {
+    const { metricsRecorded } = await runWithBridge(async () => {
+      // No ctx.usage set — reviewer phase produces no cost data.
+    });
+
+    expect(metricsRecorded.find((m) => m.name === 'gitlab_review_total_cost_usd')).toBeUndefined();
+  });
+
+  it('carries gitlab.pipeline_source on gitlab_review_run_duration_seconds when CI var is set', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: {
+        GITLAB_REVIEW_OTEL: '1',
+        CI_PROJECT_PATH: 'corp/svc',
+        CI_PIPELINE_SOURCE: 'merge_request_event',
+      },
+    });
+
+    const config = makeConfig();
+    const runId = 'run-pipeline-source';
+    const runContext = createDiagnosticContext('run', config, runId);
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {});
+    await bridge!.shutdown();
+
+    const runDuration = fake.metricsRecorded.find(
+      (m) => m.name === 'gitlab_review_run_duration_seconds',
+    );
+    expect(runDuration!.attributes).toMatchObject({
+      'gitlab.project_path': 'corp/svc',
+      'gitlab.pipeline_source': 'merge_request_event',
+    });
   });
 });
