@@ -77,29 +77,27 @@ review:
 
 The CLI auto-resolves values from CI variables and common token/key names.
 
-| Variable                       | Purpose                                                                         |
-| ------------------------------ | ------------------------------------------------------------------------------- |
-| `CI_PROJECT_ID`                | Default for `--project`                                                         |
-| `CI_MERGE_REQUEST_IID`         | Default for `--mr`                                                              |
-| `CI_SERVER_URL`                | Default for `--gitlab-url`                                                      |
-| `CI_SERVER_HOST`               | Fallback for `--gitlab-url` as `https://$CI_SERVER_HOST`                        |
-| `GITLAB_TOKEN`                 | Preferred GitLab API token (`PRIVATE-TOKEN`)                                    |
-| `GLAB_CLI_TOKEN`               | Fallback GitLab API token (`PRIVATE-TOKEN`)                                     |
-| `CI_JOB_TOKEN`                 | Fallback token (`JOB-TOKEN`)                                                    |
-| `GITLAB_PRIVATE_TOKEN`         | Fallback token (`PRIVATE-TOKEN`)                                                |
-| `GITLAB_REVIEW_API_KEY`        | Preferred AI API key                                                            |
-| `ANTHROPIC_API_KEY`            | Fallback AI API key                                                             |
-| `CLAUDE_API_KEY`               | Fallback AI API key                                                             |
-| `GITLAB_REVIEW_MODEL`          | Default for `--model`                                                           |
-| `GITLAB_REVIEW_MIN_SEVERITY`   | Default for `--min-severity`                                                    |
-| `GITLAB_REVIEW_THINKING_LEVEL` | Default for `--thinking`                                                        |
-| `GITLAB_REVIEW_POSTING_MODE`   | Default for `--posting-mode`                                                    |
-| `GITLAB_REVIEW_POST_SUMMARY`   | Set to `false`/`0` to skip the MR-level summary note                            |
-| `GITLAB_REVIEW_FORCE_REVIEW`   | Set to `true`/`1` to review even if the commit was already reviewed             |
-| `GITLAB_REVIEW_SKILLS`         | Comma-separated list of built-in skill names to enable (e.g. `code-review`)     |
-| `GITLAB_REVIEW_OTEL`           | Set to `1` to enable the OpenTelemetry bridge (generic OTLP spans + metrics)    |
-| `GITLAB_REVIEW_SIGIL`          | Set to `1` to enable Grafana AI Observability (Sigil) generation export         |
-| `SIGIL_CONTENT_CAPTURE_MODE`   | Default for `--sigil-capture-mode` (`metadata_only`, `no_tool_content`, `full`) |
+| Variable                       | Purpose                                                                      |
+| ------------------------------ | ---------------------------------------------------------------------------- |
+| `CI_PROJECT_ID`                | Default for `--project`                                                      |
+| `CI_MERGE_REQUEST_IID`         | Default for `--mr`                                                           |
+| `CI_SERVER_URL`                | Default for `--gitlab-url`                                                   |
+| `CI_SERVER_HOST`               | Fallback for `--gitlab-url` as `https://$CI_SERVER_HOST`                     |
+| `GITLAB_TOKEN`                 | Preferred GitLab API token (`PRIVATE-TOKEN`)                                 |
+| `GLAB_CLI_TOKEN`               | Fallback GitLab API token (`PRIVATE-TOKEN`)                                  |
+| `CI_JOB_TOKEN`                 | Fallback token (`JOB-TOKEN`)                                                 |
+| `GITLAB_PRIVATE_TOKEN`         | Fallback token (`PRIVATE-TOKEN`)                                             |
+| `GITLAB_REVIEW_API_KEY`        | Preferred AI API key                                                         |
+| `ANTHROPIC_API_KEY`            | Fallback AI API key                                                          |
+| `CLAUDE_API_KEY`               | Fallback AI API key                                                          |
+| `GITLAB_REVIEW_MODEL`          | Default for `--model`                                                        |
+| `GITLAB_REVIEW_MIN_SEVERITY`   | Default for `--min-severity`                                                 |
+| `GITLAB_REVIEW_THINKING_LEVEL` | Default for `--thinking`                                                     |
+| `GITLAB_REVIEW_POSTING_MODE`   | Default for `--posting-mode`                                                 |
+| `GITLAB_REVIEW_POST_SUMMARY`   | Set to `false`/`0` to skip the MR-level summary note                         |
+| `GITLAB_REVIEW_FORCE_REVIEW`   | Set to `true`/`1` to review even if the commit was already reviewed          |
+| `GITLAB_REVIEW_SKILLS`         | Comma-separated list of built-in skill names to enable (e.g. `code-review`)  |
+| `GITLAB_REVIEW_OTEL`           | Set to `1` to enable the OpenTelemetry bridge (generic OTLP spans + metrics) |
 
 ## Flags
 
@@ -122,8 +120,6 @@ The CLI auto-resolves values from CI variables and common token/key names.
 | `--skill <name>`         | Enable a built-in skill by name (repeatable)           | `GITLAB_REVIEW_SKILLS` or none                                           |
 | `--dry-run`              | Generate artifacts and skip posting                    | `false`                                                                  |
 | `--no-post`              | Same behavior as `--dry-run`                           | `false`                                                                  |
-| `--sigil`                | Enable Grafana AI Observability generation export      | `GITLAB_REVIEW_SIGIL` or `false`                                         |
-| `--sigil-capture-mode`   | `metadata_only`, `no_tool_content`, or `full`          | `SIGIL_CONTENT_CAPTURE_MODE` or `metadata_only`                          |
 | `--help`, `-h`           | Show help                                              | -                                                                        |
 | `--version`, `-v`        | Show version                                           | -                                                                        |
 
@@ -251,81 +247,80 @@ await run(config);
 
 ### OpenTelemetry bridge
 
-`GITLAB_REVIEW_OTEL=1` enables a bridge that subscribes to the diagnostics channels and emits generic **OTLP** spans and the standardized GenAI client metrics tagged with the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (`gen_ai.*`). The OTel runtime is bundled — no extra installs required.
+`GITLAB_REVIEW_OTEL=1` enables a bridge that subscribes to the diagnostics channels and emits **OTLP** spans, GenAI client metrics, and structured log records. The OTel runtime is bundled — no extra installs required.
 
-The bridge records `gen_ai.client.operation.duration` and `gen_ai.client.token.usage` histograms alongside the spans, so Grafana Application Observability (and any other OTel-compliant LLM observability surface driven off these metric names) auto-discovers the service from its metrics without any dashboard import.
+Exporter selection follows the standard `OTEL_*` env vars (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_PROTOCOL`, …). Anything that ingests OTLP works: Tempo, Mimir, Loki, Jaeger, Datadog, Honeycomb, SigNoz, and so on.
 
-Exporter selection follows the standard `OTEL_*` env vars (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_PROTOCOL`, …). Anything that ingests OTLP works: Tempo, Mimir, Jaeger, Datadog, Honeycomb, SigNoz, and so on.
+#### Spans
 
-> **Note:** `GITLAB_REVIEW_OTEL` sends generic OTLP spans/metrics. It is separate from `GITLAB_REVIEW_SIGIL` (see below), which sends generation-level records to [Grafana AI Observability](https://grafana.com/docs/grafana-cloud/machine-learning/ai-observability/) via the Sigil protocol and is **not** OTLP.
+The full trace hierarchy in Tempo is:
 
-Span shape:
+```
+invoke_workflow gitlab-review
+└── invoke_agent gitlab-review
+    ├── gen_ai.agent.turn (turn 1)
+    │   ├── execute_tool Read
+    │   └── execute_tool Grep
+    ├── gen_ai.agent.turn (turn 2)
+    │   └── execute_tool Read
+    └── gen_ai.agent.turn (turn N)
+```
 
-- `invoke_workflow gitlab-review` — root span per run, carrying `gitlab.project_id`, `gitlab.mr_iid`, comment counters, and `gen_ai.*` totals once the reviewer has finished.
-- `invoke_agent gitlab-review` — wraps the agent call. Tagged with `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.operation.name=invoke_agent`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_creation.input_tokens`, and `gen_ai.usage.cost.*_usd` (cost is not yet standardized in the GenAI semconv, so it sits under a clearly namespaced custom attribute).
-- `gitlab-review.<phase>` — one span per remaining phase (`gitlab.get_merge_request`, `git.get_merge_diff`, `gitlab.post_comments`, …) so latency and error rates per phase show up in Tempo / Grafana.
+- `invoke_workflow gitlab-review` — root span per run, carrying `gitlab.project_id`, `gitlab.mr_iid`, comment counters, and `gen_ai.*` totals.
+- `invoke_agent gitlab-review` — wraps the full agent call. Tagged with `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.operation.name=invoke_agent`, aggregate token and cost attributes.
+- `gen_ai.agent.turn` — one child span per agent turn with per-turn token counts, cost, model, and stop reason.
+- `execute_tool <name>` — one grandchild span per tool call (`gen_ai.tool.name`, `gen_ai.tool.call.id`). Error status is set on failed calls.
+- `gitlab-review.<phase>` — one span per remaining phase (`gitlab.get_merge_request`, `git.get_merge_diff`, `gitlab.post_comments`, …) for latency and error rates.
 
-When the env var is not set, the bridge is a no-op and `@opentelemetry/*` is never imported (the modules are dynamic-loaded behind the env check, so unsetting the flag pays no startup cost).
+#### Metrics
 
-Library callers with pre-existing `TracerProvider`/`MeterProvider` can share them by injecting a runtime instead of letting the bridge boot its own `NodeSDK`:
+The bridge emits the standardized GenAI client metrics tagged with the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (`gen_ai.*`):
+
+| Metric                              | Unit    | Purpose                                           |
+| ----------------------------------- | ------- | ------------------------------------------------- |
+| `gen_ai.client.operation.duration`  | s       | Overall agent call duration                       |
+| `gen_ai.client.token.usage`         | {token} | Token counts per turn by type                     |
+| `gen_ai.client.cost`                | usd     | Cost per turn and total per review                |
+| `gen_ai.client.time_to_first_token` | s       | TTFT per turn (recorded on first streaming event) |
+
+Grafana Application Observability auto-discovers the service from its `gen_ai.*` metrics without any dashboard import.
+
+#### Structured log records
+
+After each review the bridge emits one **OTel log record per generated comment** (`event.name: gitlab_review.comment`) and a **review completion record** (`event.name: gitlab_review.completed`). Each comment record carries path, line, severity, duplicate flag, and the comment body. The completion record carries total cost, token counts, model, project/MR IDs, and comment/duplicate counts.
+
+Log records land in Loki (or whichever OTLP log backend you target) and can be correlated back to traces via `run.id`.
+
+#### Grafana Cloud token scopes
+
+For all three signals to reach their respective backends, the service account token used in `OTEL_EXPORTER_OTLP_HEADERS` must carry:
+
+- `Traces Publisher` — writes to Tempo
+- `Metrics Publisher` — writes to Mimir
+- `Logs Publisher` — writes to Loki
+
+A token missing any of these scopes will get a silent `401 Unauthorized: invalid scope requested` from the OTLP gateway. Set `OTEL_LOG_LEVEL=error` to surface export failures.
+
+#### Disabling the bridge
+
+When `GITLAB_REVIEW_OTEL` is not set, the bridge is a no-op and `@opentelemetry/*` is never imported (dynamic-loaded behind the env check, so unsetting the flag pays no startup cost).
+
+#### Library injection
+
+Library callers with pre-existing `TracerProvider`/`MeterProvider`/`LoggerProvider` can share them by injecting a runtime instead of letting the bridge boot its own `NodeSDK`:
 
 ```js
 import { metrics, trace } from '@opentelemetry/api';
+import { logs } from '@opentelemetry/api-logs';
 import { startOtelBridge } from '@ikko-dev/gitlab-review';
 
 await startOtelBridge({
   runtime: {
     tracerProvider: trace.getTracerProvider(),
     meterProvider: metrics.getMeterProvider(),
+    loggerProvider: logs.getLoggerProvider(),
     shutdown: async () => {},
   },
-});
-```
-
-### Grafana AI Observability (Sigil)
-
-`GITLAB_REVIEW_SIGIL=1` (or `--sigil`) enables a dedicated bridge that sends **generation-level records** to [Grafana AI Observability](https://grafana.com/docs/grafana-cloud/machine-learning/ai-observability/) via `@grafana/sigil-sdk-js`. This is a separate path from the OTel bridge above — it uses the Sigil ingest protocol, not OTLP. The SDK is bundled — no extra installs required.
-
-**Required environment variables** — find all values in your Grafana Cloud stack under _AI Observability → Configuration_:
-
-| Variable               | Purpose                                                          |
-| ---------------------- | ---------------------------------------------------------------- |
-| `SIGIL_ENDPOINT`       | Generation ingest URL from AI Observability Configuration        |
-| `SIGIL_AUTH_TENANT_ID` | Instance ID (numeric stack ID) for `basic` or `tenant` auth mode |
-| `SIGIL_AUTH_TOKEN`     | Cloud Access Policy token (scopes: `sigil:write`)                |
-
-GitLab CI example:
-
-```yml
-variables:
-  GITLAB_REVIEW_SIGIL: '1'
-  SIGIL_ENDPOINT: 'https://your-stack.grafana.net/ai-observability'
-  SIGIL_AUTH_TENANT_ID: '$GRAFANA_INSTANCE_ID'
-  SIGIL_AUTH_TOKEN: '$GRAFANA_CLOUD_TOKEN'
-```
-
-**Content capture** is controlled by `SIGIL_CONTENT_CAPTURE_MODE` (or `--sigil-capture-mode`):
-
-| Mode              | What is exported                                                                                                                                           |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `metadata_only`   | _(default)_ Token counts, costs, model name, timing, project/MR IDs.                                                                                       |
-| `no_tool_content` | Full messages but no tool-call bodies. Currently behaves like `metadata_only` because message content is not yet forwarded through the diagnostic context. |
-| `full`            | Complete content with built-in redaction. Same current limitation as above.                                                                                |
-
-The bridge subscribes only to the `reviewer.run` diagnostic phase. No diff content, prompts, or review bodies are included in the `metadata_only` default.
-
-When `GITLAB_REVIEW_SIGIL` is not set, `@grafana/sigil-sdk-js` is never imported.
-
-Library callers can inject a pre-configured client:
-
-```js
-import { SigilClient } from '@grafana/sigil-sdk-js';
-import { startSigilBridge } from '@ikko-dev/gitlab-review';
-
-await startSigilBridge({
-  client: new SigilClient({
-    /* … */
-  }),
 });
 ```
 
