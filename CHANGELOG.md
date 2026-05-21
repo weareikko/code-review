@@ -9,25 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Per-turn and per-tool OTel telemetry** via `OtelBridge.createAgentTelemetry(runId)`: when `GITLAB_REVIEW_OTEL=1` is set, the bridge now subscribes to the agent's live event stream and emits:
-  - `gen_ai.agent.turn` child spans under `invoke_agent gitlab-review`, with `gen_ai.agent.turn.index`, per-turn token counts, per-turn cost, model, and stop reason.
-  - `execute_tool <name>` grandchild spans under each turn span, with `gen_ai.tool.name`, `gen_ai.tool.call.id`, and ERROR status on failures — gives a full tool-use timeline in Tempo.
-  - `gen_ai.client.time_to_first_token` histogram (seconds, per turn) recorded when streaming `message_update` events fire.
-  - Per-turn `gen_ai.client.token.usage` and `gen_ai.client.cost` metrics so dashboards can break down token spend and USD cost by turn, model, and operation.
-- **`gen_ai.client.cost` histogram** (unit `usd`) on the aggregate `invoke_agent` span — enables $/review and $/model dashboards in Prometheus/Grafana without custom queries.
-- **Automatic metrics export**: `loadDefaultRuntime()` now defaults `OTEL_METRICS_EXPORTER` to `otlp` when the caller has not already set it, so `gen_ai.client.*` histograms land in Mimir/Prometheus via the same OTLP gateway as traces without extra env configuration.
-- **OTel structured logs**: `OtelBridge` now emits two types of log records to Loki/the configured log backend (auto-enabled via `OTEL_LOGS_EXPORTER=otlp`):
-  - `gitlab_review.completed` — one record per review at `ROOT_PHASE` close, carrying project, MR, model, full cost/token breakdown, and comment counts.
-  - `gitlab_review.comment` — one record per generated comment (via `OtelBridge.logComments()`), carrying file, line, severity, `is_duplicate`, and the comment body (truncated to 500 chars). Enables Loki searches across comment text and audit trails by project/model.
-- **`@opentelemetry/api-logs`** added as a direct dependency for the `logs` global and `SeverityNumber` enum.
-
-### Notes
-
-- **Grafana Cloud token scopes**: for structured logs to reach Loki via the OTLP gateway, the service account token in `OTEL_EXPORTER_OTLP_HEADERS` must include the `Logs Publisher` scope in addition to `Traces Publisher` and `Metrics Publisher`. A token missing `Logs Publisher` receives a silent `401 Unauthorized: invalid scope requested`. Use `OTEL_LOG_LEVEL=error` to surface such export failures.
-
-### Removed
-
-- **Grafana AI Observability (Sigil) bridge**: removed `src/sigil.ts`, `@grafana/sigil-pi` dependency, `--sigil` / `--sigil-capture-mode` CLI flags, and all related config fields. The equivalent observability (per-turn spans, tool calls, TTFT, cost metrics) is now handled directly by the OTel bridge.
+- **Richer OTel agent telemetry** (`GITLAB_REVIEW_OTEL=1`): per-turn `gen_ai.agent.turn` spans and per-call `execute_tool <name>` grandchild spans now appear under `invoke_agent gitlab-review` in Tempo, giving a full tool-use timeline. Per-turn `gen_ai.client.token.usage`, `gen_ai.client.cost`, and `gen_ai.client.time_to_first_token` metrics break down spend and latency by turn.
+- **OTel structured log records**: one `gitlab_review.comment` log record per generated comment (file, line, severity, duplicate flag, body) and one `gitlab_review.completed` record per run (cost, tokens, model, comment counts) sent to Loki/the configured log backend. Requires the `Logs Publisher` scope on the Grafana Cloud access policy token alongside `Traces Publisher` and `Metrics Publisher`.
 
 ## [0.3.2] - 2026-05-20
 
