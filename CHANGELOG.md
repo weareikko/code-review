@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-05-21
+
+### Added
+
+- **Review-level OTel metrics** (`GITLAB_REVIEW_OTEL=1`): five new Prometheus-compatible instruments emitted once per complete run (success, error, or timeout) at the close of the `invoke_workflow gitlab-review` root span ([#37]).
+  - `gitlab_review_run_duration_seconds` (Histogram, boundaries 5–600 s) — overall run duration, labelled with `gitlab.project_path`, `gitlab.pipeline_source`, `gitlab_review.dry_run`, and `gitlab_review.status`.
+  - `gitlab_review_total_cost_usd` (Histogram, boundaries 0.001–1.0 USD) — total LLM spend for the run, summed across all turns.
+  - `gitlab_review_comments_total` (Counter) — number of MR comments posted.
+  - `gitlab_review_drafts_published_total` (Counter) — number of draft notes bulk-published.
+  - `gitlab_review_phase_duration_seconds` (Histogram, boundaries 1–300 s) — per-phase latency with a `gitlab_review.phase` label, covering every diagnostic phase including the root run.
+  - `gitlab_review.status` is `success`, `error`, or `timeout`; `AbortError`/`ETIMEDOUT` are classified as `timeout` so Grafana alerts can treat deadline-exceeded runs separately from hard failures.
+  - `gitlab.mr_iid` is intentionally excluded from all metric labels (high cardinality); it remains available on spans only.
+  - The existing `gen_ai.client.*` per-turn metrics are unchanged.
+
 ## [0.3.4] - 2026-05-21
 
 ### Added
