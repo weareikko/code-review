@@ -52,6 +52,12 @@ export interface RunReviewOptions {
   createAgent?: CreateAgent;
   timeoutMs?: number;
   logger?: Logger;
+  /**
+   * Called with the agent after it is created, before the first prompt.
+   * Use this to attach telemetry (e.g. `otelBridge.createAgentTelemetry(runId)`).
+   * The returned function, if any, is called after the review completes.
+   */
+  attachTelemetry?: (agent: AgentLike) => (() => void) | undefined;
 }
 
 const DEFAULT_REVIEW_TIMEOUT_MS = 10 * 60 * 1000;
@@ -440,13 +446,16 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   let turnCount = 0;
   let toolCallCount = 0;
 
+  // Attach telemetry before the first prompt so all events fire.
+  const detachTelemetry = options.attachTelemetry?.(agent);
+
   const timeoutMs = options.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS;
   let unsubscribe: (() => void) | undefined;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   let finalText = '';
   try {
     const ended = new Promise<void>((resolvePromise, rejectPromise) => {
-      unsubscribe = agent.subscribe((event) => {
+      unsubscribe = agent.subscribe(async (event) => {
         if (event.type === 'turn_start') {
           turnCount += 1;
           logger.debug(`Turn ${turnCount} started`);
@@ -498,6 +507,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   } finally {
     clearTimeout(timeoutId);
     unsubscribe?.();
+    detachTelemetry?.();
   }
 
   const reviewPath = resolve(cwd, config.reviewFile);

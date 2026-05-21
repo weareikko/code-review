@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Richer OTel agent telemetry** (`GITLAB_REVIEW_OTEL=1`): per-turn `gen_ai.agent.turn` spans and per-call `execute_tool <name>` grandchild spans now appear under `invoke_agent gitlab-review` in Tempo, giving a full tool-use timeline. Per-turn `gen_ai.client.token.usage`, `gen_ai.client.cost`, and `gen_ai.client.time_to_first_token` metrics break down spend and latency by turn ([#35]).
+- **OTel structured log records**: one `gitlab_review.comment` log record per generated comment (file, line, severity, duplicate flag, body) and one `gitlab_review.completed` record per run (cost, tokens, model, comment counts) sent to Loki/the configured log backend. Requires the `Logs Publisher` scope on the Grafana Cloud access policy token alongside `Traces Publisher` and `Metrics Publisher` ([#35]).
+
 ## [0.3.2] - 2026-05-20
 
 ### Added
@@ -208,6 +213,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#29]: https://github.com/ikko-dev/gitlab-review/pull/29
 [#31]: https://github.com/ikko-dev/gitlab-review/pull/31
 [#32]: https://github.com/ikko-dev/gitlab-review/pull/32
+[#35]: https://github.com/ikko-dev/gitlab-review/pull/35
 [0.1.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.0
 [a6166f5]: https://github.com/ikko-dev/gitlab-review/commit/a6166f5
 [310dccf]: https://github.com/ikko-dev/gitlab-review/commit/310dccf

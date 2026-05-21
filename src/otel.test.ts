@@ -3,6 +3,7 @@ import { trace } from '@opentelemetry/api';
 import { describe, expect, it, vi } from 'vitest';
 import type { Config } from './config.js';
 import { ReviewerError } from './errors.js';
+import type { AgentLike } from './gitlab-review.js';
 import type { OtelRuntime } from './otel.js';
 import {
   createDiagnosticContext,
@@ -10,6 +11,24 @@ import {
   traceDiagnostic,
   type DiagnosticContext,
 } from './review.js';
+
+function makeAgent(): AgentLike & { emit: (event: Record<string, unknown>) => Promise<void> } {
+  type Listener = (event: Record<string, unknown>) => void | Promise<void>;
+  const listeners: Listener[] = [];
+  return {
+    subscribe(listener: Listener): () => void {
+      listeners.push(listener);
+      return () => {
+        const i = listeners.indexOf(listener);
+        if (i !== -1) listeners.splice(i, 1);
+      };
+    },
+    async prompt() {},
+    async emit(event) {
+      for (const l of listeners) await l(event);
+    },
+  };
+}
 
 describe('OpenTelemetry bridge', () => {
   interface RecordedAttribute {
@@ -29,10 +48,16 @@ describe('OpenTelemetry bridge', () => {
     value: number;
     attributes: Record<string, unknown>;
   }
+  interface RecordedLog {
+    severityNumber?: number;
+    body: string;
+    attributes: Record<string, unknown>;
+  }
 
   function createFakeRuntime() {
     const spans: RecordedSpan[] = [];
     const metricsRecorded: RecordedMetric[] = [];
+    const logsEmitted: RecordedLog[] = [];
     const shutdown = vi.fn(async () => undefined);
 
     const makeSpan = (name: string, parent: RecordedSpan | undefined): RecordedSpan => {
@@ -92,9 +117,25 @@ describe('OpenTelemetry bridge', () => {
     };
     const meterProvider = { getMeter: () => meter };
 
-    const runtime = { tracerProvider, meterProvider, shutdown } as unknown as OtelRuntime;
+    const fakeLogger = {
+      emit(log: { severityNumber?: number; body?: unknown; attributes?: Record<string, unknown> }) {
+        logsEmitted.push({
+          severityNumber: log.severityNumber,
+          body: String(log.body ?? ''),
+          attributes: log.attributes ?? {},
+        });
+      },
+    };
+    const loggerProvider = { getLogger: () => fakeLogger };
 
-    return { runtime, spans, metricsRecorded, shutdown };
+    const runtime = {
+      tracerProvider,
+      meterProvider,
+      loggerProvider,
+      shutdown,
+    } as unknown as OtelRuntime;
+
+    return { runtime, spans, metricsRecorded, logsEmitted, shutdown };
   }
 
   async function runWithBridge(
@@ -349,5 +390,497 @@ describe('OpenTelemetry bridge', () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it('records gen_ai.client.cost on the aggregate reviewer span', async () => {
+    const { metricsRecorded } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-sonnet-4-5',
+        tokens: { input: 1000, output: 200, cacheRead: 0, cacheWrite: 0, total: 1200 },
+        cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+      };
+    });
+    const cost = metricsRecorded.find((m) => m.name === 'gen_ai.client.cost');
+    expect(cost).toBeDefined();
+    expect(cost!.value).toBeCloseTo(0.03);
+    expect(cost!.attributes).toMatchObject({
+      'gen_ai.operation.name': 'invoke_agent',
+      'gen_ai.request.model': 'claude-sonnet-4-5',
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // createAgentTelemetry — per-turn and per-tool spans / metrics
+  // ---------------------------------------------------------------------------
+
+  async function runWithAgentTelemetry(
+    agentWork: (agent: ReturnType<typeof makeAgent>) => Promise<void>,
+    runId = 'run-agent',
+  ): Promise<ReturnType<typeof createFakeRuntime>> {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config: Config = {
+      project: 'proj',
+      mr: '1',
+      gitlabUrl: 'https://gitlab.example.com',
+      gitlabToken: 't',
+      gitlabAuthHeader: 'PRIVATE-TOKEN',
+      model: 'anthropic/claude-haiku-4-5',
+      minSeverity: 'info',
+      thinkingLevel: 'off',
+      postingMode: 'direct',
+      apiKey: 'k',
+      reviewFile: 'gitlab-review.md',
+      output: 'review-comments.json',
+      dryRun: false,
+      noPost: false,
+      postSummary: false,
+      forceReview: false,
+      verbose: false,
+      cwd: '/tmp',
+      skills: [],
+    };
+
+    const runContext = createDiagnosticContext('run', config, runId);
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      const reviewerContext = createDiagnosticContext('reviewer.run', config, runId);
+      await traceDiagnostic(diagnosticChannels.runReviewer, reviewerContext, async () => {
+        const attach = bridge!.createAgentTelemetry(runId);
+        expect(attach).toBeDefined();
+        const agent = makeAgent();
+        const detach = attach!(agent);
+        await agentWork(agent);
+        detach();
+      });
+    });
+    await bridge!.shutdown();
+    return fake;
+  }
+
+  it('createAgentTelemetry returns undefined when reviewer span is not yet open', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+    expect(bridge!.createAgentTelemetry('nonexistent-run')).toBeUndefined();
+    await bridge!.shutdown();
+  });
+
+  it('emits a gen_ai.agent.turn span per turn, parented to invoke_agent', async () => {
+    const fakeMsg = {
+      role: 'assistant',
+      model: 'anthropic/claude-haiku-4-5',
+      stopReason: 'end_turn',
+      usage: {
+        input: 100,
+        output: 50,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: { input: 0.001, output: 0.002, cacheRead: 0, cacheWrite: 0, total: 0.003 },
+      },
+    };
+    const { spans } = await runWithAgentTelemetry(async (agent) => {
+      await agent.emit({ type: 'turn_start', turnIndex: 1 });
+      await agent.emit({ type: 'message_end', message: fakeMsg });
+      await agent.emit({ type: 'turn_start', turnIndex: 2 });
+      await agent.emit({ type: 'message_end', message: fakeMsg });
+    });
+
+    const turnSpans = spans.filter((s) => s.name === 'gen_ai.agent.turn');
+    expect(turnSpans).toHaveLength(2);
+
+    const invokeAgent = spans.find((s) => s.name === 'invoke_agent gitlab-review');
+    for (const ts of turnSpans) {
+      expect(ts.parent).toBe(invokeAgent);
+      expect(ts.ended).toBe(true);
+    }
+
+    const idx = Object.fromEntries(turnSpans[0].attributes.map((a) => [a.key, a.value]));
+    expect(idx['gen_ai.agent.turn.index']).toBe(1);
+  });
+
+  it('stamps per-turn token usage and cost on turn spans', async () => {
+    const fakeMsg = {
+      role: 'assistant',
+      model: 'anthropic/claude-haiku-4-5',
+      stopReason: 'end_turn',
+      usage: {
+        input: 300,
+        output: 80,
+        cacheRead: 50,
+        cacheWrite: 0,
+        cost: { input: 0.003, output: 0.008, cacheRead: 0.0005, cacheWrite: 0, total: 0.0115 },
+      },
+    };
+    const { spans } = await runWithAgentTelemetry(async (agent) => {
+      await agent.emit({ type: 'turn_start', turnIndex: 1 });
+      await agent.emit({ type: 'message_end', message: fakeMsg });
+    });
+
+    const turn = spans.find((s) => s.name === 'gen_ai.agent.turn');
+    const attrs = Object.fromEntries(turn!.attributes.map((a) => [a.key, a.value]));
+    expect(attrs).toMatchObject({
+      'gen_ai.usage.input_tokens': 300,
+      'gen_ai.usage.output_tokens': 80,
+      'gen_ai.usage.cache_read.input_tokens': 50,
+      'gen_ai.usage.cost.total_usd': 0.0115,
+      'gen_ai.response.model': 'claude-haiku-4-5',
+      'gen_ai.response.stop_reason': 'end_turn',
+    });
+  });
+
+  it('records per-turn token usage and cost metrics', async () => {
+    const fakeMsg = {
+      role: 'assistant',
+      model: 'anthropic/claude-haiku-4-5',
+      stopReason: 'end_turn',
+      usage: {
+        input: 400,
+        output: 100,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: { input: 0.004, output: 0.01, cacheRead: 0, cacheWrite: 0, total: 0.014 },
+      },
+    };
+    const { metricsRecorded } = await runWithAgentTelemetry(async (agent) => {
+      await agent.emit({ type: 'turn_start', turnIndex: 1 });
+      await agent.emit({ type: 'message_end', message: fakeMsg });
+    });
+
+    const tokenMetrics = metricsRecorded.filter((m) => m.name === 'gen_ai.client.token.usage');
+    // One per-turn input + output (plus aggregate from diagnosticChannel close)
+    const perTurnInput = tokenMetrics.find(
+      (m) => m.attributes['gen_ai.token.type'] === 'input' && m.value === 400,
+    );
+    const perTurnOutput = tokenMetrics.find(
+      (m) => m.attributes['gen_ai.token.type'] === 'output' && m.value === 100,
+    );
+    expect(perTurnInput).toBeDefined();
+    expect(perTurnOutput).toBeDefined();
+
+    const costMetrics = metricsRecorded.filter((m) => m.name === 'gen_ai.client.cost');
+    const perTurnCost = costMetrics.find((m) => Math.abs(m.value - 0.014) < 0.0001);
+    expect(perTurnCost).toBeDefined();
+    expect(perTurnCost!.attributes).toMatchObject({ 'gen_ai.request.model': 'claude-haiku-4-5' });
+  });
+
+  it('records TTFT metric when message_update fires before message_end', async () => {
+    const fakeMsg = {
+      role: 'assistant',
+      model: 'anthropic/claude-haiku-4-5',
+      stopReason: 'end_turn',
+      usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0 },
+    };
+    const { metricsRecorded, spans } = await runWithAgentTelemetry(async (agent) => {
+      await agent.emit({ type: 'turn_start', turnIndex: 1 });
+      await agent.emit({ type: 'message_update', message: { role: 'assistant' } });
+      await agent.emit({ type: 'message_end', message: fakeMsg });
+    });
+
+    const ttft = metricsRecorded.find((m) => m.name === 'gen_ai.client.time_to_first_token');
+    expect(ttft).toBeDefined();
+    expect(typeof ttft!.value).toBe('number');
+    expect(ttft!.value).toBeGreaterThanOrEqual(0);
+
+    const turn = spans.find((s) => s.name === 'gen_ai.agent.turn');
+    const attrs = Object.fromEntries(turn!.attributes.map((a) => [a.key, a.value]));
+    expect(typeof attrs['gen_ai.client.time_to_first_token_s']).toBe('number');
+  });
+
+  it('does not record TTFT when no message_update fires', async () => {
+    const fakeMsg = {
+      role: 'assistant',
+      model: 'anthropic/claude-haiku-4-5',
+      stopReason: 'end_turn',
+      usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0 },
+    };
+    const { metricsRecorded } = await runWithAgentTelemetry(async (agent) => {
+      await agent.emit({ type: 'turn_start', turnIndex: 1 });
+      await agent.emit({ type: 'message_end', message: fakeMsg });
+    });
+    expect(
+      metricsRecorded.find((m) => m.name === 'gen_ai.client.time_to_first_token'),
+    ).toBeUndefined();
+  });
+
+  it('emits execute_tool spans as children of the current turn span', async () => {
+    const fakeMsg = {
+      role: 'assistant',
+      model: 'anthropic/claude-haiku-4-5',
+      stopReason: 'end_turn',
+      usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0 },
+    };
+    const { spans } = await runWithAgentTelemetry(async (agent) => {
+      await agent.emit({ type: 'turn_start', turnIndex: 1 });
+      await agent.emit({ type: 'tool_execution_start', toolName: 'Read', toolCallId: 'tc-1' });
+      await agent.emit({ type: 'tool_execution_end', toolCallId: 'tc-1', isError: false });
+      await agent.emit({ type: 'tool_execution_start', toolName: 'Grep', toolCallId: 'tc-2' });
+      await agent.emit({ type: 'tool_execution_end', toolCallId: 'tc-2', isError: false });
+      await agent.emit({ type: 'message_end', message: fakeMsg });
+    });
+
+    const toolSpans = spans.filter((s) => s.name.startsWith('execute_tool '));
+    expect(toolSpans).toHaveLength(2);
+    expect(toolSpans.map((s) => s.name).toSorted()).toEqual([
+      'execute_tool Grep',
+      'execute_tool Read',
+    ]);
+
+    const turn = spans.find((s) => s.name === 'gen_ai.agent.turn');
+    for (const ts of toolSpans) {
+      expect(ts.parent).toBe(turn);
+      expect(ts.ended).toBe(true);
+    }
+
+    const readAttrs = Object.fromEntries(
+      toolSpans
+        .find((s) => s.name === 'execute_tool Read')!
+        .attributes.map((a) => [a.key, a.value]),
+    );
+    expect(readAttrs).toMatchObject({
+      'gen_ai.operation.name': 'execute_tool',
+      'gen_ai.tool.name': 'Read',
+      'gen_ai.tool.call.id': 'tc-1',
+    });
+  });
+
+  it('marks tool span with ERROR status when tool fails', async () => {
+    const fakeMsg = {
+      role: 'assistant',
+      model: 'anthropic/claude-haiku-4-5',
+      stopReason: 'end_turn',
+      usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0 },
+    };
+    const { spans } = await runWithAgentTelemetry(async (agent) => {
+      await agent.emit({ type: 'turn_start', turnIndex: 1 });
+      await agent.emit({ type: 'tool_execution_start', toolName: 'Bash', toolCallId: 'tc-err' });
+      await agent.emit({ type: 'tool_execution_end', toolCallId: 'tc-err', isError: true });
+      await agent.emit({ type: 'message_end', message: fakeMsg });
+    });
+
+    const bash = spans.find((s) => s.name === 'execute_tool Bash');
+    expect(bash?.status?.code).toBe(2); // SpanStatusCode.ERROR = 2
+    expect(bash?.ended).toBe(true);
+  });
+
+  it('flushes open turn and tool spans on agent_end', async () => {
+    const { spans } = await runWithAgentTelemetry(async (agent) => {
+      await agent.emit({ type: 'turn_start', turnIndex: 1 });
+      await agent.emit({ type: 'tool_execution_start', toolName: 'Read', toolCallId: 'tc-x' });
+      // Simulate abrupt end without tool_execution_end or message_end
+      await agent.emit({ type: 'agent_end', messages: [] });
+    });
+
+    for (const span of spans) {
+      expect(span.ended).toBe(true);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // OTel logs — review completion and per-comment records
+  // ---------------------------------------------------------------------------
+
+  it('emits a review completion log when the run phase closes', async () => {
+    const { logsEmitted } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-haiku-4-5',
+        tokens: { input: 100, output: 50, cacheRead: 200, cacheWrite: 10, total: 360 },
+        cost: { input: 0.001, output: 0.002, cacheRead: 0.002, cacheWrite: 0.001, total: 0.006 },
+      };
+    });
+    const completedLog = logsEmitted.find(
+      (l) => l.attributes['event.name'] === 'gitlab_review.completed',
+    );
+    expect(completedLog).toBeDefined();
+    expect(completedLog!.body).toMatch(/review completed: proj MR#1/);
+    expect(completedLog!.attributes).toMatchObject({
+      'event.name': 'gitlab_review.completed',
+      'gitlab.project_id': 'proj',
+      'gitlab.mr_iid': '1',
+      'gen_ai.request.model': 'claude-haiku-4-5',
+      'gen_ai.usage.cost.total_usd': 0.006,
+      'gen_ai.usage.input_tokens': 100,
+      'gen_ai.usage.output_tokens': 50,
+      'gen_ai.usage.cache_read.input_tokens': 200,
+      'gen_ai.usage.cache_creation.input_tokens': 10,
+    });
+  });
+
+  it('logComments emits one log record per comment with file/line/severity/is_duplicate', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config: Config = {
+      project: 'acme/web',
+      mr: '42',
+      gitlabUrl: 'https://gitlab.acme.com',
+      gitlabToken: 't',
+      gitlabAuthHeader: 'PRIVATE-TOKEN',
+      model: 'anthropic/claude-sonnet-4-5',
+      minSeverity: 'info',
+      thinkingLevel: 'off',
+      postingMode: 'direct',
+      apiKey: 'k',
+      reviewFile: 'gitlab-review.md',
+      output: 'review-comments.json',
+      dryRun: false,
+      noPost: false,
+      postSummary: false,
+      forceReview: false,
+      verbose: false,
+      cwd: '/tmp',
+      skills: [],
+    };
+    const runContext = createDiagnosticContext('run', config, 'run-logs');
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      bridge!.logComments(
+        [
+          {
+            comment: {
+              file: 'src/auth.ts',
+              line: 42,
+              side: 'RIGHT',
+              severity: 'critical',
+              body: 'Use bcrypt.',
+            },
+            fingerprints: { primary: 'a', secondary: 'b' },
+            duplicate: false,
+            payload: {
+              body: '',
+              position: {
+                position_type: 'text',
+                base_sha: '',
+                start_sha: '',
+                head_sha: '',
+                old_path: '',
+                new_path: '',
+              },
+            },
+          },
+          {
+            comment: {
+              file: 'src/utils.ts',
+              line: 7,
+              side: 'RIGHT',
+              severity: 'warn',
+              body: 'Remove unused import.',
+            },
+            fingerprints: { primary: 'c', secondary: 'd' },
+            duplicate: true,
+            payload: {
+              body: '',
+              position: {
+                position_type: 'text',
+                base_sha: '',
+                start_sha: '',
+                head_sha: '',
+                old_path: '',
+                new_path: '',
+              },
+            },
+          },
+        ],
+        'run-logs',
+      );
+    });
+    await bridge!.shutdown();
+
+    const commentLogs = fake.logsEmitted.filter(
+      (l) => l.attributes['event.name'] === 'gitlab_review.comment',
+    );
+    expect(commentLogs).toHaveLength(2);
+
+    const [auth, utils] = commentLogs;
+    expect(auth.body).toContain('[critical] src/auth.ts:42');
+    expect(auth.attributes).toMatchObject({
+      'gitlab.project_id': 'acme/web',
+      'gitlab.mr_iid': '42',
+      'gitlab_review.run_id': 'run-logs',
+      'gitlab_review.comment.file': 'src/auth.ts',
+      'gitlab_review.comment.line': 42,
+      'gitlab_review.comment.severity': 'critical',
+      'gitlab_review.comment.is_duplicate': false,
+    });
+    expect(utils.attributes['gitlab_review.comment.is_duplicate']).toBe(true);
+  });
+
+  it('logComments truncates comment body at 500 chars', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+    const config: Config = {
+      project: 'p',
+      mr: '1',
+      gitlabUrl: 'https://gitlab.example.com',
+      gitlabToken: 't',
+      gitlabAuthHeader: 'PRIVATE-TOKEN',
+      model: 'anthropic/claude-sonnet-4-5',
+      minSeverity: 'info',
+      thinkingLevel: 'off',
+      postingMode: 'direct',
+      apiKey: 'k',
+      reviewFile: 'gitlab-review.md',
+      output: 'review-comments.json',
+      dryRun: false,
+      noPost: false,
+      postSummary: false,
+      forceReview: false,
+      verbose: false,
+      cwd: '/tmp',
+      skills: [],
+    };
+    const runContext = createDiagnosticContext('run', config, 'run-trunc');
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      bridge!.logComments(
+        [
+          {
+            comment: {
+              file: 'a.ts',
+              line: 1,
+              side: 'RIGHT',
+              severity: 'info',
+              body: 'x'.repeat(600),
+            },
+            fingerprints: { primary: 'e', secondary: 'f' },
+            duplicate: false,
+            payload: {
+              body: '',
+              position: {
+                position_type: 'text',
+                base_sha: '',
+                start_sha: '',
+                head_sha: '',
+                old_path: '',
+                new_path: '',
+              },
+            },
+          },
+        ],
+        'run-trunc',
+      );
+    });
+    await bridge!.shutdown();
+
+    const log = fake.logsEmitted.find(
+      (l) => l.attributes['event.name'] === 'gitlab_review.comment',
+    );
+    // The log body includes the prefix "[info] a.ts:1 — " plus the truncated body.
+    expect(log!.body).toContain('…');
+    // Total body should not exceed ~520 chars (prefix + 500 content chars + ellipsis)
+    expect(log!.body.length).toBeLessThan(520);
   });
 });

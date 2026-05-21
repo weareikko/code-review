@@ -7,6 +7,8 @@ const external = [
   ...builtinModules,
   ...builtinModules.map((moduleName) => `node:${moduleName}`),
   /^@earendil-works\//,
+  /^@opentelemetry\//,
+  /^@grpc\//,
 ];
 
 const pkg = JSON.parse(

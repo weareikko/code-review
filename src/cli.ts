@@ -16,6 +16,7 @@ import type { ReviewUsage } from './gitlab-review.js';
 import { runReview } from './gitlab-review.js';
 import { GitLabClient } from './gitlab.js';
 import { createLogger } from './logger.js';
+import type { OtelBridge } from './otel.js';
 import { startOtelBridge } from './otel.js';
 import { parseReviewMarkdownWithWarnings } from './parser.js';
 import { buildGeneratedComments } from './payloads.js';
@@ -120,7 +121,12 @@ function refsFromVersion(version: {
   };
 }
 
-export async function run(config: Config): Promise<RunResult> {
+export interface RunBridges {
+  /** Pre-started OTel bridge for per-turn and per-tool-call agent telemetry. */
+  otel?: OtelBridge;
+}
+
+export async function run(config: Config, bridges?: RunBridges): Promise<RunResult> {
   validateConfig(config);
 
   const logger = createLogger(config.verbose ? 'debug' : 'info');
@@ -195,7 +201,14 @@ export async function run(config: Config): Promise<RunResult> {
     );
     logger.info('Running review...');
     const usage = await traceDiagnosticPhase('reviewer.run', config, runId, async (context) => {
-      const result = await runReview(config, { cwd: config.cwd, diff, logger });
+      const result = await runReview(config, {
+        cwd: config.cwd,
+        diff,
+        logger,
+        // Subscribe the OTel bridge to the agent's event stream so per-turn
+        // and per-tool-call spans/metrics fire in real time.
+        attachTelemetry: bridges?.otel?.createAgentTelemetry(runId),
+      });
       context.usage = result;
       return result;
     });
@@ -249,6 +262,7 @@ export async function run(config: Config): Promise<RunResult> {
 
     const newCount = generated.filter((item) => !item.duplicate).length;
     recordCommentCounts(runContext, generated);
+    bridges?.otel?.logComments(generated, runId);
     logger.info(`Posting ${newCount} new comment(s)...`);
     if (config.dryRun || config.noPost) {
       console.log(`Generated ${generated.length} comments, ${newCount} new. Posting disabled.`);
@@ -375,7 +389,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const config = resolveConfig(argv);
   const otel = await startOtelBridge();
   try {
-    await run(config);
+    await run(config, { otel: otel ?? undefined });
   } finally {
     await otel?.shutdown();
   }

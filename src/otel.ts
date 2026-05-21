@@ -1,18 +1,35 @@
 /**
- * Optional OpenTelemetry bridge over `diagnostics_channel`.
+ * Optional OpenTelemetry bridge over `diagnostics_channel` and the agent
+ * event stream.
  *
  * Subscribes to every `@ikko-dev/gitlab-review:*` tracing channel, opens an
  * OTel span on `start`, and closes it on `asyncEnd`/`error`. The `reviewer.run`
  * phase additionally carries OpenTelemetry GenAI semantic-convention
  * attributes (`gen_ai.*`) and emits the standardized GenAI client metrics
- * (`gen_ai.client.operation.duration`, `gen_ai.client.token.usage`) so
- * metrics-driven AI observability surfaces (Grafana Application Observability,
- * Datadog LLM Observability, …) auto-discover the service.
+ * (`gen_ai.client.operation.duration`, `gen_ai.client.token.usage`,
+ * `gen_ai.client.cost`, `gen_ai.client.time_to_first_token`) so
+ * metrics-driven AI observability surfaces auto-discover the service.
+ *
+ * Per-turn and per-tool-call telemetry is captured via `createAgentTelemetry`,
+ * which subscribes to the agent's live event stream and emits:
+ *   - `gen_ai.agent.turn` child spans under `invoke_agent gitlab-review`
+ *   - `execute_tool <name>` grandchild spans under each turn
+ *   - Per-turn `gen_ai.client.token.usage` and `gen_ai.client.cost` metrics
+ *   - `gen_ai.client.time_to_first_token` when streaming events fire
  *
  * Opt-in: set `GITLAB_REVIEW_OTEL=1`. Exporter selection and endpoint follow
  * the standard `OTEL_*` env vars (`OTEL_EXPORTER_OTLP_ENDPOINT`,
- * `OTEL_EXPORTER_OTLP_HEADERS`, …). For Grafana Sigil, set the endpoint and
- * the `OTEL_EXPORTER_OTLP_HEADERS` to carry the Cloud Access Policy Token.
+ * `OTEL_EXPORTER_OTLP_HEADERS`, …).
+ *
+ * **Grafana Cloud token scopes**: for all three signals to reach their
+ * respective backends, the service account token used in
+ * `OTEL_EXPORTER_OTLP_HEADERS` must have:
+ *   - `Traces Publisher` — writes to Tempo (traces)
+ *   - `Metrics Publisher` — writes to Mimir (gen_ai.* histograms)
+ *   - `Logs Publisher` — writes to Loki (structured log records)
+ * A token missing any of these scopes will receive `401 Unauthorized:
+ * invalid scope requested` silently from the OTLP gateway. Enable OTel
+ * diagnostics with `OTEL_LOG_LEVEL=error` to surface export failures.
  *
  * The OTel SDK runtime is bundled but loaded via dynamic `import()` behind the
  * env check, so disabling the bridge skips the SDK boot entirely. Library
@@ -31,7 +48,16 @@ import type {
   TracerProvider,
 } from '@opentelemetry/api';
 import { context, metrics, SpanKind, SpanStatusCode, trace } from '@opentelemetry/api';
-import { diagnosticChannels, type DiagnosticContext, type DiagnosticPhase } from './diagnostics.js';
+import type { Logger, LoggerProvider } from '@opentelemetry/api-logs';
+import { logs, SeverityNumber } from '@opentelemetry/api-logs';
+import {
+  diagnosticChannels,
+  type DiagnosticContext,
+  type DiagnosticPhase,
+  type DiagnosticUsage,
+} from './diagnostics.js';
+import type { AgentLike } from './gitlab-review.js';
+import type { GeneratedComment } from './types.js';
 
 // Inlined at build time by Vite's `define` (see vite.config.ts). Keeps
 // `service.version` accurate under `npx`/standalone bin invocations, where
@@ -40,11 +66,27 @@ declare const __PKG_VERSION__: string;
 
 export interface OtelBridge {
   shutdown(): Promise<void>;
+  /**
+   * Returns a function that, when called with an agent, subscribes to its live
+   * event stream and emits per-turn and per-tool-call OTel spans/metrics.
+   * Must be called after the `reviewer.run` diagnostic span is open (i.e. from
+   * inside `traceDiagnosticPhase('reviewer.run', ...)`). Returns `undefined`
+   * when the span is not yet open or OTel is disabled.
+   */
+  createAgentTelemetry(runId: string): ((agent: AgentLike) => () => void) | undefined;
+  /**
+   * Emits one structured OTel log record per generated comment to Loki/the
+   * configured log backend. Each record carries `event.name`,
+   * `gitlab_review.comment.*` attributes, and the comment body as the log
+   * line. Safe to call at any point after the run phase has opened.
+   */
+  logComments(comments: GeneratedComment[], runId: string): void;
 }
 
 export interface OtelRuntime {
   tracerProvider: TracerProvider;
   meterProvider: MeterProvider;
+  loggerProvider: LoggerProvider;
   shutdown(): Promise<void>;
 }
 
@@ -76,6 +118,12 @@ const DURATION_BUCKETS_S = [
 const TOKEN_BUCKETS = [
   1, 4, 16, 64, 256, 1024, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864,
 ];
+const TTFT_BUCKETS_S = [
+  0.001, 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
+];
+const COST_BUCKETS_USD = [
+  0.0001, 0.0005, 0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0,
+];
 
 const OTEL_SDK_PACKAGES = [
   '@opentelemetry/sdk-node',
@@ -90,6 +138,21 @@ interface OpenSpan {
   closed: boolean;
 }
 
+// Minimal shape of a per-turn assistant message we need for telemetry.
+// Avoids importing AssistantMessage from @earendil-works/pi-ai in this module.
+interface TurnMessage {
+  role?: string;
+  model?: string;
+  stopReason?: string;
+  usage?: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    cost?: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
+  };
+}
+
 export function isOtelEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.GITLAB_REVIEW_OTEL === '1' || env.GITLAB_REVIEW_OTEL === 'true';
 }
@@ -101,6 +164,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
   const runtime = options.runtime ?? (await loadDefaultRuntime());
   const tracer: Tracer = runtime.tracerProvider.getTracer(SERVICE_NAME);
   const meter: Meter = runtime.meterProvider.getMeter(SERVICE_NAME);
+  const logger: Logger = runtime.loggerProvider.getLogger(SERVICE_NAME);
 
   const operationDuration = meter.createHistogram('gen_ai.client.operation.duration', {
     description: 'GenAI operation duration',
@@ -112,8 +176,22 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     unit: '{token}',
     advice: { explicitBucketBoundaries: TOKEN_BUCKETS },
   });
+  const operationCost = meter.createHistogram('gen_ai.client.cost', {
+    description: 'GenAI operation cost in USD',
+    unit: 'usd',
+    advice: { explicitBucketBoundaries: COST_BUCKETS_USD },
+  });
+  const timeToFirstToken = meter.createHistogram('gen_ai.client.time_to_first_token', {
+    description: 'Time to first token from the LLM',
+    unit: 's',
+    advice: { explicitBucketBoundaries: TTFT_BUCKETS_S },
+  });
 
   const openByRun = new Map<string, Map<DiagnosticPhase, OpenSpan>>();
+
+  // Per-run metadata cached from the ROOT_PHASE context for use in the review
+  // completion log and in logComments attribute enrichment.
+  const runMeta = new Map<string, RunMeta>();
 
   const parentContext = (runId: string) => {
     const root = openByRun.get(runId)?.get(ROOT_PHASE);
@@ -133,6 +211,15 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
       parentContext(ctx.runId),
     );
     phases.set(ctx.phase, { span, closed: false });
+    // Seed run metadata so logComments and the review completion log can enrich
+    // records with project/mr context even before the run phase closes.
+    if (ctx.phase === ROOT_PHASE) {
+      runMeta.set(ctx.runId, {
+        project: ctx.project,
+        mr: ctx.mr,
+        gitlabUrl: ctx.gitlabUrl,
+      });
+    }
   };
 
   const closeSpan = (ctx: DiagnosticContext, isError: boolean): void => {
@@ -140,7 +227,12 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     if (!entry || entry.closed) return;
     if (ctx.phase === GEN_AI_PHASE) {
       applyGenAiAttributes(entry.span, ctx);
-      recordGenAiMetrics(operationDuration, tokenUsage, ctx, isError);
+      recordGenAiMetrics(operationDuration, tokenUsage, operationCost, ctx, isError);
+      // Cache usage so the ROOT_PHASE completion log can include cost/token totals.
+      if (ctx.usage) {
+        const meta = runMeta.get(ctx.runId);
+        if (meta) meta.usage = ctx.usage;
+      }
     }
     applyResultAttributes(entry.span, ctx);
     if (isError && ctx.errorInfo) {
@@ -152,7 +244,11 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     }
     entry.span.end();
     entry.closed = true;
-    if (ctx.phase === ROOT_PHASE) openByRun.delete(ctx.runId);
+    if (ctx.phase === ROOT_PHASE) {
+      emitReviewCompletedLog(logger, ctx, runMeta.get(ctx.runId), isError);
+      runMeta.delete(ctx.runId);
+      openByRun.delete(ctx.runId);
+    }
   };
 
   const handlers = {
@@ -181,8 +277,159 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         }
       }
       openByRun.clear();
+      runMeta.clear();
       await runtime.shutdown();
     },
+
+    logComments(comments: GeneratedComment[], runId: string): void {
+      const meta = runMeta.get(runId);
+      for (const { comment, duplicate } of comments) {
+        const preview = comment.body.length > 500 ? `${comment.body.slice(0, 497)}…` : comment.body;
+        logger.emit({
+          severityNumber: SeverityNumber.INFO,
+          severityText: 'INFO',
+          body: `[${comment.severity}] ${comment.file}:${comment.line} — ${preview}`,
+          attributes: {
+            'event.name': 'gitlab_review.comment',
+            'gitlab_review.run_id': runId,
+            'gitlab_review.comment.file': comment.file,
+            'gitlab_review.comment.line': comment.line,
+            'gitlab_review.comment.severity': comment.severity,
+            'gitlab_review.comment.is_duplicate': duplicate,
+            ...(meta && {
+              'gitlab.project_id': meta.project,
+              'gitlab.mr_iid': meta.mr,
+              'gitlab.server_url': meta.gitlabUrl,
+            }),
+          },
+        });
+      }
+    },
+
+    createAgentTelemetry(runId: string): ((agent: AgentLike) => () => void) | undefined {
+      const reviewerEntry = openByRun.get(runId)?.get(GEN_AI_PHASE);
+      if (!reviewerEntry || reviewerEntry.closed) return undefined;
+      const reviewerSpanCtx = trace.setSpan(context.active(), reviewerEntry.span);
+      return buildAgentSubscriber(
+        tracer,
+        tokenUsage,
+        operationCost,
+        timeToFirstToken,
+        reviewerSpanCtx,
+      );
+    },
+  };
+}
+
+function buildAgentSubscriber(
+  tracer: Tracer,
+  tokenUsage: Histogram,
+  operationCost: Histogram,
+  timeToFirstToken: Histogram,
+  reviewerSpanCtx: ReturnType<typeof trace.setSpan>,
+): (agent: AgentLike) => () => void {
+  return (agent: AgentLike): (() => void) => {
+    let currentTurn: { span: Span; startMs: number; firstTokenMs?: number } | undefined;
+    const openTools = new Map<string, Span>();
+
+    return agent.subscribe(async (event) => {
+      const type = (event as { type?: string }).type;
+      if (!type) return;
+
+      if (type === 'turn_start') {
+        if (currentTurn) currentTurn.span.end(); // close any orphaned turn
+        const turnIndex = (event as { turnIndex?: number }).turnIndex;
+        const span = tracer.startSpan(
+          'gen_ai.agent.turn',
+          { kind: SpanKind.INTERNAL },
+          reviewerSpanCtx,
+        );
+        span.setAttribute('gen_ai.operation.name', 'invoke_agent');
+        if (typeof turnIndex === 'number') span.setAttribute('gen_ai.agent.turn.index', turnIndex);
+        currentTurn = { span, startMs: Date.now() };
+      }
+
+      if (type === 'message_update' && currentTurn && !currentTurn.firstTokenMs) {
+        currentTurn.firstTokenMs = Date.now();
+      }
+
+      if (type === 'message_end') {
+        const msg = (event as { message?: TurnMessage }).message;
+        if (!msg || msg.role !== 'assistant' || !currentTurn) return;
+        const { span, startMs, firstTokenMs } = currentTurn;
+        currentTurn = undefined;
+
+        const rawModel = String(msg.model ?? '');
+        const modelId = rawModel.includes('/') ? rawModel.split('/')[1] : rawModel || undefined;
+        const metricAttrs: Attributes = { 'gen_ai.operation.name': 'invoke_agent' };
+        if (modelId) {
+          metricAttrs['gen_ai.request.model'] = modelId;
+          metricAttrs['gen_ai.response.model'] = modelId;
+          span.setAttribute('gen_ai.response.model', modelId);
+        }
+        if (msg.stopReason) span.setAttribute('gen_ai.response.stop_reason', msg.stopReason);
+
+        if (firstTokenMs !== undefined) {
+          const ttftS = (firstTokenMs - startMs) / 1000;
+          timeToFirstToken.record(ttftS, metricAttrs);
+          span.setAttribute('gen_ai.client.time_to_first_token_s', ttftS);
+        }
+
+        if (msg.usage) {
+          const u = msg.usage;
+          tokenUsage.record(u.input, { ...metricAttrs, 'gen_ai.token.type': 'input' });
+          tokenUsage.record(u.output, { ...metricAttrs, 'gen_ai.token.type': 'output' });
+          span.setAttribute('gen_ai.usage.input_tokens', u.input);
+          span.setAttribute('gen_ai.usage.output_tokens', u.output);
+          if (u.cacheRead) span.setAttribute('gen_ai.usage.cache_read.input_tokens', u.cacheRead);
+          if (u.cacheWrite)
+            span.setAttribute('gen_ai.usage.cache_creation.input_tokens', u.cacheWrite);
+          if (u.cost) {
+            operationCost.record(u.cost.total, metricAttrs);
+            span.setAttribute('gen_ai.usage.cost.input_usd', u.cost.input);
+            span.setAttribute('gen_ai.usage.cost.output_usd', u.cost.output);
+            span.setAttribute('gen_ai.usage.cost.total_usd', u.cost.total);
+          }
+        }
+        span.end();
+      }
+
+      if (type === 'tool_execution_start') {
+        const { toolName, toolCallId } = event as { toolName?: string; toolCallId?: string };
+        if (!toolName || !toolCallId) return;
+        const toolParentCtx = currentTurn
+          ? trace.setSpan(context.active(), currentTurn.span)
+          : reviewerSpanCtx;
+        const toolSpan = tracer.startSpan(
+          `execute_tool ${toolName}`,
+          { kind: SpanKind.INTERNAL },
+          toolParentCtx,
+        );
+        toolSpan.setAttribute('gen_ai.operation.name', 'execute_tool');
+        toolSpan.setAttribute('gen_ai.tool.name', toolName);
+        toolSpan.setAttribute('gen_ai.tool.call.id', toolCallId);
+        openTools.set(toolCallId, toolSpan);
+      }
+
+      if (type === 'tool_execution_end') {
+        const { toolCallId, isError } = event as { toolCallId?: string; isError?: boolean };
+        if (!toolCallId) return;
+        const span = openTools.get(toolCallId);
+        if (!span) return;
+        if (isError) span.setStatus({ code: SpanStatusCode.ERROR });
+        span.end();
+        openTools.delete(toolCallId);
+      }
+
+      if (type === 'agent_end') {
+        if (currentTurn) {
+          currentTurn.span.end();
+          currentTurn = undefined;
+        }
+        for (const span of openTools.values()) span.end();
+        openTools.clear();
+      }
+    });
   };
 }
 
@@ -218,6 +465,15 @@ async function loadDefaultRuntime(): Promise<OtelRuntime> {
     [semconv.ATTR_SERVICE_NAME ?? 'service.name']: SERVICE_NAME,
     [semconv.ATTR_SERVICE_VERSION ?? 'service.version']: __PKG_VERSION__,
   });
+  // NodeSDK defaults both OTEL_METRICS_EXPORTER and OTEL_LOGS_EXPORTER to
+  // 'otlp' when the env vars are empty. However if the caller explicitly sets
+  // them to 'none' (common in CI setups that ship traces but not metrics/logs),
+  // we preserve that intent. Setting them here ensures the otlp default takes
+  // effect even when the shell exports them as an empty string, which would
+  // otherwise be parsed as an unknown exporter and silently ignored.
+  process.env.OTEL_METRICS_EXPORTER = process.env.OTEL_METRICS_EXPORTER ?? 'otlp';
+  process.env.OTEL_LOGS_EXPORTER = process.env.OTEL_LOGS_EXPORTER ?? 'otlp';
+
   const sdk = new sdkNode.NodeSDK({
     resource: resources.defaultResource().merge(serviceResource),
     // NodeSDK auto-detects OTLP HTTP/gRPC exporters and a periodic metric
@@ -227,8 +483,66 @@ async function loadDefaultRuntime(): Promise<OtelRuntime> {
   return {
     tracerProvider: trace.getTracerProvider(),
     meterProvider: metrics.getMeterProvider(),
+    loggerProvider: logs.getLoggerProvider(),
     shutdown: () => sdk.shutdown(),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Log helpers
+// ---------------------------------------------------------------------------
+
+interface RunMeta {
+  project: string;
+  mr: string;
+  gitlabUrl: string;
+  usage?: DiagnosticUsage;
+}
+
+function emitReviewCompletedLog(
+  logger: Logger,
+  ctx: DiagnosticContext,
+  meta: RunMeta | undefined,
+  isError: boolean,
+): void {
+  const usage = meta?.usage;
+  const rawModel = usage?.model ?? ctx.model ?? '';
+  const modelId = rawModel.includes('/') ? rawModel.split('/')[1] : rawModel || undefined;
+  const cost = usage?.cost.total;
+  const costStr = cost !== undefined ? ` $${cost.toFixed(4)}` : '';
+  const commentStr = ctx.generated !== undefined ? ` → ${ctx.generated} comments` : '';
+  logger.emit({
+    severityNumber: isError ? SeverityNumber.ERROR : SeverityNumber.INFO,
+    severityText: isError ? 'ERROR' : 'INFO',
+    body: `review completed: ${ctx.project} MR#${ctx.mr}${commentStr}${costStr}`,
+    attributes: {
+      'event.name': 'gitlab_review.completed',
+      'gitlab.project_id': ctx.project,
+      'gitlab.mr_iid': ctx.mr,
+      'gitlab.server_url': ctx.gitlabUrl,
+      'gitlab_review.run_id': ctx.runId,
+      'gitlab_review.duration_ms': ctx.durationMs ?? 0,
+      'gitlab_review.dry_run': ctx.dryRun,
+      'gitlab_review.comments.generated': ctx.generated ?? 0,
+      'gitlab_review.comments.new': ctx.newComments ?? 0,
+      'gitlab_review.comments.duplicate': ctx.duplicateComments ?? 0,
+      'gitlab_review.comments.posted': ctx.posted ?? 0,
+      ...(modelId !== undefined && { 'gen_ai.request.model': modelId }),
+      ...(cost !== undefined && { 'gen_ai.usage.cost.total_usd': cost }),
+      ...(usage?.tokens.input !== undefined && {
+        'gen_ai.usage.input_tokens': usage.tokens.input,
+      }),
+      ...(usage?.tokens.output !== undefined && {
+        'gen_ai.usage.output_tokens': usage.tokens.output,
+      }),
+      ...(usage?.tokens.cacheRead && {
+        'gen_ai.usage.cache_read.input_tokens': usage.tokens.cacheRead,
+      }),
+      ...(usage?.tokens.cacheWrite && {
+        'gen_ai.usage.cache_creation.input_tokens': usage.tokens.cacheWrite,
+      }),
+    },
+  });
 }
 
 function spanNameFor(phase: DiagnosticPhase): string {
@@ -317,6 +631,7 @@ function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
 function recordGenAiMetrics(
   durationHist: Histogram,
   tokenHist: Histogram,
+  costHist: Histogram,
   ctx: DiagnosticContext,
   isError: boolean,
 ): void {
@@ -336,5 +651,6 @@ function recordGenAiMetrics(
   if (ctx.usage) {
     tokenHist.record(ctx.usage.tokens.input, { ...attrs, 'gen_ai.token.type': 'input' });
     tokenHist.record(ctx.usage.tokens.output, { ...attrs, 'gen_ai.token.type': 'output' });
+    costHist.record(ctx.usage.cost.total, attrs);
   }
 }
