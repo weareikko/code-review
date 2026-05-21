@@ -40,6 +40,7 @@
 
 import type {
   Attributes,
+  Context,
   Counter,
   Histogram,
   Meter,
@@ -174,6 +175,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
   if (!isOtelEnabled(env)) return null;
 
   const ciAttrs = buildCiAttrs(env);
+  const ciSpanAttrs = buildCiSpanAttrs(env);
 
   const runtime = options.runtime ?? (await loadDefaultRuntime());
   const tracer: Tracer = runtime.tracerProvider.getTracer(SERVICE_NAME);
@@ -192,7 +194,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
   });
   const operationCost = meter.createHistogram('gen_ai.client.cost', {
     description: 'GenAI operation cost in USD',
-    unit: 'usd',
+    unit: '{usd}',
     advice: { explicitBucketBoundaries: COST_BUCKETS_USD },
   });
   const timeToFirstToken = meter.createHistogram('gen_ai.client.time_to_first_token', {
@@ -230,7 +232,10 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     if (phases.has(ctx.phase)) return;
     const span = tracer.startSpan(
       spanNameFor(ctx.phase),
-      { kind: SpanKind.INTERNAL, attributes: { ...baseAttributes(ctx), ...ciAttrs } },
+      {
+        kind: SpanKind.INTERNAL,
+        attributes: { ...baseAttributes(ctx), ...ciAttrs, ...ciSpanAttrs },
+      },
       parentContext(ctx.runId),
     );
     phases.set(ctx.phase, { span, closed: false });
@@ -242,7 +247,12 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         mr: ctx.mr,
         gitlabUrl: ctx.gitlabUrl,
         ciAttrs,
+        ciSpanAttrs,
         model: ctx.model,
+        // Store root span context so logger.emit() can correlate log records to
+        // the trace — tracer.startSpan does not activate the span, so we capture
+        // the context explicitly here while the span is live.
+        rootSpanCtx: trace.setSpan(context.active(), span),
       });
     }
   };
@@ -313,11 +323,14 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         });
       }
 
-      reviewCommentsTotal.add(ctx.posted ?? 0, {
-        ...REVIEW_SERVICE_ATTRS,
-        'gitlab.project_path': projectPath,
-        'gitlab_review.dry_run': ctx.dryRun,
-      });
+      const posted = ctx.posted ?? 0;
+      if (posted > 0) {
+        reviewCommentsTotal.add(posted, {
+          ...REVIEW_SERVICE_ATTRS,
+          'gitlab.project_path': projectPath,
+          'gitlab_review.dry_run': ctx.dryRun,
+        });
+      }
 
       reviewDraftsPublishedTotal.add(meta?.draftsPublished ?? 0, {
         ...REVIEW_SERVICE_ATTRS,
@@ -369,6 +382,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
           severityNumber: SeverityNumber.INFO,
           severityText: 'INFO',
           body: `[${comment.severity}] ${comment.file}:${comment.line} — ${preview}`,
+          context: meta?.rootSpanCtx,
           attributes: {
             'service.name': SERVICE_NAME,
             'event.name': 'gitlab_review.comment',
@@ -382,6 +396,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
               'gitlab.mr_iid': meta.mr,
               'gitlab.server_url': meta.gitlabUrl,
               ...meta.ciAttrs,
+              ...meta.ciSpanAttrs,
             }),
           },
         });
@@ -493,7 +508,6 @@ function buildAgentSubscriber(
         }
         if (modelId) {
           metricAttrs['gen_ai.request.model'] = modelId;
-          metricAttrs['gen_ai.response.model'] = modelId;
           span.setAttribute('gen_ai.response.model', modelId);
         }
         if (msg.stopReason) span.setAttribute('gen_ai.response.stop_reason', msg.stopReason);
@@ -526,12 +540,25 @@ function buildAgentSubscriber(
           if (u.cacheWrite)
             span.setAttribute('gen_ai.usage.cache_creation.input_tokens', u.cacheWrite);
           if (u.cost) {
-            // Emit cost here (per-turn) — this is the sole emission point for
-            // gen_ai.client.cost to prevent the double-count that arises when
-            // recordGenAiMetrics also records the phase-aggregate cost with a
-            // different label set (missing gen_ai.system when msg.model has no
-            // provider prefix).
-            operationCost.record(u.cost.total, metricAttrs);
+            // Emit cost broken down by token type (mirrors gen_ai.client.token.usage).
+            // Per-turn is the sole emission point to prevent double-count.
+            if (u.cost.input)
+              operationCost.record(u.cost.input, { ...metricAttrs, 'gen_ai.token.type': 'input' });
+            if (u.cost.output)
+              operationCost.record(u.cost.output, {
+                ...metricAttrs,
+                'gen_ai.token.type': 'output',
+              });
+            if (u.cost.cacheRead)
+              operationCost.record(u.cost.cacheRead, {
+                ...metricAttrs,
+                'gen_ai.token.type': 'cache_read',
+              });
+            if (u.cost.cacheWrite)
+              operationCost.record(u.cost.cacheWrite, {
+                ...metricAttrs,
+                'gen_ai.token.type': 'cache_creation',
+              });
             span.setAttribute('gen_ai.usage.cost.input_usd', u.cost.input);
             span.setAttribute('gen_ai.usage.cost.output_usd', u.cost.output);
             span.setAttribute('gen_ai.usage.cost.total_usd', u.cost.total);
@@ -642,7 +669,15 @@ interface RunMeta {
   project: string;
   mr: string;
   gitlabUrl: string;
+  /** Low-cardinality CI attributes spread into metric data points. */
   ciAttrs: Record<string, string>;
+  /** High-cardinality CI attributes (job/pipeline IDs) used on spans and logs only. */
+  ciSpanAttrs: Record<string, string>;
+  /**
+   * Context capturing the root span so `logger.emit()` can correlate log records
+   * to the trace. Populated in `openSpan` for ROOT_PHASE before the span ends.
+   */
+  rootSpanCtx?: Context;
   /**
    * Configured model string from the ROOT_PHASE context (e.g.
    * `'anthropic/claude-sonnet-4-5'`). Passed to `buildAgentSubscriber` so it
@@ -671,6 +706,7 @@ function emitReviewCompletedLog(
     severityNumber: isError ? SeverityNumber.ERROR : SeverityNumber.INFO,
     severityText: isError ? 'ERROR' : 'INFO',
     body: `review completed: ${ctx.project} MR#${ctx.mr}${commentStr}${costStr}`,
+    context: meta?.rootSpanCtx,
     attributes: {
       'service.name': SERVICE_NAME,
       'event.name': 'gitlab_review.completed',
@@ -678,6 +714,7 @@ function emitReviewCompletedLog(
       'gitlab.mr_iid': ctx.mr,
       'gitlab.server_url': ctx.gitlabUrl,
       ...meta?.ciAttrs,
+      ...meta?.ciSpanAttrs,
       'gitlab_review.run_id': ctx.runId,
       'gitlab_review.duration_ms': ctx.durationMs ?? 0,
       'gitlab_review.dry_run': ctx.dryRun,
@@ -729,7 +766,7 @@ function createReviewInstruments(meter: Meter): ReviewInstruments {
     }),
     reviewTotalCost: meter.createHistogram('gitlab_review_total_cost_usd', {
       description: 'Total LLM cost in USD for a complete gitlab-review run',
-      unit: 'usd',
+      unit: '{usd}',
       advice: { explicitBucketBoundaries: REVIEW_TOTAL_COST_BUCKETS_USD },
     }),
     reviewCommentsTotal: meter.createCounter('gitlab_review_comments_total', {
@@ -780,6 +817,18 @@ function buildCiAttrs(env: NodeJS.ProcessEnv): Record<string, string> {
   if (env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME)
     attrs['gitlab.mr_target_branch'] = env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME;
   if (env.CI_PIPELINE_SOURCE) attrs['gitlab.pipeline_source'] = env.CI_PIPELINE_SOURCE;
+  return attrs;
+}
+
+/**
+ * Extracts high-cardinality GitLab CI identifiers that should appear on spans
+ * and log records but NOT on metric data points (to avoid label explosion in
+ * Prometheus/Mimir). Spread results via `ciSpanAttrs` stored in RunMeta.
+ */
+function buildCiSpanAttrs(env: NodeJS.ProcessEnv): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  if (env.CI_JOB_ID) attrs['gitlab.ci_job_id'] = env.CI_JOB_ID;
+  if (env.CI_PIPELINE_ID) attrs['gitlab.ci_pipeline_id'] = env.CI_PIPELINE_ID;
   return attrs;
 }
 
@@ -840,7 +889,10 @@ function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
   // OpenTelemetry GenAI semantic conventions — currently experimental, opt-in
   // via OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental.
   // Spec: https://opentelemetry.io/docs/specs/semconv/gen-ai/
-  const [provider, modelId] = (ctx.model ?? '').split('/');
+  const rawModel = ctx.model ?? '';
+  const slashIdx = rawModel.indexOf('/');
+  const provider = slashIdx >= 0 ? rawModel.slice(0, slashIdx) : undefined;
+  const modelId = slashIdx >= 0 ? rawModel.slice(slashIdx + 1) : undefined;
   if (provider) span.setAttribute('gen_ai.system', provider);
   if (modelId) {
     span.setAttribute('gen_ai.request.model', modelId);
@@ -864,7 +916,7 @@ function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
   span.setAttribute('gen_ai.usage.cost.input_usd', usage.cost.input);
   span.setAttribute('gen_ai.usage.cost.output_usd', usage.cost.output);
   span.setAttribute('gen_ai.usage.cost.cache_read_usd', usage.cost.cacheRead);
-  span.setAttribute('gen_ai.usage.cost.cache_write_usd', usage.cost.cacheWrite);
+  span.setAttribute('gen_ai.usage.cost.cache_creation_usd', usage.cost.cacheWrite);
   span.setAttribute('gen_ai.usage.cost.total_usd', usage.cost.total);
 }
 
@@ -884,17 +936,18 @@ function recordGenAiMetrics(
   isError: boolean,
   ciAttrs: Record<string, string> = {},
 ): void {
-  const [provider, modelId] = (ctx.model ?? '').split('/');
+  const rawModel = ctx.model ?? '';
+  const slashIdx = rawModel.indexOf('/');
+  const provider = slashIdx >= 0 ? rawModel.slice(0, slashIdx) : undefined;
+  const modelId = slashIdx >= 0 ? rawModel.slice(slashIdx + 1) : undefined;
   const attrs: Attributes = {
     'gen_ai.operation.name': 'invoke_agent',
     ...REVIEW_SERVICE_ATTRS,
     ...ciAttrs,
   };
   if (provider) attrs['gen_ai.system'] = provider;
-  if (modelId) {
-    attrs['gen_ai.request.model'] = modelId;
-    attrs['gen_ai.response.model'] = modelId;
-  }
+  // gen_ai.request.model only (gen_ai.response.model belongs on spans, not metrics).
+  if (modelId) attrs['gen_ai.request.model'] = modelId;
   if (isError) {
     attrs['error.type'] = ctx.errorInfo?.code ?? ctx.errorInfo?.name ?? '_OTHER';
   }

@@ -78,6 +78,7 @@ describe('OpenTelemetry bridge', () => {
     severityNumber?: number;
     body: string;
     attributes: Record<string, unknown>;
+    context?: unknown;
   }
 
   function createFakeRuntime() {
@@ -162,11 +163,17 @@ describe('OpenTelemetry bridge', () => {
     const meterProvider = { getMeter: () => meter };
 
     const fakeLogger = {
-      emit(log: { severityNumber?: number; body?: unknown; attributes?: Record<string, unknown> }) {
+      emit(log: {
+        severityNumber?: number;
+        body?: unknown;
+        attributes?: Record<string, unknown>;
+        context?: unknown;
+      }) {
         logsEmitted.push({
           severityNumber: log.severityNumber,
           body: String(log.body ?? ''),
           attributes: log.attributes ?? {},
+          context: log.context,
         });
       },
     };
@@ -314,8 +321,9 @@ describe('OpenTelemetry bridge', () => {
       'gen_ai.operation.name': 'invoke_agent',
       'gen_ai.system': 'anthropic',
       'gen_ai.request.model': 'claude-sonnet-4-5',
-      'gen_ai.response.model': 'claude-sonnet-4-5',
     });
+    // gen_ai.response.model belongs on spans (traces), not on metric data points.
+    expect(duration!.attributes).not.toHaveProperty('gen_ai.response.model');
     expect(duration!.attributes).not.toHaveProperty('error.type');
 
     // No token or cost metrics from phase-close — those are per-turn only.
@@ -620,13 +628,21 @@ describe('OpenTelemetry bridge', () => {
     expect(perTurnOutput).toBeDefined();
 
     const costMetrics = metricsRecorded.filter((m) => m.name === 'gen_ai.client.cost');
-    const perTurnCost = costMetrics.find((m) => Math.abs(m.value - 0.014) < 0.0001);
-    expect(perTurnCost).toBeDefined();
-    expect(perTurnCost!.attributes).toMatchObject({
-      'service.name': '@ikko-dev/gitlab-review',
-      'gen_ai.system': 'anthropic',
-      'gen_ai.request.model': 'claude-haiku-4-5',
-    });
+    const costByType = new Map(costMetrics.map((m) => [m.attributes['gen_ai.token.type'], m]));
+    // GAP 1 fix: cost is broken down by token type, no single total observation.
+    expect(costByType.get('input')?.value).toBeCloseTo(0.004);
+    expect(costByType.get('output')?.value).toBeCloseTo(0.01);
+    expect(costByType.get('cache_read')).toBeUndefined(); // zero — skipped
+    expect(costByType.get('cache_creation')).toBeUndefined(); // zero — skipped
+    for (const metric of costMetrics) {
+      expect(metric.attributes).toMatchObject({
+        'service.name': '@ikko-dev/gitlab-review',
+        'gen_ai.system': 'anthropic',
+        'gen_ai.request.model': 'claude-haiku-4-5',
+      });
+      // gen_ai.response.model is span-only, not in metric labels (GAP 3 fix).
+      expect(metric.attributes).not.toHaveProperty('gen_ai.response.model');
+    }
   });
 
   it('records cache_read and cache_creation token metrics per turn (Gap 2 fix)', async () => {
@@ -673,6 +689,14 @@ describe('OpenTelemetry bridge', () => {
         'gen_ai.request.model': 'claude-sonnet-4-5',
       });
     }
+
+    // GAP 1 fix: cost is also broken down by token type.
+    const costMetrics = metricsRecorded.filter((m) => m.name === 'gen_ai.client.cost');
+    const costByType = new Map(costMetrics.map((m) => [m.attributes['gen_ai.token.type'], m]));
+    expect(costByType.get('input')?.value).toBeCloseTo(0.00003);
+    expect(costByType.get('output')?.value).toBeCloseTo(0.00453);
+    expect(costByType.get('cache_read')?.value).toBeCloseTo(0.0034);
+    expect(costByType.get('cache_creation')?.value).toBeCloseTo(0.049658);
   });
 
   it('derives gen_ai.system from configuredModel when msg.model has no provider prefix', async () => {
@@ -761,10 +785,14 @@ describe('OpenTelemetry bridge', () => {
     await bridge!.shutdown();
 
     const costMetrics = fake.metricsRecorded.filter((m) => m.name === 'gen_ai.client.cost');
-    // Exactly one emission — no double-count from phase-close.
-    expect(costMetrics).toHaveLength(1);
-    expect(costMetrics[0].value).toBeCloseTo(0.004);
-    expect(costMetrics[0].attributes['gen_ai.system']).toBe('anthropic');
+    // Exactly two cost metrics (input + output by type) — no double-count from phase-close.
+    expect(costMetrics).toHaveLength(2);
+    const costByType = new Map(costMetrics.map((m) => [m.attributes['gen_ai.token.type'], m]));
+    expect(costByType.get('input')?.value).toBeCloseTo(0.001);
+    expect(costByType.get('output')?.value).toBeCloseTo(0.003);
+    for (const m of costMetrics) {
+      expect(m.attributes['gen_ai.system']).toBe('anthropic');
+    }
   });
 
   it('records TTFT metric when message_update fires before message_end', async () => {
@@ -908,6 +936,73 @@ describe('OpenTelemetry bridge', () => {
       'gen_ai.usage.cache_read.input_tokens': 200,
       'gen_ai.usage.cache_creation.input_tokens': 10,
     });
+  });
+
+  it('emits review completion log and comment logs with root span context for trace correlation', async () => {
+    // BUG 2 regression test: logger.emit was previously called without a context
+    // so the logger SDK could not stamp traceId/spanId on Loki log records.
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig();
+    const runId = 'run-log-correlation';
+    const runContext = createDiagnosticContext('run', config, runId);
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      const reviewerContext = createDiagnosticContext('reviewer.run', config, runId);
+      await traceDiagnostic(diagnosticChannels.runReviewer, reviewerContext, async (ctx) => {
+        ctx.usage = {
+          model: 'anthropic/claude-sonnet-4-5',
+          tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+          cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+        };
+      });
+      bridge!.logComments(
+        [
+          {
+            comment: { file: 'x.ts', line: 1, side: 'RIGHT', severity: 'info', body: 'test' },
+            fingerprints: { primary: 'a', secondary: 'b' },
+            duplicate: false,
+            payload: {
+              body: '',
+              position: {
+                position_type: 'text',
+                base_sha: '',
+                start_sha: '',
+                head_sha: '',
+                old_path: '',
+                new_path: '',
+              },
+            },
+          },
+        ],
+        runId,
+      );
+    });
+    await bridge!.shutdown();
+
+    // The review completion log must carry a non-undefined context so the logger
+    // SDK can extract traceId/spanId and correlate the log record to the trace.
+    const completedLog = fake.logsEmitted.find(
+      (l) => l.attributes['event.name'] === 'gitlab_review.completed',
+    );
+    expect(completedLog).toBeDefined();
+    expect(completedLog!.context).toBeDefined();
+    // The context must contain the root span (invoke_workflow span).
+    const spanFromCtx = trace.getSpan(
+      completedLog!.context as import('@opentelemetry/api').Context,
+    );
+    expect(spanFromCtx).toBeDefined();
+
+    // Comment logs must also carry trace context.
+    const commentLog = fake.logsEmitted.find(
+      (l) => l.attributes['event.name'] === 'gitlab_review.comment',
+    );
+    expect(commentLog).toBeDefined();
+    expect(commentLog!.context).toBeDefined();
   });
 
   it('logComments emits one log record per comment with file/line/severity/is_duplicate', async () => {
@@ -1111,6 +1206,58 @@ describe('OpenTelemetry bridge', () => {
     expect(duration?.attributes).not.toHaveProperty('gitlab.pipeline_source');
   });
 
+  it('adds CI_JOB_ID and CI_PIPELINE_ID to spans and logs but not to metric attributes', async () => {
+    // MINOR 3: high-cardinality CI identifiers should enrich traces and logs for
+    // debugging but must not be labels on Prometheus metrics (cardinality bomb).
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: {
+        GITLAB_REVIEW_OTEL: '1',
+        CI_PROJECT_PATH: 'my-group/my-project',
+        CI_JOB_ID: '12345',
+        CI_PIPELINE_ID: '67890',
+      },
+    });
+
+    const config = makeConfig();
+    const runId = 'run-ci-span-attrs';
+    const runContext = createDiagnosticContext('run', config, runId);
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      const reviewerContext = createDiagnosticContext('reviewer.run', config, runId);
+      await traceDiagnostic(diagnosticChannels.runReviewer, reviewerContext, async (ctx) => {
+        ctx.usage = {
+          model: 'anthropic/claude-sonnet-4-5',
+          tokens: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, total: 15 },
+          cost: { input: 0.001, output: 0.001, cacheRead: 0, cacheWrite: 0, total: 0.002 },
+        };
+      });
+    });
+    await bridge!.shutdown();
+
+    // Spans should carry both low- and high-cardinality CI attrs.
+    for (const span of fake.spans) {
+      const attrs = Object.fromEntries(span.attributes.map((a) => [a.key, a.value]));
+      expect(attrs['gitlab.ci_job_id']).toBe('12345');
+      expect(attrs['gitlab.ci_pipeline_id']).toBe('67890');
+    }
+
+    // Review completion log should also carry the high-cardinality attrs.
+    const completedLog = fake.logsEmitted.find(
+      (l) => l.attributes['event.name'] === 'gitlab_review.completed',
+    );
+    expect(completedLog?.attributes['gitlab.ci_job_id']).toBe('12345');
+    expect(completedLog?.attributes['gitlab.ci_pipeline_id']).toBe('67890');
+
+    // gen_ai.* metric data points must NOT carry high-cardinality CI IDs.
+    const genAiMetrics = fake.metricsRecorded.filter((m) => m.name.startsWith('gen_ai.'));
+    for (const metric of genAiMetrics) {
+      expect(metric.attributes).not.toHaveProperty('gitlab.ci_job_id');
+      expect(metric.attributes).not.toHaveProperty('gitlab.ci_pipeline_id');
+    }
+  });
+
   it('logComments truncates comment body at 500 chars', async () => {
     const { startOtelBridge } = await import('./otel.js');
     const fake = createFakeRuntime();
@@ -1268,6 +1415,16 @@ describe('OpenTelemetry bridge', () => {
       'service.name': '@ikko-dev/gitlab-review',
       'gitlab_review.dry_run': false,
     });
+  });
+
+  it('does not emit gitlab_review_comments_total when posted count is zero', async () => {
+    // MINOR 2: emitting a zero-increment counter is wasteful and can create
+    // spurious series in Prometheus on error/dry-run paths.
+    const { metricsRecorded } = await runWithBridge(async (ctx) => {
+      ctx.posted = 0;
+    });
+    const comments = metricsRecorded.find((m) => m.name === 'gitlab_review_comments_total');
+    expect(comments).toBeUndefined();
   });
 
   it('emits gitlab_review_phase_duration_seconds for every measured phase', async () => {
