@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-05-21
+
 ### Fixed
 
 - **OTel `gen_ai.client.cost` double-count** (`GITLAB_REVIEW_OTEL=1`): cost was previously emitted from two places — `recordGenAiMetrics` at `reviewer.run` phase close (with `gen_ai.system`) and `buildAgentSubscriber` at `message_end` (without `gen_ai.system` when the Anthropic SDK returns a bare model ID). This created two Prometheus series per review run that differed only by presence/absence of `gen_ai_system`, causing a naive `sum()` in Grafana to return 2× the real cost. `gen_ai.client.cost` is now emitted exclusively per-turn by `buildAgentSubscriber`.
@@ -236,7 +238,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.3.2...HEAD
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.3.8...HEAD
+[0.3.8]: https://github.com/ikko-dev/gitlab-review/compare/0.3.7...0.3.8
+[0.3.7]: https://github.com/ikko-dev/gitlab-review/compare/0.3.6...0.3.7
+[0.3.6]: https://github.com/ikko-dev/gitlab-review/compare/0.3.5...0.3.6
+[0.3.5]: https://github.com/ikko-dev/gitlab-review/compare/0.3.4...0.3.5
+[0.3.4]: https://github.com/ikko-dev/gitlab-review/compare/0.3.3...0.3.4
 [0.3.3]: https://github.com/ikko-dev/gitlab-review/compare/0.3.2...0.3.3
 [0.3.2]: https://github.com/ikko-dev/gitlab-review/compare/0.3.1...0.3.2
 [0.3.1]: https://github.com/ikko-dev/gitlab-review/compare/0.3.0...0.3.1
