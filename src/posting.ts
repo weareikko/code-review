@@ -45,6 +45,7 @@ export interface SummaryBodyOptions {
   historyEntries?: string[];
   reviewedCommitSha?: string;
   skillsFooter?: string;
+  runId?: string;
 }
 
 export interface UpsertSummaryOptions extends SummaryBodyOptions {
@@ -62,6 +63,7 @@ export function buildSummaryBody(
     costFooter?.trim(),
     options.skillsFooter?.trim(),
     options.reviewedCommitSha ? buildReviewedCommitFooter(options.reviewedCommitSha) : undefined,
+    options.runId ? `<sub>Run ID: \`${options.runId}\`</sub>` : undefined,
   ].filter((line): line is string => Boolean(line));
   const withFooter =
     footerLines.length > 0 ? `${body}\n\n---\n\n${footerLines.join('\n\n')}` : body;

@@ -280,6 +280,7 @@ describe('OpenTelemetry bridge', () => {
     const reviewer = spans.find((s) => s.name === 'invoke_agent gitlab-review');
     const attrs = Object.fromEntries(reviewer!.attributes.map((a) => [a.key, a.value]));
     expect(attrs).toMatchObject({
+      'gen_ai.conversation.id': 'run-otel',
       'gen_ai.provider.name': 'anthropic',
       'gen_ai.request.model': 'claude-sonnet-4-5',
       'gen_ai.response.model': 'claude-sonnet-4-5',
@@ -547,6 +548,7 @@ describe('OpenTelemetry bridge', () => {
     }
 
     const idx = Object.fromEntries(turnSpans[0].attributes.map((a) => [a.key, a.value]));
+    expect(idx['gen_ai.conversation.id']).toBe('run-agent');
     expect(idx['gen_ai.agent.turn.index']).toBe(1);
   });
 

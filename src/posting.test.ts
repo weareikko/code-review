@@ -48,6 +48,12 @@ describe('summary note upsert', () => {
     expect(footerIndex).toBeGreaterThan(summaryIndex);
   });
 
+  it('appends the run ID footnote when provided', () => {
+    const id = 'a1b2c3d4-0000-0000-0000-000000000000';
+    const body = buildSummaryBody('Great work.', undefined, { runId: id });
+    expect(body).toContain(`<sub>Run ID: \`${id}\`</sub>`);
+  });
+
   it('appends and extracts the reviewed commit footer', () => {
     const commit = '27dab603346bcb994190042029ce7368021ff21e';
     const body = buildSummaryBody('Great work.', undefined, { reviewedCommitSha: commit });

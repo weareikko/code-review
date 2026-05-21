@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-05-21
+
+### Added
+
+- **`gen_ai.conversation.id` OTel attribute**: every span emitted by the OTel bridge (all phase spans and per-turn `gen_ai.agent.turn` spans) now carries `gen_ai.conversation.id` set to the run UUID. This follows the OpenTelemetry GenAI semantic conventions and unlocks the Sentry Conversations view as well as cross-span querying by conversation in any OTel-compatible backend.
+- **Run ID footnote in MR summary notes**: when `postSummary` is enabled, the posted summary note now includes a `<sub>Run ID: \`<uuid>\`</sub>` footnote so the trace can be located in Sentry (or any OTel backend) directly from the MR.
+
 ## [0.3.5] - 2026-05-21
 
 ### Added

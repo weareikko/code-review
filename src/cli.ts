@@ -281,6 +281,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
               costFooter: formatUsageLine(usage),
               skillsFooter: formatSkillsFooter(usage.skills),
               reviewedCommitSha: version.head_commit_sha,
+              runId,
             },
           );
           context.summaryAction = result.action;

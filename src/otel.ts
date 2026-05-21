@@ -386,6 +386,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         timeToFirstToken,
         reviewerSpanCtx,
         ciAttrs,
+        runId,
       );
     },
   };
@@ -398,6 +399,7 @@ function buildAgentSubscriber(
   timeToFirstToken: Histogram,
   reviewerSpanCtx: ReturnType<typeof trace.setSpan>,
   ciAttrs: Record<string, string> = {},
+  runId?: string,
 ): (agent: AgentLike) => () => void {
   return (agent: AgentLike): (() => void) => {
     let currentTurn: { span: Span; startMs: number; firstTokenMs?: number } | undefined;
@@ -416,6 +418,7 @@ function buildAgentSubscriber(
           reviewerSpanCtx,
         );
         span.setAttribute('gen_ai.operation.name', 'invoke_agent');
+        if (runId) span.setAttribute('gen_ai.conversation.id', runId);
         if (typeof turnIndex === 'number') span.setAttribute('gen_ai.agent.turn.index', turnIndex);
         currentTurn = { span, startMs: Date.now() };
       }
@@ -703,6 +706,7 @@ function buildCiAttrs(env: NodeJS.ProcessEnv): Record<string, string> {
 function baseAttributes(ctx: DiagnosticContext): Record<string, string | number | boolean> {
   return {
     'gitlab_review.run_id': ctx.runId,
+    'gen_ai.conversation.id': ctx.runId,
     'gitlab_review.phase': ctx.phase,
     'gitlab.project_id': ctx.project,
     'gitlab.mr_iid': ctx.mr,
