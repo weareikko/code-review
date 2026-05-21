@@ -166,8 +166,9 @@ const NoSevereFindingsJudge = createJudge(
   },
 );
 
+// Use || (not ??) so an empty-string ANTHROPIC_API_KEY falls through to GITLAB_REVIEW_API_KEY.
 const missingApiKey = () => {
-  return !(process.env.ANTHROPIC_API_KEY ?? process.env.GITLAB_REVIEW_API_KEY);
+  return !(process.env.ANTHROPIC_API_KEY || process.env.GITLAB_REVIEW_API_KEY);
 };
 
 describeEval(
@@ -195,12 +196,23 @@ describeEval(
       expect(mentionedAsync).toBe(true);
       expect(result.output.comments.length).toBeGreaterThan(0);
     });
+  },
+);
 
-    it('detects async/forEach bugs without code-review skill (baseline)', async ({ run }) => {
+// Baseline: record judge scores without hard-failing — model may miss the bug without skill guidance.
+describeEval(
+  'code-review skill — bug detection (baseline, no skill)',
+  {
+    harness: reviewHarness,
+    judges: [AsyncBugDetectedJudge, HasSevereFindingJudge],
+    judgeThreshold: null,
+    skipIf: missingApiKey,
+  },
+  (it) => {
+    it('async/forEach bug baseline without code-review skill', async ({ run }) => {
       const diff = await readFile(join(FIXTURES, 'async-foreach-bug.diff'), 'utf8');
       const result = await run({ diff, skills: [] });
 
-      // Record baseline scores without requiring pass — judges still run
       expect(result.output).toBeDefined();
       expect(result.output.summary).toBeTruthy();
     });
@@ -275,14 +287,23 @@ describeEval(
 
       expect(result.output.comments.length).toBeGreaterThan(0);
     });
+  },
+);
 
-    it('detects missing useEffect deps / stale closure without skill (baseline)', async ({
-      run,
-    }) => {
+// Baseline: record scores but do not hard-assert pass.
+describeEval(
+  'code-review skill — React stale closure detection (baseline, no skill)',
+  {
+    harness: reviewHarness,
+    judges: [StaleClosureJudge, HasSevereFindingJudge],
+    judgeThreshold: null,
+    skipIf: missingApiKey,
+  },
+  (it) => {
+    it('stale closure baseline without code-review skill', async ({ run }) => {
       const diff = await readFile(join(FIXTURES, 'react-stale-deps.diff'), 'utf8');
       const result = await run({ diff, skills: [] });
 
-      // Baseline: record scores but do not hard-assert pass
       expect(result.output).toBeDefined();
     });
   },
@@ -303,8 +324,20 @@ describeEval(
 
       expect(result.output.comments.length).toBeGreaterThan(0);
     });
+  },
+);
 
-    it('detects non-atomic promo code claim without skill (baseline)', async ({ run }) => {
+// Baseline: record scores but do not hard-assert pass.
+describeEval(
+  'code-review skill — PHP race condition detection (baseline, no skill)',
+  {
+    harness: reviewHarness,
+    judges: [RaceConditionJudge, HasSevereFindingJudge],
+    judgeThreshold: null,
+    skipIf: missingApiKey,
+  },
+  (it) => {
+    it('race condition baseline without code-review skill', async ({ run }) => {
       const diff = await readFile(join(FIXTURES, 'php-promo-race.diff'), 'utf8');
       const result = await run({ diff, skills: [] });
 
