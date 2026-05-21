@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -86,16 +85,8 @@ export interface RunResult {
   skipped?: boolean;
 }
 
-function readVersion(): string {
-  try {
-    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
-      version?: string;
-    };
-    return pkg.version ?? '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
-}
+declare const __PKG_NAME__: string;
+declare const __PKG_VERSION__: string;
 
 function assertNodeVersion(): void {
   const major = Number(process.versions.node.split('.')[0]);
@@ -381,10 +372,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
   if (argv.includes('--version') || argv.includes('-v')) {
-    console.log(readVersion());
+    console.log(__PKG_VERSION__);
     return;
   }
 
+  process.stderr.write(`[gitlab-review] ${__PKG_NAME__} v${__PKG_VERSION__}\n`);
   assertNodeVersion();
   const config = resolveConfig(argv);
   const otel = await startOtelBridge();

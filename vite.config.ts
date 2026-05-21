@@ -13,10 +13,11 @@ const external = [
 
 const pkg = JSON.parse(
   readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf8'),
-) as { version: string };
+) as { name: string; version: string };
 
 export default defineConfig({
   define: {
+    __PKG_NAME__: JSON.stringify(pkg.name),
     __PKG_VERSION__: JSON.stringify(pkg.version),
   },
   build: {
