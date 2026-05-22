@@ -21,6 +21,12 @@
  * the standard `OTEL_*` env vars (`OTEL_EXPORTER_OTLP_ENDPOINT`,
  * `OTEL_EXPORTER_OTLP_HEADERS`, …).
  *
+ * **Content capture**: set `GITLAB_REVIEW_OTEL_CAPTURE_CONTENT=1` to attach
+ * LLM output text and tool arguments/results to spans as `gen_ai.output.messages`,
+ * `gen_ai.tool.call.arguments`, and `gen_ai.tool.call.result`. These attributes
+ * may contain code diffs and review commentary — only enable after confirming
+ * your observability backend's data-retention and PII policies allow it.
+ *
  * **Grafana Cloud token scopes**: for all three signals to reach their
  * respective backends, the service account token used in
  * `OTEL_EXPORTER_OTLP_HEADERS` must have:
@@ -106,6 +112,15 @@ export interface OtelBridgeOptions {
    * `process.env`.
    */
   env?: NodeJS.ProcessEnv;
+  /**
+   * When true, attaches LLM output text and tool call arguments/results to
+   * spans as `gen_ai.output.messages`, `gen_ai.tool.call.arguments`, and
+   * `gen_ai.tool.call.result`. Defaults to `isContentCaptureEnabled(env)`.
+   *
+   * Only enable after confirming your observability backend's data-retention
+   * and PII policies permit storing code review content.
+   */
+  captureContent?: boolean;
 }
 
 const ROOT_PHASE: DiagnosticPhase = 'run';
@@ -170,10 +185,28 @@ export function isOtelEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.GITLAB_REVIEW_OTEL === '1' || env.GITLAB_REVIEW_OTEL === 'true';
 }
 
+/**
+ * Returns true when `GITLAB_REVIEW_OTEL_CAPTURE_CONTENT=1` (or `true`) is set.
+ *
+ * When enabled, per-turn assistant output text is attached to turn spans as
+ * `gen_ai.output.messages`, and tool arguments / results are attached to
+ * `execute_tool` spans as `gen_ai.tool.call.arguments` / `gen_ai.tool.call.result`.
+ *
+ * These fields may contain code diffs and review commentary — only enable after
+ * confirming your observability backend's data-retention and PII policies.
+ */
+export function isContentCaptureEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (
+    env.GITLAB_REVIEW_OTEL_CAPTURE_CONTENT === '1' ||
+    env.GITLAB_REVIEW_OTEL_CAPTURE_CONTENT === 'true'
+  );
+}
+
 export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<OtelBridge | null> {
   const env = options.env ?? process.env;
   if (!isOtelEnabled(env)) return null;
 
+  const captureContent = options.captureContent ?? isContentCaptureEnabled(env);
   const ciAttrs = buildCiAttrs(env);
   const ciSpanAttrs = buildCiSpanAttrs(env);
 
@@ -419,6 +452,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
           // Pass the configured model so the per-turn subscriber can derive
           // gen_ai.system when msg.model carries a bare ID without a provider prefix.
           configuredModel: runMeta.get(runId)?.model,
+          captureContent,
         },
       );
     },
@@ -434,6 +468,102 @@ interface AgentSubscriberOptions {
    * bare model IDs without a provider prefix (common with the Anthropic SDK).
    */
   configuredModel?: string;
+  /**
+   * When true, serializes LLM output text and tool call arguments/results onto
+   * spans as `gen_ai.output.messages`, `gen_ai.tool.call.arguments`, and
+   * `gen_ai.tool.call.result`. Requires explicit opt-in via
+   * `GITLAB_REVIEW_OTEL_CAPTURE_CONTENT=1` or `OtelBridgeOptions.captureContent`.
+   */
+  captureContent?: boolean;
+}
+
+/** Applies per-turn token counts and costs to the turn span and emits metric observations. */
+function recordTurnUsage(
+  span: Span,
+  u: NonNullable<TurnMessage['usage']>,
+  metricAttrs: Attributes,
+  tokenUsage: Histogram,
+  operationCost: Histogram,
+): void {
+  // Emit all four token type measurements per OTel GenAI semconv.
+  // These are the canonical source for gen_ai.client.token.usage —
+  // recordGenAiMetrics only emits phase duration to avoid double-count.
+  tokenUsage.record(u.input, { ...metricAttrs, 'gen_ai.token.type': 'input' });
+  tokenUsage.record(u.output, { ...metricAttrs, 'gen_ai.token.type': 'output' });
+  if (u.cacheRead) {
+    tokenUsage.record(u.cacheRead, { ...metricAttrs, 'gen_ai.token.type': 'cache_read' });
+  }
+  if (u.cacheWrite) {
+    tokenUsage.record(u.cacheWrite, { ...metricAttrs, 'gen_ai.token.type': 'cache_creation' });
+  }
+  // gen_ai.usage.input_tokens follows Sentry AI monitoring's convention:
+  // the value is the TOTAL tokens consumed as input (non-cached + cached).
+  // gen_ai.usage.input_tokens.cached is the cached SUBSET so backends can
+  // compute uncached cost without negative values (Sentry warns about this).
+  // gen_ai.usage.cache_read.input_tokens is kept for Grafana backward compat.
+  span.setAttribute('gen_ai.usage.input_tokens', u.input + u.cacheRead);
+  if (u.cacheRead) span.setAttribute('gen_ai.usage.input_tokens.cached', u.cacheRead);
+  span.setAttribute('gen_ai.usage.output_tokens', u.output);
+  if (u.cacheRead) span.setAttribute('gen_ai.usage.cache_read.input_tokens', u.cacheRead);
+  if (u.cacheWrite) span.setAttribute('gen_ai.usage.cache_creation.input_tokens', u.cacheWrite);
+  if (u.cost) {
+    // Emit cost broken down by token type (mirrors gen_ai.client.token.usage).
+    // Per-turn is the sole emission point to prevent double-count.
+    if (u.cost.input)
+      operationCost.record(u.cost.input, { ...metricAttrs, 'gen_ai.token.type': 'input' });
+    if (u.cost.output)
+      operationCost.record(u.cost.output, { ...metricAttrs, 'gen_ai.token.type': 'output' });
+    if (u.cost.cacheRead)
+      operationCost.record(u.cost.cacheRead, {
+        ...metricAttrs,
+        'gen_ai.token.type': 'cache_read',
+      });
+    if (u.cost.cacheWrite)
+      operationCost.record(u.cost.cacheWrite, {
+        ...metricAttrs,
+        'gen_ai.token.type': 'cache_creation',
+      });
+    span.setAttribute('gen_ai.usage.cost.input_usd', u.cost.input);
+    span.setAttribute('gen_ai.usage.cost.output_usd', u.cost.output);
+    span.setAttribute('gen_ai.usage.cost.total_usd', u.cost.total);
+  }
+}
+
+/**
+ * Safely serializes a value to a JSON string for use as an OTel span attribute.
+ * Truncates to `maxLen` characters to stay within typical span attribute limits.
+ * Returns `undefined` when the value is `null` or `undefined`.
+ */
+function safeSerialize(value: unknown, maxLen = 2000): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  try {
+    const s = typeof value === 'string' ? value : JSON.stringify(value);
+    return s.length > maxLen ? `${s.slice(0, maxLen - 1)}…` : s;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Extracts printable text content from an assistant message's content array.
+ * Returns a JSON-serialized array in Sentry's `{role, parts: [{type, text}]}` format,
+ * or `undefined` when no text blocks are found.
+ */
+function extractOutputMessages(msg: TurnMessage): string | undefined {
+  const content = (msg as { content?: unknown[] }).content;
+  if (!Array.isArray(content)) return undefined;
+  const texts = content
+    .filter((block): block is { type: string; text: string } => {
+      return (
+        typeof block === 'object' &&
+        block !== null &&
+        (block as { type?: string }).type === 'text' &&
+        typeof (block as { text?: string }).text === 'string'
+      );
+    })
+    .map((block) => ({ type: 'text', text: block.text }));
+  if (texts.length === 0) return undefined;
+  return safeSerialize([{ role: 'assistant', parts: texts }]);
 }
 
 function buildAgentSubscriber(
@@ -444,7 +574,7 @@ function buildAgentSubscriber(
   reviewerSpanCtx: ReturnType<typeof trace.setSpan>,
   options: AgentSubscriberOptions = {},
 ): (agent: AgentLike) => () => void {
-  const { ciAttrs = {}, runId, configuredModel } = options;
+  const { ciAttrs = {}, runId, configuredModel, captureContent = false } = options;
   return (agent: AgentLike): (() => void) => {
     let currentTurn: { span: Span; startMs: number; firstTokenMs?: number } | undefined;
     const openTools = new Map<string, Span>();
@@ -519,56 +649,24 @@ function buildAgentSubscriber(
         }
 
         if (msg.usage) {
-          const u = msg.usage;
-          // Emit all four token type measurements per OTel GenAI semconv.
-          // These are the canonical source for gen_ai.client.token.usage —
-          // recordGenAiMetrics only emits phase duration to avoid double-count.
-          tokenUsage.record(u.input, { ...metricAttrs, 'gen_ai.token.type': 'input' });
-          tokenUsage.record(u.output, { ...metricAttrs, 'gen_ai.token.type': 'output' });
-          if (u.cacheRead) {
-            tokenUsage.record(u.cacheRead, { ...metricAttrs, 'gen_ai.token.type': 'cache_read' });
-          }
-          if (u.cacheWrite) {
-            tokenUsage.record(u.cacheWrite, {
-              ...metricAttrs,
-              'gen_ai.token.type': 'cache_creation',
-            });
-          }
-          span.setAttribute('gen_ai.usage.input_tokens', u.input);
-          span.setAttribute('gen_ai.usage.output_tokens', u.output);
-          if (u.cacheRead) span.setAttribute('gen_ai.usage.cache_read.input_tokens', u.cacheRead);
-          if (u.cacheWrite)
-            span.setAttribute('gen_ai.usage.cache_creation.input_tokens', u.cacheWrite);
-          if (u.cost) {
-            // Emit cost broken down by token type (mirrors gen_ai.client.token.usage).
-            // Per-turn is the sole emission point to prevent double-count.
-            if (u.cost.input)
-              operationCost.record(u.cost.input, { ...metricAttrs, 'gen_ai.token.type': 'input' });
-            if (u.cost.output)
-              operationCost.record(u.cost.output, {
-                ...metricAttrs,
-                'gen_ai.token.type': 'output',
-              });
-            if (u.cost.cacheRead)
-              operationCost.record(u.cost.cacheRead, {
-                ...metricAttrs,
-                'gen_ai.token.type': 'cache_read',
-              });
-            if (u.cost.cacheWrite)
-              operationCost.record(u.cost.cacheWrite, {
-                ...metricAttrs,
-                'gen_ai.token.type': 'cache_creation',
-              });
-            span.setAttribute('gen_ai.usage.cost.input_usd', u.cost.input);
-            span.setAttribute('gen_ai.usage.cost.output_usd', u.cost.output);
-            span.setAttribute('gen_ai.usage.cost.total_usd', u.cost.total);
-          }
+          recordTurnUsage(span, msg.usage, metricAttrs, tokenUsage, operationCost);
         }
+
+        // Optional content capture — requires GITLAB_REVIEW_OTEL_CAPTURE_CONTENT=1.
+        if (captureContent) {
+          const outputMsgs = extractOutputMessages(msg);
+          if (outputMsgs) span.setAttribute('gen_ai.output.messages', outputMsgs);
+        }
+
         span.end();
       }
 
       if (type === 'tool_execution_start') {
-        const { toolName, toolCallId } = event as { toolName?: string; toolCallId?: string };
+        const { toolName, toolCallId, args } = event as {
+          toolName?: string;
+          toolCallId?: string;
+          args?: unknown;
+        };
         if (!toolName || !toolCallId) return;
         const toolParentCtx = currentTurn
           ? trace.setSpan(context.active(), currentTurn.span)
@@ -581,15 +679,27 @@ function buildAgentSubscriber(
         toolSpan.setAttribute('gen_ai.operation.name', 'execute_tool');
         toolSpan.setAttribute('gen_ai.tool.name', toolName);
         toolSpan.setAttribute('gen_ai.tool.call.id', toolCallId);
+        if (captureContent && args !== undefined) {
+          const argsStr = safeSerialize(args);
+          if (argsStr) toolSpan.setAttribute('gen_ai.tool.call.arguments', argsStr);
+        }
         openTools.set(toolCallId, toolSpan);
       }
 
       if (type === 'tool_execution_end') {
-        const { toolCallId, isError } = event as { toolCallId?: string; isError?: boolean };
+        const { toolCallId, isError, result } = event as {
+          toolCallId?: string;
+          isError?: boolean;
+          result?: unknown;
+        };
         if (!toolCallId) return;
         const span = openTools.get(toolCallId);
         if (!span) return;
         if (isError) span.setStatus({ code: SpanStatusCode.ERROR });
+        if (captureContent && result !== undefined) {
+          const resultStr = safeSerialize(result);
+          if (resultStr) span.setAttribute('gen_ai.tool.call.result', resultStr);
+        }
         span.end();
         openTools.delete(toolCallId);
       }
@@ -725,13 +835,16 @@ function emitReviewCompletedLog(
       ...(modelId !== undefined && { 'gen_ai.request.model': modelId }),
       ...(cost !== undefined && { 'gen_ai.usage.cost.total_usd': cost }),
       ...(usage?.tokens.input !== undefined && {
-        'gen_ai.usage.input_tokens': usage.tokens.input,
+        // Total (non-cached + cached) — Sentry AI monitoring model.
+        'gen_ai.usage.input_tokens': usage.tokens.input + (usage.tokens.cacheRead ?? 0),
+      }),
+      ...(usage?.tokens.cacheRead && {
+        'gen_ai.usage.input_tokens.cached': usage.tokens.cacheRead,
+        // Keep for Grafana backward compat.
+        'gen_ai.usage.cache_read.input_tokens': usage.tokens.cacheRead,
       }),
       ...(usage?.tokens.output !== undefined && {
         'gen_ai.usage.output_tokens': usage.tokens.output,
-      }),
-      ...(usage?.tokens.cacheRead && {
-        'gen_ai.usage.cache_read.input_tokens': usage.tokens.cacheRead,
       }),
       ...(usage?.tokens.cacheWrite && {
         'gen_ai.usage.cache_creation.input_tokens': usage.tokens.cacheWrite,
@@ -903,7 +1016,13 @@ function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
 
   const usage = ctx.usage;
   if (!usage) return;
-  span.setAttribute('gen_ai.usage.input_tokens', usage.tokens.input);
+  // Total input tokens (non-cached + cached) — Sentry AI monitoring model.
+  // gen_ai.usage.input_tokens.cached is the cached subset for Sentry cost math.
+  // gen_ai.usage.cache_read.input_tokens is kept for Grafana backward compat.
+  span.setAttribute('gen_ai.usage.input_tokens', usage.tokens.input + usage.tokens.cacheRead);
+  if (usage.tokens.cacheRead) {
+    span.setAttribute('gen_ai.usage.input_tokens.cached', usage.tokens.cacheRead);
+  }
   span.setAttribute('gen_ai.usage.output_tokens', usage.tokens.output);
   if (usage.tokens.cacheRead) {
     span.setAttribute('gen_ai.usage.cache_read.input_tokens', usage.tokens.cacheRead);
