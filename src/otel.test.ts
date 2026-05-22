@@ -5,6 +5,7 @@ import type { Config } from './config.js';
 import { ReviewerError } from './errors.js';
 import type { AgentLike } from './gitlab-review.js';
 import type { OtelRuntime } from './otel.js';
+import { isContentCaptureEnabled } from './otel.js';
 import {
   createDiagnosticContext,
   diagnosticChannels,
@@ -293,7 +294,9 @@ describe('OpenTelemetry bridge', () => {
       'gen_ai.response.model': 'claude-sonnet-4-5',
       'gen_ai.operation.name': 'invoke_agent',
       'gen_ai.agent.name': 'gitlab-review',
-      'gen_ai.usage.input_tokens': 1200,
+      // Total input = non-cached (1200) + cached (50) — Sentry AI monitoring model.
+      'gen_ai.usage.input_tokens': 1250,
+      'gen_ai.usage.input_tokens.cached': 50,
       'gen_ai.usage.output_tokens': 340,
       'gen_ai.usage.cache_read.input_tokens': 50,
       'gen_ai.usage.cache_creation.input_tokens': 10,
@@ -588,7 +591,9 @@ describe('OpenTelemetry bridge', () => {
     const attrs = Object.fromEntries(turn!.attributes.map((a) => [a.key, a.value]));
     expect(attrs).toMatchObject({
       'gen_ai.system': 'anthropic',
-      'gen_ai.usage.input_tokens': 300,
+      // Total input = non-cached (300) + cached (50) — Sentry AI monitoring model.
+      'gen_ai.usage.input_tokens': 350,
+      'gen_ai.usage.input_tokens.cached': 50,
       'gen_ai.usage.output_tokens': 80,
       'gen_ai.usage.cache_read.input_tokens': 50,
       'gen_ai.usage.cost.total_usd': 0.0115,
@@ -931,7 +936,9 @@ describe('OpenTelemetry bridge', () => {
       'gitlab.mr_iid': '1',
       'gen_ai.request.model': 'claude-haiku-4-5',
       'gen_ai.usage.cost.total_usd': 0.006,
-      'gen_ai.usage.input_tokens': 100,
+      // Total input = non-cached (100) + cached (200) — Sentry AI monitoring model.
+      'gen_ai.usage.input_tokens': 300,
+      'gen_ai.usage.input_tokens.cached': 200,
       'gen_ai.usage.output_tokens': 50,
       'gen_ai.usage.cache_read.input_tokens': 200,
       'gen_ai.usage.cache_creation.input_tokens': 10,
@@ -1551,5 +1558,278 @@ describe('OpenTelemetry bridge', () => {
       'gitlab.project_path': 'corp/svc',
       'gitlab.pipeline_source': 'merge_request_event',
     });
+  });
+
+  // ---------------------------------------------------------------------------
+  // isContentCaptureEnabled
+  // ---------------------------------------------------------------------------
+
+  it('isContentCaptureEnabled returns false unless explicitly opted in', () => {
+    expect(isContentCaptureEnabled({})).toBe(false);
+    expect(isContentCaptureEnabled({ GITLAB_REVIEW_OTEL_CAPTURE_CONTENT: '0' })).toBe(false);
+    expect(isContentCaptureEnabled({ GITLAB_REVIEW_OTEL_CAPTURE_CONTENT: 'yes' })).toBe(false);
+    expect(isContentCaptureEnabled({ GITLAB_REVIEW_OTEL_CAPTURE_CONTENT: '1' })).toBe(true);
+    expect(isContentCaptureEnabled({ GITLAB_REVIEW_OTEL_CAPTURE_CONTENT: 'true' })).toBe(true);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Content capture — GITLAB_REVIEW_OTEL_CAPTURE_CONTENT
+  // ---------------------------------------------------------------------------
+
+  it('does not attach gen_ai.output.messages or tool content by default', async () => {
+    const fakeMsg = {
+      role: 'assistant',
+      model: 'anthropic/claude-haiku-4-5',
+      stopReason: 'end_turn',
+      // Add content blocks that would be captured if the flag were set.
+      content: [{ type: 'text', text: 'Here is the review.' }],
+      usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0 },
+    };
+    const { spans } = await runWithAgentTelemetry(async (agent) => {
+      await agent.emit({ type: 'turn_start', turnIndex: 1 });
+      await agent.emit({
+        type: 'tool_execution_start',
+        toolName: 'Read',
+        toolCallId: 'tc-no-capture',
+        args: { file: 'src/main.ts' },
+      });
+      await agent.emit({
+        type: 'tool_execution_end',
+        toolCallId: 'tc-no-capture',
+        toolName: 'Read',
+        result: 'file contents',
+        isError: false,
+      });
+      await agent.emit({ type: 'message_end', message: fakeMsg });
+    });
+
+    const turnSpan = spans.find((s) => s.name === 'gen_ai.agent.turn');
+    const turnAttrs = Object.fromEntries(turnSpan!.attributes.map((a) => [a.key, a.value]));
+    expect(turnAttrs).not.toHaveProperty('gen_ai.output.messages');
+
+    const toolSpan = spans.find((s) => s.name === 'execute_tool Read');
+    const toolAttrs = Object.fromEntries(toolSpan!.attributes.map((a) => [a.key, a.value]));
+    expect(toolAttrs).not.toHaveProperty('gen_ai.tool.call.arguments');
+    expect(toolAttrs).not.toHaveProperty('gen_ai.tool.call.result');
+  });
+
+  it('attaches gen_ai.output.messages to turn spans when captureContent=true', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+      captureContent: true,
+    });
+
+    const config = makeConfig({ model: 'anthropic/claude-haiku-4-5' });
+    const runId = 'run-capture-output';
+    const runContext = createDiagnosticContext('run', config, runId);
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      const reviewerContext = createDiagnosticContext('reviewer.run', config, runId);
+      await traceDiagnostic(diagnosticChannels.runReviewer, reviewerContext, async () => {
+        const attach = bridge!.createAgentTelemetry(runId);
+        expect(attach).toBeDefined();
+        const agent = makeAgent();
+        const detach = attach!(agent);
+        await agent.emit({ type: 'turn_start', turnIndex: 1 });
+        await agent.emit({
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            model: 'anthropic/claude-haiku-4-5',
+            stopReason: 'end_turn',
+            content: [
+              { type: 'text', text: 'This is a review comment.' },
+              { type: 'thinking', thinking: 'internal reasoning' }, // should be ignored
+            ],
+            usage: { input: 50, output: 10, cacheRead: 0, cacheWrite: 0 },
+          },
+        });
+        detach();
+      });
+    });
+    await bridge!.shutdown();
+
+    const turnSpan = fake.spans.find((s) => s.name === 'gen_ai.agent.turn');
+    const attrs = Object.fromEntries(turnSpan!.attributes.map((a) => [a.key, a.value]));
+    expect(attrs).toHaveProperty('gen_ai.output.messages');
+    const parsed = JSON.parse(attrs['gen_ai.output.messages'] as string) as unknown[];
+    expect(parsed).toEqual([
+      { role: 'assistant', parts: [{ type: 'text', text: 'This is a review comment.' }] },
+    ]);
+  });
+
+  it('attaches tool arguments and results when captureContent=true', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+      captureContent: true,
+    });
+
+    const config = makeConfig({ model: 'anthropic/claude-haiku-4-5' });
+    const runId = 'run-capture-tools';
+    const runContext = createDiagnosticContext('run', config, runId);
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      const reviewerContext = createDiagnosticContext('reviewer.run', config, runId);
+      await traceDiagnostic(diagnosticChannels.runReviewer, reviewerContext, async () => {
+        const attach = bridge!.createAgentTelemetry(runId);
+        const agent = makeAgent();
+        const detach = attach!(agent);
+        await agent.emit({ type: 'turn_start', turnIndex: 1 });
+        await agent.emit({
+          type: 'tool_execution_start',
+          toolName: 'Read',
+          toolCallId: 'tc-cap-1',
+          args: { file_path: '/src/auth.ts' },
+        });
+        await agent.emit({
+          type: 'tool_execution_end',
+          toolCallId: 'tc-cap-1',
+          toolName: 'Read',
+          result: { content: 'const x = 1;' },
+          isError: false,
+        });
+        await agent.emit({
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            model: 'anthropic/claude-haiku-4-5',
+            stopReason: 'tool_use',
+            content: [],
+            usage: { input: 50, output: 10, cacheRead: 0, cacheWrite: 0 },
+          },
+        });
+        detach();
+      });
+    });
+    await bridge!.shutdown();
+
+    const toolSpan = fake.spans.find((s) => s.name === 'execute_tool Read');
+    expect(toolSpan).toBeDefined();
+    const attrs = Object.fromEntries(toolSpan!.attributes.map((a) => [a.key, a.value]));
+    expect(attrs).toHaveProperty('gen_ai.tool.call.arguments');
+    expect(JSON.parse(attrs['gen_ai.tool.call.arguments'] as string)).toEqual({
+      file_path: '/src/auth.ts',
+    });
+    expect(attrs).toHaveProperty('gen_ai.tool.call.result');
+    expect(JSON.parse(attrs['gen_ai.tool.call.result'] as string)).toEqual({
+      content: 'const x = 1;',
+    });
+  });
+
+  it('truncates serialized content at 2000 chars to protect span attribute size', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+      captureContent: true,
+    });
+
+    const config = makeConfig({ model: 'anthropic/claude-haiku-4-5' });
+    const runId = 'run-capture-trunc';
+    const runContext = createDiagnosticContext('run', config, runId);
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      const reviewerContext = createDiagnosticContext('reviewer.run', config, runId);
+      await traceDiagnostic(diagnosticChannels.runReviewer, reviewerContext, async () => {
+        const attach = bridge!.createAgentTelemetry(runId);
+        const agent = makeAgent();
+        const detach = attach!(agent);
+        await agent.emit({ type: 'turn_start', turnIndex: 1 });
+        await agent.emit({
+          type: 'tool_execution_start',
+          toolName: 'Read',
+          toolCallId: 'tc-trunc',
+          args: { content: 'x'.repeat(5000) },
+        });
+        await agent.emit({
+          type: 'tool_execution_end',
+          toolCallId: 'tc-trunc',
+          toolName: 'Read',
+          result: 'y'.repeat(5000),
+          isError: false,
+        });
+        await agent.emit({
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            model: 'anthropic/claude-haiku-4-5',
+            stopReason: 'end_turn',
+            content: [{ type: 'text', text: 'z'.repeat(5000) }],
+            usage: { input: 50, output: 10, cacheRead: 0, cacheWrite: 0 },
+          },
+        });
+        detach();
+      });
+    });
+    await bridge!.shutdown();
+
+    const toolSpan = fake.spans.find((s) => s.name === 'execute_tool Read');
+    const toolAttrs = Object.fromEntries(toolSpan!.attributes.map((a) => [a.key, a.value]));
+    expect((toolAttrs['gen_ai.tool.call.arguments'] as string).length).toBeLessThanOrEqual(2000);
+    expect((toolAttrs['gen_ai.tool.call.result'] as string).length).toBeLessThanOrEqual(2000);
+
+    const turnSpan = fake.spans.find((s) => s.name === 'gen_ai.agent.turn');
+    const turnAttrs = Object.fromEntries(turnSpan!.attributes.map((a) => [a.key, a.value]));
+    expect((turnAttrs['gen_ai.output.messages'] as string).length).toBeLessThanOrEqual(2000);
+  });
+
+  it('GITLAB_REVIEW_OTEL_CAPTURE_CONTENT env var enables content capture via env option', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1', GITLAB_REVIEW_OTEL_CAPTURE_CONTENT: '1' },
+    });
+
+    const config = makeConfig({ model: 'anthropic/claude-haiku-4-5' });
+    const runId = 'run-capture-env';
+    const runContext = createDiagnosticContext('run', config, runId);
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      const reviewerContext = createDiagnosticContext('reviewer.run', config, runId);
+      await traceDiagnostic(diagnosticChannels.runReviewer, reviewerContext, async () => {
+        const attach = bridge!.createAgentTelemetry(runId);
+        const agent = makeAgent();
+        const detach = attach!(agent);
+        await agent.emit({ type: 'turn_start', turnIndex: 1 });
+        await agent.emit({
+          type: 'tool_execution_start',
+          toolName: 'Bash',
+          toolCallId: 'tc-env',
+          args: { command: 'ls' },
+        });
+        await agent.emit({
+          type: 'tool_execution_end',
+          toolCallId: 'tc-env',
+          toolName: 'Bash',
+          result: 'file1.ts\nfile2.ts',
+          isError: false,
+        });
+        await agent.emit({
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            model: 'anthropic/claude-haiku-4-5',
+            stopReason: 'end_turn',
+            content: [{ type: 'text', text: 'Done.' }],
+            usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 },
+          },
+        });
+        detach();
+      });
+    });
+    await bridge!.shutdown();
+
+    const toolSpan = fake.spans.find((s) => s.name === 'execute_tool Bash');
+    const toolAttrs = Object.fromEntries(toolSpan!.attributes.map((a) => [a.key, a.value]));
+    expect(toolAttrs['gen_ai.tool.call.arguments']).toBeDefined();
+    expect(toolAttrs['gen_ai.tool.call.result']).toBeDefined();
+
+    const turnSpan = fake.spans.find((s) => s.name === 'gen_ai.agent.turn');
+    const turnAttrs = Object.fromEntries(turnSpan!.attributes.map((a) => [a.key, a.value]));
+    expect(turnAttrs['gen_ai.output.messages']).toBeDefined();
   });
 });

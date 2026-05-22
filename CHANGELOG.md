@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.9] - 2026-05-22
+
+### Added
+
+- **`GITLAB_REVIEW_OTEL_CAPTURE_CONTENT=1` opt-in for content capture** (`GITLAB_REVIEW_OTEL=1`): when set, per-turn assistant output text is attached to `gen_ai.agent.turn` spans as `gen_ai.output.messages` (Sentry Conversations-compatible JSON format), and tool arguments / results are attached to `execute_tool` spans as `gen_ai.tool.call.arguments` / `gen_ai.tool.call.result`. Content is truncated at 2 000 chars per attribute to stay within typical span size limits. Disabled by default — only enable after confirming your observability backend's data-retention and PII policies allow storing code review content. The `captureContent` field on `OtelBridgeOptions` provides the programmatic equivalent for library callers.
+- **`isContentCaptureEnabled()` export** from `src/otel.ts`: reflects the `GITLAB_REVIEW_OTEL_CAPTURE_CONTENT` opt-in check, mirroring the pattern of `isOtelEnabled()`.
+
+### Fixed
+
+- **`gen_ai.usage.input_tokens` now reports total input** (non-cached + cached) on `gen_ai.agent.turn` spans and the `invoke_agent gitlab-review` phase span, matching the Sentry AI monitoring convention. Previously it reported only non-cached input tokens, which caused Sentry's cost calculator to produce negative cache costs. `gen_ai.usage.input_tokens.cached` is now also set as the SUBSET attribute when cache reads are non-zero. `gen_ai.usage.cache_read.input_tokens` is kept unchanged for Grafana/Tempo backward compatibility.
+- Same `gen_ai.usage.input_tokens` total fix applied to the `gitlab_review.completed` OTel log record, which now also carries `gen_ai.usage.input_tokens.cached`.
+
 ## [0.3.8] - 2026-05-21
 
 ### Fixed
