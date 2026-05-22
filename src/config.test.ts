@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseArgs,
+  parseModelProvider,
   resolveConfig,
   validateConfig,
   type Severity,
@@ -31,6 +32,8 @@ describe('config env defaults', () => {
       output: 'review-comments.json',
       dryRun: false,
       noPost: false,
+      baseUrl: '',
+      maxTokens: 0,
     });
   });
 
@@ -98,6 +101,8 @@ describe('validateConfig', () => {
     thinkingLevel: 'off',
     postingMode: 'direct',
     apiKey: 'key',
+    baseUrl: '',
+    maxTokens: 0,
     reviewFile: 'gitlab-review.md',
     output: 'review-comments.json',
     dryRun: false,
@@ -343,5 +348,150 @@ describe('summary posting configuration', () => {
     expect(resolveConfig([], { ...baseEnv, GITLAB_REVIEW_FORCE_REVIEW: 'true' }).forceReview).toBe(
       true,
     );
+  });
+});
+
+describe('parseModelProvider', () => {
+  it('extracts the provider from a simple provider/model string', () => {
+    expect(parseModelProvider('anthropic/claude-sonnet-4-5')).toBe('anthropic');
+  });
+
+  it('extracts the provider from a multi-slash model string', () => {
+    expect(parseModelProvider('openrouter/anthropic/claude-3-opus-20240229')).toBe('openrouter');
+  });
+
+  it('returns empty string when there is no slash', () => {
+    expect(parseModelProvider('just-a-model')).toBe('');
+  });
+
+  it('returns the first segment for ollama models', () => {
+    expect(parseModelProvider('ollama/qwen2.5-coder:32b')).toBe('ollama');
+  });
+});
+
+describe('Ollama provider support', () => {
+  const baseEnv = {
+    CI_PROJECT_ID: '1',
+    CI_MERGE_REQUEST_IID: '2',
+    CI_SERVER_URL: 'https://gl.example.com',
+    GITLAB_TOKEN: 't',
+  };
+
+  it('resolves apiKey as "ollama" placeholder when model is ollama and no key is set', () => {
+    const cfg = resolveConfig(['--model', 'ollama/qwen2.5-coder:32b'], baseEnv);
+    expect(cfg.apiKey).toBe('ollama');
+  });
+
+  it('resolves baseUrl from OLLAMA_HOST with /v1 appended', () => {
+    const cfg = resolveConfig(['--model', 'ollama/qwen2.5-coder:32b'], {
+      ...baseEnv,
+      OLLAMA_HOST: 'http://localhost:11434',
+    });
+    expect(cfg.baseUrl).toBe('http://localhost:11434/v1');
+  });
+
+  it('strips trailing slash from OLLAMA_HOST before appending /v1', () => {
+    const cfg = resolveConfig(['--model', 'ollama/llama3:8b'], {
+      ...baseEnv,
+      OLLAMA_HOST: 'http://ollama.internal/',
+    });
+    expect(cfg.baseUrl).toBe('http://ollama.internal/v1');
+  });
+
+  it('defaults OLLAMA_HOST to http://localhost:11434 when not set', () => {
+    const cfg = resolveConfig(['--model', 'ollama/llama3:8b'], baseEnv);
+    expect(cfg.baseUrl).toBe('http://localhost:11434/v1');
+  });
+
+  it('GITLAB_REVIEW_API_KEY overrides the ollama placeholder', () => {
+    const cfg = resolveConfig(['--model', 'ollama/llama3:8b'], {
+      ...baseEnv,
+      GITLAB_REVIEW_API_KEY: 'my-actual-key',
+    });
+    expect(cfg.apiKey).toBe('my-actual-key');
+  });
+
+  it('validateConfig does not require api-key for ollama model', () => {
+    const cfg = resolveConfig(['--model', 'ollama/llama3:8b'], baseEnv);
+    // Empty apiKey should not throw for ollama
+    expect(() => validateConfig({ ...cfg, apiKey: '' })).not.toThrow('--api-key');
+  });
+});
+
+describe('base URL and max tokens overrides', () => {
+  const baseEnv = {
+    CI_PROJECT_ID: '1',
+    CI_MERGE_REQUEST_IID: '2',
+    CI_SERVER_URL: 'https://gl.example.com',
+    GITLAB_TOKEN: 't',
+    GITLAB_REVIEW_API_KEY: 'k',
+  };
+
+  it('reads baseUrl from GITLAB_REVIEW_BASE_URL', () => {
+    const cfg = resolveConfig([], {
+      ...baseEnv,
+      GITLAB_REVIEW_BASE_URL: 'https://my-proxy.example.com/v1',
+    });
+    expect(cfg.baseUrl).toBe('https://my-proxy.example.com/v1');
+  });
+
+  it('reads baseUrl from --base-url flag', () => {
+    const cfg = resolveConfig(['--base-url', 'https://custom.example.com/v1'], baseEnv);
+    expect(cfg.baseUrl).toBe('https://custom.example.com/v1');
+  });
+
+  it('--base-url flag overrides GITLAB_REVIEW_BASE_URL', () => {
+    const cfg = resolveConfig(['--base-url', 'https://flag.example.com/v1'], {
+      ...baseEnv,
+      GITLAB_REVIEW_BASE_URL: 'https://env.example.com/v1',
+    });
+    expect(cfg.baseUrl).toBe('https://flag.example.com/v1');
+  });
+
+  it('reads maxTokens from GITLAB_REVIEW_MAX_TOKENS', () => {
+    const cfg = resolveConfig([], { ...baseEnv, GITLAB_REVIEW_MAX_TOKENS: '8192' });
+    expect(cfg.maxTokens).toBe(8192);
+  });
+
+  it('reads maxTokens from --max-tokens flag', () => {
+    const cfg = resolveConfig(['--max-tokens', '4096'], baseEnv);
+    expect(cfg.maxTokens).toBe(4096);
+  });
+
+  it('defaults maxTokens to 0 when not set', () => {
+    const cfg = resolveConfig([], baseEnv);
+    expect(cfg.maxTokens).toBe(0);
+  });
+
+  it('GITLAB_REVIEW_BASE_URL takes priority over OLLAMA_HOST', () => {
+    const cfg = resolveConfig(['--model', 'ollama/llama3:8b'], {
+      ...baseEnv,
+      OLLAMA_HOST: 'http://localhost:11434',
+      GITLAB_REVIEW_BASE_URL: 'http://override.example.com/v1',
+    });
+    expect(cfg.baseUrl).toBe('http://override.example.com/v1');
+  });
+});
+
+describe('multi-slash model IDs', () => {
+  const baseEnv = {
+    CI_PROJECT_ID: '1',
+    CI_MERGE_REQUEST_IID: '2',
+    CI_SERVER_URL: 'https://gl.example.com',
+    GITLAB_TOKEN: 't',
+    GITLAB_REVIEW_API_KEY: 'k',
+  };
+
+  it('preserves multi-slash model IDs like openrouter/anthropic/claude-3-opus', () => {
+    const cfg = resolveConfig(['--model', 'openrouter/anthropic/claude-3-opus-20240229'], baseEnv);
+    expect(cfg.model).toBe('openrouter/anthropic/claude-3-opus-20240229');
+  });
+
+  it('resolves GITLAB_REVIEW_MODEL with multi-slash ID', () => {
+    const cfg = resolveConfig([], {
+      ...baseEnv,
+      GITLAB_REVIEW_MODEL: 'openrouter/meta-llama/llama-3-8b-instruct',
+    });
+    expect(cfg.model).toBe('openrouter/meta-llama/llama-3-8b-instruct');
   });
 });

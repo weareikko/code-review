@@ -21,6 +21,8 @@ describe('runReview pipeline', () => {
     thinkingLevel: 'off',
     postingMode: 'direct',
     apiKey: 'key',
+    baseUrl: '',
+    maxTokens: 0,
     reviewFile: 'gitlab-review.md',
     output: 'review-comments.json',
     dryRun: false,
@@ -337,5 +339,164 @@ describe('runReview pipeline', () => {
         { cwd, diff: sampleDiff, createAgent: () => fakeAgent(messages) },
       ),
     ).resolves.toBeDefined();
+  });
+});
+
+describe('resolveModel (via runReview createAgent)', () => {
+  const sampleDiff = [
+    'diff --git a/src/a.ts b/src/a.ts',
+    '--- a/src/a.ts',
+    '+++ b/src/a.ts',
+    '@@ -1 +1 @@',
+    '-old',
+    '+new',
+    '',
+  ].join('\n');
+
+  function makeAssistant(text: string): AssistantMessage {
+    return {
+      role: 'assistant',
+      content: text ? [{ type: 'text', text }] : [],
+      api: 'anthropic-messages',
+      provider: 'anthropic',
+      model: 'test',
+      stopReason: 'stop',
+      timestamp: Date.now(),
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+    } as AssistantMessage;
+  }
+
+  function fakeAgentWithCapture(
+    captured: { model?: unknown },
+    text = 'ok',
+  ): (params: { model: unknown }) => AgentLike {
+    return (params) => {
+      captured.model = params.model;
+      const msg = makeAssistant(text);
+      let listener: ((event: AgentEvent) => void | Promise<void>) | undefined;
+      return {
+        subscribe(fn) {
+          listener = fn;
+          return () => {};
+        },
+        async prompt() {
+          if (!listener) return;
+          await listener({ type: 'message_end', message: msg });
+          await listener({ type: 'agent_end', messages: [msg] });
+        },
+      };
+    };
+  }
+
+  const base: Config = {
+    project: 'proj',
+    mr: '1',
+    gitlabUrl: 'https://gitlab.example.com',
+    gitlabToken: 'tok',
+    gitlabAuthHeader: 'PRIVATE-TOKEN',
+    model: 'ollama/llama3:8b',
+    minSeverity: 'info',
+    thinkingLevel: 'off',
+    postingMode: 'direct',
+    apiKey: 'ollama',
+    baseUrl: 'http://localhost:11434/v1',
+    maxTokens: 0,
+    reviewFile: 'gitlab-review.md',
+    output: 'review-comments.json',
+    dryRun: false,
+    noPost: false,
+    postSummary: false,
+    forceReview: false,
+    verbose: false,
+    cwd: '/tmp',
+    skills: [],
+  };
+
+  it('builds an openai-completions model for ollama provider', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const captured: { model?: unknown } = {};
+
+    await runReview(
+      { ...base, cwd },
+      { cwd, diff: sampleDiff, createAgent: fakeAgentWithCapture(captured) },
+    );
+
+    expect(captured.model).toMatchObject({
+      id: 'llama3:8b',
+      api: 'openai-completions',
+      provider: 'ollama',
+      baseUrl: 'http://localhost:11434/v1',
+      reasoning: false,
+    });
+  });
+
+  it('uses custom baseUrl for ollama model from config', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const captured: { model?: unknown } = {};
+
+    await runReview(
+      { ...base, cwd, baseUrl: 'http://ollama.internal:11434/v1' },
+      { cwd, diff: sampleDiff, createAgent: fakeAgentWithCapture(captured) },
+    );
+
+    expect((captured.model as { baseUrl?: string })?.baseUrl).toBe(
+      'http://ollama.internal:11434/v1',
+    );
+  });
+
+  it('applies maxTokens to the ollama model', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const captured: { model?: unknown } = {};
+
+    await runReview(
+      { ...base, cwd, maxTokens: 2048 },
+      { cwd, diff: sampleDiff, createAgent: fakeAgentWithCapture(captured) },
+    );
+
+    expect((captured.model as { maxTokens?: number })?.maxTokens).toBe(2048);
+  });
+
+  it('uses model id with slash for openrouter multi-slash models', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const captured: { model?: unknown } = {};
+
+    // openrouter/ai21/jamba-large-1.7 is a registered model in pi-ai
+    await runReview(
+      { ...base, cwd, model: 'openrouter/ai21/jamba-large-1.7', apiKey: 'or-key' },
+      { cwd, diff: sampleDiff, createAgent: fakeAgentWithCapture(captured) },
+    );
+
+    // The model ID passed to the agent should be the full multi-slash ID
+    expect((captured.model as { id?: string })?.id).toBe('ai21/jamba-large-1.7');
+    expect((captured.model as { provider?: string })?.provider).toBe('openrouter');
+  });
+
+  it('throws ReviewerError for an unknown model', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+
+    await expect(
+      runReview(
+        { ...base, cwd, model: 'anthropic/does-not-exist-9999' },
+        { cwd, diff: sampleDiff, createAgent: fakeAgentWithCapture({}) },
+      ),
+    ).rejects.toBeInstanceOf(ReviewerError);
+  });
+
+  it('throws ReviewerError when model string has no slash', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+
+    await expect(
+      runReview(
+        { ...base, cwd, model: 'noslash' },
+        { cwd, diff: sampleDiff, createAgent: fakeAgentWithCapture({}) },
+      ),
+    ).rejects.toBeInstanceOf(ReviewerError);
   });
 });

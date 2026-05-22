@@ -55,8 +55,19 @@ Options:
   --mr <iid>              Merge request IID (default: CI_MERGE_REQUEST_IID)
   --gitlab-url <url>      GitLab URL (default: CI_SERVER_URL or CI_SERVER_HOST)
   --gitlab-token <token>  GitLab token (default: GITLAB_TOKEN, GLAB_CLI_TOKEN, CI_JOB_TOKEN, GITLAB_PRIVATE_TOKEN)
-  --api-key <key>         AI API key (default: GITLAB_REVIEW_API_KEY, ANTHROPIC_API_KEY, CLAUDE_API_KEY)
-  --model <provider/id>   gitlab-review model (default: anthropic/claude-sonnet-4-5)
+  --api-key <key>         AI API key. Optional when the provider has ambient credentials
+                          or runs locally (e.g. Ollama). Resolved from GITLAB_REVIEW_API_KEY,
+                          ANTHROPIC_API_KEY, CLAUDE_API_KEY, or the provider-specific env var
+                          (e.g. OPENROUTER_API_KEY, GEMINI_API_KEY).
+  --model <provider/id>   Model to use. Format: provider/modelId. Multi-slash IDs such as
+                          openrouter/anthropic/claude-3-opus are supported by splitting on the
+                          first slash. Use ollama/<model> for local Ollama models.
+                          (default: anthropic/claude-sonnet-4-5, env: GITLAB_REVIEW_MODEL)
+  --base-url <url>        Override the provider base URL (e.g. a custom OpenAI-compatible
+                          endpoint). For Ollama, set OLLAMA_HOST instead.
+                          (env: GITLAB_REVIEW_BASE_URL)
+  --max-tokens <n>        Override maximum output tokens for the model. 0 = model default.
+                          (env: GITLAB_REVIEW_MAX_TOKENS)
   --min-severity <level>  info, warn, or critical (default: info)
   --thinking <level>      off, minimal, low, medium, high, or xhigh (default: off).
                           Higher levels add billable thinking tokens at the model output rate.

@@ -356,21 +356,76 @@ export function extractLastAssistantText(messages: AssistantMessage[]): string {
   return '';
 }
 
-function resolveModel(modelString: string): Model<string> {
-  const [provider, modelId] = modelString.split('/');
-  if (!provider || !modelId) {
+/**
+ * Build a Model object for an Ollama-hosted model.
+ *
+ * Ollama exposes an OpenAI-compatible `/v1` endpoint, so we use the
+ * `openai-completions` API adapter. The `baseUrl` is taken from the
+ * already-resolved config (derived from `OLLAMA_HOST` or `GITLAB_REVIEW_BASE_URL`).
+ * Cost is zero — Ollama runs locally.
+ */
+function buildOllamaModel(
+  modelId: string,
+  baseUrl: string,
+  maxTokens: number,
+): Model<'openai-completions'> {
+  const effectiveMaxTokens = maxTokens > 0 ? maxTokens : 4096;
+  return {
+    id: modelId,
+    name: modelId,
+    api: 'openai-completions' as const,
+    provider: 'ollama',
+    baseUrl,
+    reasoning: false,
+    input: ['text' as const],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: effectiveMaxTokens * 4,
+    maxTokens: effectiveMaxTokens,
+  };
+}
+
+/**
+ * Resolve a model string into a pi-ai `Model` object.
+ *
+ * The model string must be `"provider/modelId"` where `modelId` may itself
+ * contain slashes for providers like OpenRouter (`openrouter/anthropic/claude-3-opus`).
+ * Splitting is always done on the **first** slash only.
+ *
+ * Special providers:
+ * - `ollama`: builds a local OpenAI-compatible model with the given `baseUrl`.
+ *
+ * @param modelString - Full model string, e.g. `"anthropic/claude-sonnet-4-5"`.
+ * @param baseUrl     - Custom base URL override (used for Ollama or generic endpoints).
+ * @param maxTokens   - Max output tokens; 0 means use the model's default.
+ */
+function resolveModel(modelString: string, baseUrl: string, maxTokens: number): Model<string> {
+  const idx = modelString.indexOf('/');
+  if (idx < 0) {
     throw new ReviewerError(
       `Invalid model format "${modelString}". Expected "provider/modelId" (e.g. "anthropic/claude-sonnet-4-5").`,
     );
   }
-  try {
-    return getModel(provider as KnownProvider, modelId as never) as Model<string>;
-  } catch (error) {
+  const provider = modelString.slice(0, idx);
+  const modelId = modelString.slice(idx + 1);
+
+  // Built-in Ollama support via the OpenAI-compatible API.
+  if (provider === 'ollama') {
+    const effectiveBase = baseUrl || 'http://localhost:11434/v1';
+    return buildOllamaModel(modelId, effectiveBase, maxTokens);
+  }
+
+  const model = getModel(provider as KnownProvider, modelId as never) as Model<string> | undefined;
+  if (!model) {
     throw new ReviewerError(`Unknown model "${modelString}".`, {
-      cause: error,
-      hint: error instanceof Error ? error.message : undefined,
+      hint: `Check that "${provider}" is a valid provider and "${modelId}" is a registered model ID.`,
     });
   }
+
+  // Apply a custom base URL override when provided (generic OpenAI-compatible endpoint).
+  if (baseUrl) {
+    return { ...model, baseUrl };
+  }
+  return model;
 }
 
 interface AggregatedUsage {
@@ -429,7 +484,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     logger.debug(`Review rules: ${context.reviewRules.map((f) => f.path).join(', ')}`);
   }
 
-  const model = resolveModel(config.model);
+  const model = resolveModel(config.model, config.baseUrl ?? '', config.maxTokens ?? 0);
   const tools = createReadOnlyTools(cwd) as AgentTool[];
 
   const createAgent = options.createAgent ?? defaultCreateAgent;

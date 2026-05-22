@@ -31,7 +31,14 @@ type EvalOutput = {
 };
 
 function makeConfig(overrides: Partial<Config>): Config {
-  const apiKey = process.env.ANTHROPIC_API_KEY ?? process.env.GITLAB_REVIEW_API_KEY ?? '';
+  // Use the explicit override first, then fall back to ANTHROPIC_API_KEY for
+  // backward compat, then GITLAB_REVIEW_API_KEY. For other providers (e.g.
+  // openrouter), set GITLAB_REVIEW_API_KEY or the provider-specific env var.
+  const apiKey =
+    process.env.GITLAB_REVIEW_API_KEY ||
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.CLAUDE_API_KEY ||
+    '';
   return {
     project: 'test',
     mr: '1',
@@ -43,6 +50,8 @@ function makeConfig(overrides: Partial<Config>): Config {
     thinkingLevel: 'off',
     postingMode: 'direct',
     apiKey,
+    baseUrl: process.env.GITLAB_REVIEW_BASE_URL ?? '',
+    maxTokens: Number(process.env.GITLAB_REVIEW_MAX_TOKENS ?? 0),
     reviewFile: 'gitlab-review.md',
     output: 'review-comments.json',
     dryRun: true,
@@ -166,9 +175,14 @@ const NoSevereFindingsJudge = createJudge(
   },
 );
 
-// Use || (not ??) so an empty-string ANTHROPIC_API_KEY falls through to GITLAB_REVIEW_API_KEY.
+// Skip evals when no API key is available. Uses || (not ??) so an empty-string
+// env var correctly falls through to the next candidate.
 const missingApiKey = () => {
-  return !(process.env.ANTHROPIC_API_KEY || process.env.GITLAB_REVIEW_API_KEY);
+  return !(
+    process.env.GITLAB_REVIEW_API_KEY ||
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.CLAUDE_API_KEY
+  );
 };
 
 describeEval(

@@ -1,3 +1,4 @@
+import { getEnvApiKey } from '@earendil-works/pi-ai';
 import { ConfigError } from './errors.js';
 import { POSTING_MODES, type PostingMode } from './posting.js';
 import { THINKING_LEVELS, type Severity, type ThinkingLevel } from './types.js';
@@ -15,6 +16,10 @@ export interface Config {
   thinkingLevel: ThinkingLevel;
   postingMode: PostingMode;
   apiKey: string;
+  /** Custom base URL for the AI provider API (e.g. Ollama or other OpenAI-compatible endpoints). */
+  baseUrl: string;
+  /** Maximum output tokens to request from the model. 0 uses the model's default. */
+  maxTokens: number;
   reviewFile: string;
   output: string;
   dryRun: boolean;
@@ -123,6 +128,42 @@ function resolvePostingMode(value: unknown): string {
     .toLowerCase();
 }
 
+/**
+ * Extract the provider name from a `"provider/modelId"` model string.
+ * Returns an empty string when the model string contains no slash.
+ */
+export function parseModelProvider(model: string): string {
+  const idx = model.indexOf('/');
+  return idx >= 0 ? model.slice(0, idx) : '';
+}
+
+/**
+ * Resolve the base URL for the Ollama provider from the `OLLAMA_HOST` env var.
+ * Returns `undefined` for non-Ollama models.
+ *
+ * The Ollama OpenAI-compatible endpoint lives at `<host>/v1`.
+ */
+function resolveOllamaBaseUrl(model: string, env: NodeJS.ProcessEnv): string | undefined {
+  if (parseModelProvider(model) !== 'ollama') return undefined;
+  const host = env.OLLAMA_HOST ?? 'http://localhost:11434';
+  return `${host.replace(/\/$/, '')}/v1`;
+}
+
+/**
+ * Resolve an API key for the given provider using `@earendil-works/pi-ai`'s
+ * env helper. Ollama does not require a key so a placeholder is returned.
+ *
+ * NOTE: this function reads `process.env` directly via the pi-ai helper and
+ * is intentionally not testable via a passed-in env object.
+ */
+function resolveProviderApiKey(model: string): string {
+  const provider = parseModelProvider(model);
+  if (!provider) return '';
+  // Ollama is a local endpoint — no real key needed.
+  if (provider === 'ollama') return 'ollama';
+  return getEnvApiKey(provider) ?? '';
+}
+
 function resolveSkills(args: ParsedArgs, env: NodeJS.ProcessEnv): string[] {
   const argSkill = args.skill;
   if (Array.isArray(argSkill) && argSkill.length > 0) return argSkill;
@@ -161,13 +202,42 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
   ).replace(/\/$/, '');
   const token = resolveGitLabToken(args, env);
 
+  const model = String(args.model ?? env.GITLAB_REVIEW_MODEL ?? 'anthropic/claude-sonnet-4-5');
+
+  // API key resolution priority:
+  //   1. --api-key flag (universal override)
+  //   2. GITLAB_REVIEW_API_KEY (universal env override)
+  //   3. ANTHROPIC_API_KEY / CLAUDE_API_KEY (legacy Anthropic fallbacks)
+  //   4. Provider-specific env key via pi-ai (e.g. OPENROUTER_API_KEY, GEMINI_API_KEY)
+  //      → for Ollama, a placeholder is used (no real key required)
+  const apiKey = String(
+    args.apiKey ??
+      first(
+        env.GITLAB_REVIEW_API_KEY,
+        env.ANTHROPIC_API_KEY,
+        env.CLAUDE_API_KEY,
+        resolveProviderApiKey(model),
+      ) ??
+      '',
+  );
+
+  // Base URL resolution priority:
+  //   1. --base-url flag
+  //   2. GITLAB_REVIEW_BASE_URL (universal override for any OpenAI-compatible endpoint)
+  //   3. OLLAMA_HOST (automatic for ollama provider)
+  const baseUrl = String(
+    args.baseUrl ?? first(env.GITLAB_REVIEW_BASE_URL, resolveOllamaBaseUrl(model, env)) ?? '',
+  );
+
+  const maxTokens = Number(args.maxTokens ?? env.GITLAB_REVIEW_MAX_TOKENS ?? 0);
+
   return {
     project: String(args.project ?? env.CI_PROJECT_ID ?? ''),
     mr: String(args.mr ?? env.CI_MERGE_REQUEST_IID ?? ''),
     gitlabUrl,
     gitlabToken: token.token,
     gitlabAuthHeader: token.header,
-    model: String(args.model ?? env.GITLAB_REVIEW_MODEL ?? 'anthropic/claude-sonnet-4-5'),
+    model,
     minSeverity: resolveMinSeverity(
       args.minSeverity ?? env.GITLAB_REVIEW_MIN_SEVERITY ?? 'info',
     ) as Severity,
@@ -177,11 +247,9 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     postingMode: resolvePostingMode(
       args.postingMode ?? env.GITLAB_REVIEW_POSTING_MODE ?? 'direct',
     ) as PostingMode,
-    apiKey: String(
-      args.apiKey ??
-        first(env.GITLAB_REVIEW_API_KEY, env.ANTHROPIC_API_KEY, env.CLAUDE_API_KEY) ??
-        '',
-    ),
+    apiKey,
+    baseUrl,
+    maxTokens,
     reviewFile: String(args.reviewFile ?? 'gitlab-review.md'),
     output: String(args.output ?? 'review-comments.json'),
     dryRun: toBoolean(args.dryRun),
@@ -195,12 +263,20 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
 }
 
 export function validateConfig(config: Config): void {
+  // `api-key` is optional for providers that supply ambient credentials (e.g.
+  // AWS Bedrock, Google Vertex) or that don't need a key at all (Ollama).
+  // `resolveConfig` populates `apiKey` with a placeholder for these cases, so
+  // the falsy check below already skips them — but we also skip when the
+  // provider is `ollama` even if someone passes an empty string explicitly.
+  const provider = parseModelProvider(config.model);
+  const requiresApiKey = provider !== 'ollama';
+
   const missing = [
     ['project', config.project],
     ['mr', config.mr],
     ['gitlab-url', config.gitlabUrl],
     ['gitlab-token', config.gitlabToken],
-    ['api-key', config.apiKey],
+    ...(requiresApiKey ? [['api-key', config.apiKey]] : []),
   ]
     .filter(([, value]) => !value)
     .map(([name]) => `--${name}`);
