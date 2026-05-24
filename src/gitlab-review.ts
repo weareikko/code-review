@@ -247,8 +247,7 @@ function buildSkillSection(skill: Skill): string {
   const lines = [
     `<skill name="${skill.name}">`,
     `<description>${skill.description}</description>`,
-    '',
-    skill.body,
+    `<skill_file>${skill.filePath}</skill_file>`,
   ];
   if (skill.resourceDirs.length > 0) {
     const dirList = skill.resourceDirs.map((d) => `${d}/`).join(', ');
@@ -319,8 +318,10 @@ export function buildJSONSystemPrompt(
   const reviewRules = mergeContent(context.reviewRules).trim();
   if (reviewRules) sections.push(`<review_rules>\n${reviewRules}\n</review_rules>`);
   if (context.skills.length > 0) {
+    const preamble =
+      'Read each skill file before applying it. Skills contain additional review guidelines specific to this project.';
     const skillSections = context.skills.map(buildSkillSection).join('\n\n');
-    sections.push(`<skills>\n${skillSections}\n</skills>`);
+    sections.push(`<skills>\n${preamble}\n\n${skillSections}\n</skills>`);
   }
   return sections.join('\n\n');
 }
