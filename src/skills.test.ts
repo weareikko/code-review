@@ -260,7 +260,7 @@ describe('loadNamedSkill', () => {
       expect(skill.source).toBe('file');
       expect(skill.name).toBe('my-local-skill');
       expect(skill.description).toBe('A local test skill');
-      expect(skill.body).toBe('Do the thing.');
+      expect(skill.filePath).toBe(join(skillDir, 'SKILL.md'));
     });
 
     it('loads a skill from an absolute file: path', async () => {
@@ -305,7 +305,7 @@ describe('loadNamedSkill', () => {
       const skill = await loadNamedSkill('npm:my-npm-skill', cwd);
       expect(skill.source).toBe('npm');
       expect(skill.name).toBe('npm-skill');
-      expect(skill.body).toBe('Review npm packages.');
+      expect(skill.filePath).toBe(join(pkgDir, 'SKILL.md'));
     });
 
     it('loads a scoped npm package', async () => {

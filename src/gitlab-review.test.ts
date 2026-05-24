@@ -6,8 +6,9 @@ import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { describe, expect, it, vi } from 'vitest';
 import type { Config } from './config.js';
 import { ReviewerError } from './errors.js';
-import { filterDiff, runReview, type AgentLike } from './gitlab-review.js';
+import { buildJSONSystemPrompt, filterDiff, runReview, type AgentLike } from './gitlab-review.js';
 import { noopLogger, type Logger } from './logger.js';
+import type { Skill } from './skills.js';
 
 describe('runReview pipeline', () => {
   const minimalConfig: Config = {
@@ -548,5 +549,109 @@ describe('resolveModel (via runReview createAgent)', () => {
     );
 
     expect((captured.model as { contextWindow?: number })?.contextWindow).toBe(131072);
+  });
+});
+
+function makeTestSkill(overrides: Partial<Skill> = {}): Skill {
+  return {
+    name: 'security',
+    description: 'Security review guidelines',
+    filePath: '/path/to/skills/security/SKILL.md',
+    rootDir: '/path/to/skills/security',
+    resourceDirs: [],
+    source: 'npm',
+    ...overrides,
+  };
+}
+
+describe('buildJSONSystemPrompt — skill section', () => {
+  it('emits <skill_file> path reference instead of inline body', () => {
+    const context = {
+      conventions: [],
+      reviewRules: [],
+      skills: [makeTestSkill()],
+    };
+
+    const prompt = buildJSONSystemPrompt(context, 'INFO');
+
+    expect(prompt).toContain('<skill_file>/path/to/skills/security/SKILL.md</skill_file>');
+  });
+
+  it('does not embed skill body content inline', () => {
+    const context = {
+      conventions: [],
+      reviewRules: [],
+      skills: [makeTestSkill({ filePath: '/some/SKILL.md' })],
+    };
+
+    const prompt = buildJSONSystemPrompt(context, 'INFO');
+
+    // The prompt should not contain any stale body text
+    expect(prompt).not.toContain('## How to review');
+  });
+
+  it('includes read-skills preamble in the <skills> block', () => {
+    const context = {
+      conventions: [],
+      reviewRules: [],
+      skills: [makeTestSkill()],
+    };
+
+    const prompt = buildJSONSystemPrompt(context, 'INFO');
+
+    expect(prompt).toContain('Read each skill file before applying it.');
+    expect(prompt).toContain('<skills>');
+  });
+
+  it('includes skill name and description', () => {
+    const context = {
+      conventions: [],
+      reviewRules: [],
+      skills: [makeTestSkill({ name: 'accessibility', description: 'A11y review rules' })],
+    };
+
+    const prompt = buildJSONSystemPrompt(context, 'INFO');
+
+    expect(prompt).toContain('<skill name="accessibility">');
+    expect(prompt).toContain('<description>A11y review rules</description>');
+  });
+
+  it('includes <skill_resources> block when resourceDirs are present', () => {
+    const context = {
+      conventions: [],
+      reviewRules: [],
+      skills: [makeTestSkill({ resourceDirs: ['references'] })],
+    };
+
+    const prompt = buildJSONSystemPrompt(context, 'INFO');
+
+    expect(prompt).toContain('<skill_resources>');
+    expect(prompt).toContain('references/');
+  });
+
+  it('emits no <skills> block when skills list is empty', () => {
+    const context = { conventions: [], reviewRules: [], skills: [] };
+
+    const prompt = buildJSONSystemPrompt(context, 'INFO');
+
+    expect(prompt).not.toContain('<skills>');
+  });
+
+  it('renders multiple skills separated by blank lines', () => {
+    const context = {
+      conventions: [],
+      reviewRules: [],
+      skills: [
+        makeTestSkill({ name: 'security', filePath: '/skills/security/SKILL.md' }),
+        makeTestSkill({ name: 'accessibility', filePath: '/skills/a11y/SKILL.md' }),
+      ],
+    };
+
+    const prompt = buildJSONSystemPrompt(context, 'INFO');
+
+    expect(prompt).toContain('<skill name="security">');
+    expect(prompt).toContain('<skill_file>/skills/security/SKILL.md</skill_file>');
+    expect(prompt).toContain('<skill name="accessibility">');
+    expect(prompt).toContain('<skill_file>/skills/a11y/SKILL.md</skill_file>');
   });
 });
