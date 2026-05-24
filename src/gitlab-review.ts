@@ -12,7 +12,7 @@ import { ReviewerError } from './errors.js';
 import type { Logger } from './logger.js';
 import { noopLogger } from './logger.js';
 import type { Skill } from './skills.js';
-import { loadAutoDiscoveredSkills, loadBuiltinSkill } from './skills.js';
+import { loadAutoDiscoveredSkills, loadNamedSkill } from './skills.js';
 import type { GitLabReviewSeverity, ThinkingLevel } from './types.js';
 import { toGitLabReviewSeverity } from './types.js';
 
@@ -186,12 +186,10 @@ export async function loadReviewContext(
 
   const skills = [...discovered];
   const discoveredNames = new Set(discovered.map((s) => s.name));
-  const builtins = await Promise.all(
-    skillNames.filter((n) => !discoveredNames.has(n)).map((n) => loadBuiltinSkill(n)),
+  const named = await Promise.all(
+    skillNames.filter((n) => !discoveredNames.has(n)).map((n) => loadNamedSkill(n, cwd)),
   );
-  for (const skill of builtins) {
-    if (skill) skills.push(skill);
-  }
+  skills.push(...named);
 
   return { conventions, reviewRules, skills };
 }

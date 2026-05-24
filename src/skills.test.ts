@@ -1,0 +1,416 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { ConfigError } from './errors.js';
+import { loadNamedSkill, loadSkillFromDir, parseSkillSpec, resolveNpmSkillDir } from './skills.js';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+let _tmpSeq = 0;
+async function makeTmp(prefix = 'skills-test-'): Promise<string> {
+  const dir = join(tmpdir(), `${prefix}${process.pid}-${++_tmpSeq}`);
+  await mkdir(dir, { recursive: true });
+  return dir;
+}
+
+async function writeSkillMd(
+  dir: string,
+  name: string,
+  description: string,
+  body = '',
+): Promise<void> {
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    join(dir, 'SKILL.md'),
+    `---\nname: ${name}\ndescription: ${description}\n---\n${body}`,
+    'utf8',
+  );
+}
+
+// ---------------------------------------------------------------------------
+// parseSkillSpec
+// ---------------------------------------------------------------------------
+
+describe('parseSkillSpec', () => {
+  describe('builtin (bare name)', () => {
+    it('returns builtin protocol for a bare name', () => {
+      expect(parseSkillSpec('code-review')).toEqual({ protocol: 'builtin', name: 'code-review' });
+    });
+
+    it('returns builtin for a name without any prefix', () => {
+      expect(parseSkillSpec('my-skill')).toEqual({ protocol: 'builtin', name: 'my-skill' });
+    });
+
+    it('returns builtin for a name with only alphanumerics and hyphens', () => {
+      expect(parseSkillSpec('security123')).toEqual({ protocol: 'builtin', name: 'security123' });
+    });
+  });
+
+  describe('npm: protocol', () => {
+    it('parses an unscoped package without subpath', () => {
+      expect(parseSkillSpec('npm:my-skill')).toEqual({
+        protocol: 'npm',
+        packageName: 'my-skill',
+        subpath: '',
+      });
+    });
+
+    it('parses an unscoped package with a subpath', () => {
+      expect(parseSkillSpec('npm:skills-bundle/security')).toEqual({
+        protocol: 'npm',
+        packageName: 'skills-bundle',
+        subpath: 'security',
+      });
+    });
+
+    it('parses an unscoped package with a multi-segment subpath', () => {
+      expect(parseSkillSpec('npm:bundle/a/b')).toEqual({
+        protocol: 'npm',
+        packageName: 'bundle',
+        subpath: 'a/b',
+      });
+    });
+
+    it('parses a scoped package without subpath', () => {
+      expect(parseSkillSpec('npm:@company/security-skill')).toEqual({
+        protocol: 'npm',
+        packageName: '@company/security-skill',
+        subpath: '',
+      });
+    });
+
+    it('parses a scoped package with a single subpath segment', () => {
+      expect(parseSkillSpec('npm:@company/skills-bundle/security')).toEqual({
+        protocol: 'npm',
+        packageName: '@company/skills-bundle',
+        subpath: 'security',
+      });
+    });
+
+    it('parses a scoped package with a multi-segment subpath', () => {
+      expect(parseSkillSpec('npm:@company/skills-bundle/a/b')).toEqual({
+        protocol: 'npm',
+        packageName: '@company/skills-bundle',
+        subpath: 'a/b',
+      });
+    });
+
+    it('handles a malformed scoped spec missing the package name', () => {
+      // @scope alone (no slash) → treated as packageName = '@scope', subpath = ''
+      expect(parseSkillSpec('npm:@scope')).toEqual({
+        protocol: 'npm',
+        packageName: '@scope',
+        subpath: '',
+      });
+    });
+  });
+
+  describe('file: protocol', () => {
+    it('parses a relative path', () => {
+      expect(parseSkillSpec('file:./path/to/skill')).toEqual({
+        protocol: 'file',
+        path: './path/to/skill',
+      });
+    });
+
+    it('parses an absolute path', () => {
+      expect(parseSkillSpec('file:/absolute/path/to/skill')).toEqual({
+        protocol: 'file',
+        path: '/absolute/path/to/skill',
+      });
+    });
+
+    it('preserves the path exactly as-is', () => {
+      expect(parseSkillSpec('file:../../sibling-skill')).toEqual({
+        protocol: 'file',
+        path: '../../sibling-skill',
+      });
+    });
+  });
+
+  describe('git: protocol (Phase 2 placeholder)', () => {
+    it('parses a git: HTTPS URL', () => {
+      const spec = 'git:https://github.com/org/skill.git';
+      expect(parseSkillSpec(spec)).toEqual({ protocol: 'git', url: spec, ref: '', subpath: '' });
+    });
+
+    it('parses a git+ssh: URL', () => {
+      const spec = 'git+ssh://git@gitlab.com/org/skill.git';
+      expect(parseSkillSpec(spec)).toEqual({ protocol: 'git', url: spec, ref: '', subpath: '' });
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveNpmSkillDir
+// ---------------------------------------------------------------------------
+
+describe('resolveNpmSkillDir', () => {
+  it('resolves a package directly in cwd/node_modules', async () => {
+    const root = await makeTmp();
+    const pkgDir = join(root, 'node_modules', 'my-skill');
+    await mkdir(pkgDir, { recursive: true });
+
+    const result = await resolveNpmSkillDir('my-skill', '', root);
+    expect(result).toBe(pkgDir);
+  });
+
+  it('resolves a scoped package in node_modules', async () => {
+    const root = await makeTmp();
+    const pkgDir = join(root, 'node_modules', '@company', 'security-skill');
+    await mkdir(pkgDir, { recursive: true });
+
+    const result = await resolveNpmSkillDir('@company/security-skill', '', root);
+    expect(result).toBe(pkgDir);
+  });
+
+  it('resolves a package with a subpath', async () => {
+    const root = await makeTmp();
+    const subDir = join(root, 'node_modules', '@company', 'bundle', 'security');
+    await mkdir(subDir, { recursive: true });
+
+    const result = await resolveNpmSkillDir('@company/bundle', 'security', root);
+    expect(result).toBe(subDir);
+  });
+
+  it('returns null when the package is not found', async () => {
+    const root = await makeTmp();
+
+    const result = await resolveNpmSkillDir('nonexistent-pkg', '', root);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when the subpath does not exist in the package', async () => {
+    const root = await makeTmp();
+    const pkgDir = join(root, 'node_modules', 'my-bundle');
+    await mkdir(pkgDir, { recursive: true });
+
+    const result = await resolveNpmSkillDir('my-bundle', 'missing-subpath', root);
+    expect(result).toBeNull();
+  });
+
+  it('walks up from a nested cwd (monorepo hoisting)', async () => {
+    const root = await makeTmp();
+    // Package installed at the monorepo root's node_modules
+    const pkgDir = join(root, 'node_modules', 'shared-skill');
+    await mkdir(pkgDir, { recursive: true });
+    // cwd is a nested project inside the monorepo
+    const nestedCwd = join(root, 'packages', 'web');
+    await mkdir(nestedCwd, { recursive: true });
+
+    const result = await resolveNpmSkillDir('shared-skill', '', nestedCwd);
+    expect(result).toBe(pkgDir);
+  });
+
+  it('prefers a closer node_modules when the same package exists at multiple levels', async () => {
+    const root = await makeTmp();
+    const nestedCwd = join(root, 'packages', 'web');
+    await mkdir(nestedCwd, { recursive: true });
+
+    // Closer copy at nestedCwd
+    const closerPkg = join(nestedCwd, 'node_modules', 'my-skill');
+    await mkdir(closerPkg, { recursive: true });
+    // Farther copy at root
+    const fartherPkg = join(root, 'node_modules', 'my-skill');
+    await mkdir(fartherPkg, { recursive: true });
+
+    const result = await resolveNpmSkillDir('my-skill', '', nestedCwd);
+    expect(result).toBe(closerPkg);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadNamedSkill — integration tests with fixture directories
+// ---------------------------------------------------------------------------
+
+describe('loadNamedSkill', () => {
+  describe('builtin protocol', () => {
+    it('loads the built-in code-review skill', async () => {
+      const cwd = await makeTmp();
+      const skill = await loadNamedSkill('code-review', cwd);
+      expect(skill.source).toBe('builtin');
+      expect(skill.name).toBe('code-review');
+      expect(skill.description).toBeTruthy();
+    });
+
+    it('throws ConfigError for a non-existent builtin name', async () => {
+      const cwd = await makeTmp();
+      await expect(loadNamedSkill('no-such-skill', cwd)).rejects.toBeInstanceOf(ConfigError);
+    });
+
+    it('error message includes the spec and a hint', async () => {
+      const cwd = await makeTmp();
+      const err = await loadNamedSkill('no-such-skill', cwd).catch((e) => e);
+      expect(err).toBeInstanceOf(ConfigError);
+      expect(err.message).toContain('no-such-skill');
+      expect(err.hint).toBeTruthy();
+    });
+  });
+
+  describe('file: protocol', () => {
+    it('loads a skill from a relative file: path', async () => {
+      const cwd = await makeTmp();
+      const skillDir = join(cwd, 'my-skill');
+      await writeSkillMd(skillDir, 'my-local-skill', 'A local test skill', 'Do the thing.');
+
+      const skill = await loadNamedSkill('file:./my-skill', cwd);
+      expect(skill.source).toBe('file');
+      expect(skill.name).toBe('my-local-skill');
+      expect(skill.description).toBe('A local test skill');
+      expect(skill.body).toBe('Do the thing.');
+    });
+
+    it('loads a skill from an absolute file: path', async () => {
+      const cwd = await makeTmp();
+      const skillDir = join(cwd, 'abs-skill');
+      await writeSkillMd(skillDir, 'abs-skill', 'Absolute path skill');
+
+      const skill = await loadNamedSkill(`file:${skillDir}`, cwd);
+      expect(skill.source).toBe('file');
+      expect(skill.name).toBe('abs-skill');
+    });
+
+    it('throws ConfigError when file: path has no SKILL.md', async () => {
+      const cwd = await makeTmp();
+      const emptyDir = join(cwd, 'empty-dir');
+      await mkdir(emptyDir, { recursive: true });
+
+      await expect(loadNamedSkill('file:./empty-dir', cwd)).rejects.toBeInstanceOf(ConfigError);
+    });
+
+    it('throws ConfigError when file: path does not exist', async () => {
+      const cwd = await makeTmp();
+      await expect(loadNamedSkill('file:./does-not-exist', cwd)).rejects.toBeInstanceOf(
+        ConfigError,
+      );
+    });
+
+    it('error message includes the spec and a hint for missing path', async () => {
+      const cwd = await makeTmp();
+      const err = await loadNamedSkill('file:./missing', cwd).catch((e) => e);
+      expect(err.message).toContain('file:./missing');
+      expect(err.hint).toBeTruthy();
+    });
+  });
+
+  describe('npm: protocol', () => {
+    it('loads a single-skill npm package', async () => {
+      const cwd = await makeTmp();
+      const pkgDir = join(cwd, 'node_modules', 'my-npm-skill');
+      await writeSkillMd(pkgDir, 'npm-skill', 'An npm skill', 'Review npm packages.');
+
+      const skill = await loadNamedSkill('npm:my-npm-skill', cwd);
+      expect(skill.source).toBe('npm');
+      expect(skill.name).toBe('npm-skill');
+      expect(skill.body).toBe('Review npm packages.');
+    });
+
+    it('loads a scoped npm package', async () => {
+      const cwd = await makeTmp();
+      const pkgDir = join(cwd, 'node_modules', '@company', 'security-skill');
+      await writeSkillMd(pkgDir, 'security', 'Company security skill');
+
+      const skill = await loadNamedSkill('npm:@company/security-skill', cwd);
+      expect(skill.source).toBe('npm');
+      expect(skill.name).toBe('security');
+    });
+
+    it('loads a skill from an npm bundle subpath', async () => {
+      const cwd = await makeTmp();
+      const subDir = join(cwd, 'node_modules', '@company', 'skills-bundle', 'security');
+      await writeSkillMd(subDir, 'bundle-security', 'Bundle security sub-skill');
+
+      const skill = await loadNamedSkill('npm:@company/skills-bundle/security', cwd);
+      expect(skill.source).toBe('npm');
+      expect(skill.name).toBe('bundle-security');
+    });
+
+    it('resolves hoisted npm package from a nested cwd', async () => {
+      const root = await makeTmp();
+      const pkgDir = join(root, 'node_modules', 'shared-skill');
+      await writeSkillMd(pkgDir, 'shared', 'A hoisted skill');
+      const nestedCwd = join(root, 'packages', 'web');
+      await mkdir(nestedCwd, { recursive: true });
+
+      const skill = await loadNamedSkill('npm:shared-skill', nestedCwd);
+      expect(skill.source).toBe('npm');
+      expect(skill.name).toBe('shared');
+    });
+
+    it('throws ConfigError when npm package is not installed', async () => {
+      const cwd = await makeTmp();
+      await expect(loadNamedSkill('npm:not-installed', cwd)).rejects.toBeInstanceOf(ConfigError);
+    });
+
+    it('throws ConfigError when npm package has no valid SKILL.md', async () => {
+      const cwd = await makeTmp();
+      const pkgDir = join(cwd, 'node_modules', 'no-skill-pkg');
+      await mkdir(pkgDir, { recursive: true });
+      // No SKILL.md written
+
+      await expect(loadNamedSkill('npm:no-skill-pkg', cwd)).rejects.toBeInstanceOf(ConfigError);
+    });
+
+    it('throws ConfigError when npm subpath is not found', async () => {
+      const cwd = await makeTmp();
+      const pkgDir = join(cwd, 'node_modules', '@company', 'bundle');
+      await mkdir(pkgDir, { recursive: true });
+
+      await expect(loadNamedSkill('npm:@company/bundle/missing-sub', cwd)).rejects.toBeInstanceOf(
+        ConfigError,
+      );
+    });
+
+    it('error message includes the spec for an uninstalled package', async () => {
+      const cwd = await makeTmp();
+      const err = await loadNamedSkill('npm:@org/missing', cwd).catch((e) => e);
+      expect(err.message).toContain('npm:@org/missing');
+      expect(err.hint).toBeTruthy();
+    });
+  });
+
+  describe('git: protocol (Phase 2 — unsupported)', () => {
+    it('throws ConfigError for git: specs', async () => {
+      const cwd = await makeTmp();
+      await expect(
+        loadNamedSkill('git:https://github.com/org/skill.git', cwd),
+      ).rejects.toBeInstanceOf(ConfigError);
+    });
+
+    it('throws ConfigError for git+ssh: specs', async () => {
+      const cwd = await makeTmp();
+      await expect(
+        loadNamedSkill('git+ssh://git@gitlab.com/org/skill.git', cwd),
+      ).rejects.toBeInstanceOf(ConfigError);
+    });
+
+    it('error hint mentions npm: as an alternative', async () => {
+      const cwd = await makeTmp();
+      const err = await loadNamedSkill('git:https://github.com/org/skill.git', cwd).catch((e) => e);
+      expect(err.hint).toMatch(/npm:/);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadSkillFromDir — source field propagation
+// ---------------------------------------------------------------------------
+
+describe('loadSkillFromDir source field', () => {
+  it('assigns source = "npm" when requested', async () => {
+    const dir = await makeTmp();
+    await writeSkillMd(dir, 'test-skill', 'Test');
+    const skill = await loadSkillFromDir(dir, 'npm');
+    expect(skill?.source).toBe('npm');
+  });
+
+  it('assigns source = "file" when requested', async () => {
+    const dir = await makeTmp();
+    await writeSkillMd(dir, 'test-skill', 'Test');
+    const skill = await loadSkillFromDir(dir, 'file');
+    expect(skill?.source).toBe('file');
+  });
+});
