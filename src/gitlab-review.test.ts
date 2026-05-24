@@ -499,4 +499,54 @@ describe('resolveModel (via runReview createAgent)', () => {
       ),
     ).rejects.toBeInstanceOf(ReviewerError);
   });
+
+  it('applies baseUrl override to a registered non-Ollama model', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const captured: { model?: unknown } = {};
+
+    await runReview(
+      {
+        ...base,
+        cwd,
+        model: 'openrouter/ai21/jamba-large-1.7',
+        apiKey: 'or-key',
+        baseUrl: 'https://custom-gateway.example.com/v1',
+      },
+      { cwd, diff: sampleDiff, createAgent: fakeAgentWithCapture(captured) },
+    );
+
+    expect((captured.model as { baseUrl?: string })?.baseUrl).toBe(
+      'https://custom-gateway.example.com/v1',
+    );
+  });
+
+  it('applies maxTokens override to a registered non-Ollama model', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const captured: { model?: unknown } = {};
+
+    await runReview(
+      {
+        ...base,
+        cwd,
+        model: 'openrouter/ai21/jamba-large-1.7',
+        apiKey: 'or-key',
+        maxTokens: 1024,
+      },
+      { cwd, diff: sampleDiff, createAgent: fakeAgentWithCapture(captured) },
+    );
+
+    expect((captured.model as { maxTokens?: number })?.maxTokens).toBe(1024);
+  });
+
+  it('uses contextWindow 131072 for ollama model regardless of maxTokens', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const captured: { model?: unknown } = {};
+
+    await runReview(
+      { ...base, cwd, maxTokens: 512 },
+      { cwd, diff: sampleDiff, createAgent: fakeAgentWithCapture(captured) },
+    );
+
+    expect((captured.model as { contextWindow?: number })?.contextWindow).toBe(131072);
+  });
 });

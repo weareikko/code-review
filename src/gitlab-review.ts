@@ -370,6 +370,11 @@ function buildOllamaModel(
   maxTokens: number,
 ): Model<'openai-completions'> {
   const effectiveMaxTokens = maxTokens > 0 ? maxTokens : 4096;
+  // Use a generous context window default. Ollama model context sizes vary
+  // widely and can only be known by querying the server at runtime. We set a
+  // large constant so the agent doesn't truncate context unnecessarily; the
+  // model itself will cap actual generation at its own limit.
+  const contextWindow = 131072;
   return {
     id: modelId,
     name: modelId,
@@ -379,7 +384,7 @@ function buildOllamaModel(
     reasoning: false,
     input: ['text' as const],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: effectiveMaxTokens * 4,
+    contextWindow,
     maxTokens: effectiveMaxTokens,
   };
 }
@@ -421,9 +426,15 @@ function resolveModel(modelString: string, baseUrl: string, maxTokens: number): 
     });
   }
 
-  // Apply a custom base URL override when provided (generic OpenAI-compatible endpoint).
-  if (baseUrl) {
-    return { ...model, baseUrl };
+  // Apply overrides when provided.
+  // - baseUrl: redirect to a custom OpenAI-compatible endpoint.
+  // - maxTokens: cap output tokens (0 keeps the model's registered default).
+  if (baseUrl || maxTokens > 0) {
+    return {
+      ...model,
+      ...(baseUrl ? { baseUrl } : {}),
+      ...(maxTokens > 0 ? { maxTokens } : {}),
+    };
   }
   return model;
 }

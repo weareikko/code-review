@@ -282,9 +282,12 @@ export function validateConfig(config: Config): void {
     .map(([name]) => `--${name}`);
 
   if (missing.length > 0) {
-    throw new ConfigError(`Missing required configuration: ${missing.join(', ')}.`, {
-      hint: 'Provide CLI flags or the corresponding GitLab CI environment variables.',
-    });
+    const ambientProviders = ['amazon-bedrock', 'google-vertex'];
+    const isAmbientProvider = ambientProviders.includes(provider);
+    const hint = isAmbientProvider
+      ? `Provider "${provider}" requires ambient credentials. For Amazon Bedrock set AWS_ACCESS_KEY_ID / AWS_PROFILE; for Google Vertex run \`gcloud auth application-default login\` and set GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION.`
+      : 'Provide CLI flags or the corresponding GitLab CI environment variables.';
+    throw new ConfigError(`Missing required configuration: ${missing.join(', ')}.`, { hint });
   }
 
   if (!['info', 'warn', 'critical'].includes(config.minSeverity)) {

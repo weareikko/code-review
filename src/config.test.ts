@@ -7,6 +7,7 @@ import {
   type Severity,
   type ThinkingLevel,
 } from './config.js';
+import { ConfigError } from './errors.js';
 
 describe('config env defaults', () => {
   it('resolves GitLab CI defaults deterministically', () => {
@@ -124,6 +125,32 @@ describe('validateConfig', () => {
     expect(() => validateConfig({ ...minimalConfig, minSeverity: 'bad' as Severity })).toThrow(
       '--min-severity must be one of',
     );
+  });
+
+  it('emits ambient-credentials hint when api-key is missing for amazon-bedrock', () => {
+    let caught: unknown;
+    try {
+      validateConfig({
+        ...minimalConfig,
+        model: 'amazon-bedrock/anthropic.claude-3-sonnet',
+        apiKey: '',
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ConfigError);
+    expect((caught as ConfigError).hint).toContain('AWS_ACCESS_KEY_ID');
+  });
+
+  it('emits ambient-credentials hint when api-key is missing for google-vertex', () => {
+    let caught: unknown;
+    try {
+      validateConfig({ ...minimalConfig, model: 'google-vertex/gemini-1.5-pro', apiKey: '' });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ConfigError);
+    expect((caught as ConfigError).hint).toContain('gcloud auth application-default login');
   });
 
   it('throws on invalid thinking level', () => {
