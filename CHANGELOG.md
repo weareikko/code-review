@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Multi-provider LLM support** ([#36](https://github.com/ikko-dev/gitlab-review/issues/36)): `--model` now accepts any provider registered in `@earendil-works/pi-ai` (OpenRouter, Google Gemini, Groq, Mistral, Amazon Bedrock, Google Vertex, and more). The `provider/modelId` format now splits on the first `/` only, so multi-segment IDs like `openrouter/anthropic/claude-3-opus-20240229` and `openrouter/ai21/jamba-large-1.7` are handled correctly.
+- **Built-in Ollama support**: `--model ollama/<model>` runs a local Ollama server via the OpenAI-compatible API. No API key is required. Point `OLLAMA_HOST` at the server (default: `http://localhost:11434`).
+- **Provider-specific API key auto-resolution**: when `--api-key` / `GITLAB_REVIEW_API_KEY` are not set, the CLI resolves the key from the provider-specific environment variable via `@earendil-works/pi-ai` (e.g. `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`). Providers with ambient credentials (Amazon Bedrock, Google Vertex) are also detected automatically.
+- **`--api-key` is no longer required for Ollama models**: `validateConfig` skips the `api-key` check when the provider is `ollama`.
+- **`--base-url <url>` / `GITLAB_REVIEW_BASE_URL`**: override the provider API base URL for any OpenAI-compatible endpoint (e.g. a corporate AI gateway or self-hosted vLLM instance).
+- **`--max-tokens <n>` / `GITLAB_REVIEW_MAX_TOKENS`**: override the maximum output tokens requested from the model. Applied to all providers — Ollama defaults to 4 096 when not set; registered providers keep their own default when the value is `0`.
+- **`OLLAMA_HOST`**: auto-resolved for `ollama/*` models; sets the base URL to `$OLLAMA_HOST/v1` (default: `http://localhost:11434/v1`).
+- **Ambient-credentials error hint**: when `--api-key` is missing for `amazon-bedrock` or `google-vertex`, the error message now includes setup instructions (IAM env vars / `gcloud auth application-default login`) instead of the generic "Provide CLI flags" hint.
+- **`parseModelProvider` export** from `src/config.ts`: extracts the provider prefix from a `provider/modelId` string. Useful for library callers building custom model logic.
+
 ## [0.3.9] - 2026-05-22
 
 ### Added
