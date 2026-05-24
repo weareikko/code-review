@@ -50,6 +50,8 @@ export {
   sha256,
 } from './fingerprints.js';
 export { buildGeneratedComments, buildPayload } from './payloads.js';
+export type { Skill, SkillSpec } from './skills.js';
+export { loadNamedSkill, parseSkillSpec, resolveNpmSkillDir } from './skills.js';
 export {
   SUMMARY_HISTORY_END,
   SUMMARY_HISTORY_ENTRY_END,

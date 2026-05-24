@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`npm:` and `file:` skill spec protocols** ([#38](https://github.com/ikko-dev/gitlab-review/issues/38)): the `--skill` flag and `GITLAB_REVIEW_SKILLS` env var now accept protocol-prefixed specs alongside existing bare builtin names:
+  - `npm:my-skill` — resolves from `node_modules/my-skill` (walked up from `cwd`, supports monorepo hoisting)
+  - `npm:@scope/pkg` — scoped npm packages
+  - `npm:@scope/bundle/subpath` — named sub-directory within a multi-skill npm bundle
+  - `file:./relative/path` — local skill directory relative to `cwd`
+  - `file:/absolute/path` — absolute filesystem path
+  - Bare names (e.g. `code-review`) continue to resolve from the package-bundled `skills/` directory unchanged.
+  - Unresolvable specs now throw a `ConfigError` with an actionable hint instead of being silently skipped.
+  - `git:` / `git+ssh:` are parsed but not yet executed (reserved for Phase 2).
+- **`parseSkillSpec(spec)` export**: parses a skill spec string into a typed `SkillSpec` discriminated union (`builtin | npm | file | git`). Useful for library callers building custom skill-loading pipelines.
+- **`resolveNpmSkillDir(packageName, subpath, cwd)` export**: walks `node_modules` upward from `cwd` and returns the resolved package (or sub-directory) path, or `null` if not found.
+- **`loadNamedSkill(spec, cwd)` export**: loads a `Skill` from any supported spec; throws `ConfigError` if the spec cannot be resolved.
+- **`Skill['source']`** extended with `'npm' | 'file'` values (in addition to the existing `'builtin' | 'project'`), surfaced in diagnostics and OTel `skills` attribute.
+
 - **Multi-provider LLM support** ([#36](https://github.com/ikko-dev/gitlab-review/issues/36)): `--model` now accepts any provider registered in `@earendil-works/pi-ai` (OpenRouter, Google Gemini, Groq, Mistral, Amazon Bedrock, Google Vertex, and more). The `provider/modelId` format now splits on the first `/` only, so multi-segment IDs like `openrouter/anthropic/claude-3-opus-20240229` and `openrouter/ai21/jamba-large-1.7` are handled correctly.
 - **Built-in Ollama support**: `--model ollama/<model>` runs a local Ollama server via the OpenAI-compatible API. No API key is required. Point `OLLAMA_HOST` at the server (default: `http://localhost:11434`).
 - **Provider-specific API key auto-resolution**: when `--api-key` / `GITLAB_REVIEW_API_KEY` are not set, the CLI resolves the key from the provider-specific environment variable via `@earendil-works/pi-ai` (e.g. `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`). Providers with ambient credentials (Amazon Bedrock, Google Vertex) are also detected automatically.
