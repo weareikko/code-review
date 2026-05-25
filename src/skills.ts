@@ -7,7 +7,7 @@ import { ConfigError } from './errors.js';
 export interface Skill {
   name: string;
   description: string;
-  /** @deprecated Body is no longer loaded eagerly. Use `filePath` to read the skill content lazily. */
+  /** @deprecated Prompts now reference `filePath` so agents can read skill content lazily. */
   body?: string;
   /** Absolute path to the SKILL.md file. Used to reference skill content in prompts. */
   filePath: string;
@@ -62,6 +62,7 @@ export async function loadSkillFromDir(
   return {
     name: parsed.name,
     description: parsed.description,
+    body: parsed.body,
     filePath: skillMdPath,
     rootDir: dirPath,
     resourceDirs,

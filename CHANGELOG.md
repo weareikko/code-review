@@ -7,11 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.10] - 2026-05-25
+
 ### Changed
 
 - **Lazy skill body loading** ([#42](https://github.com/ikko-dev/gitlab-review/issues/42)): `buildSkillSection` now emits a `<skill_file>` path reference in the system prompt instead of embedding the full `SKILL.md` body inline. The agent reads each skill file on demand using its existing `Read` tool. This prevents system prompt bloat when many or large skills are loaded.
-  - `Skill.body` is now optional (`body?: string`) and is no longer populated by `loadSkillFromDir`. Consumer code that accessed `skill.body` should switch to reading `skill.filePath` directly.
   - `Skill.filePath` (new field): absolute path to the `SKILL.md` file, used in `<skill_file>` references in prompts.
+  - `Skill.body` remains populated for backwards compatibility, but prompt construction no longer uses it.
   - The `<skills>` prompt block now opens with a preamble instructing the agent to read each skill file before applying it.
 
 ### Added
@@ -283,7 +285,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.3.8...HEAD
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.3.10...HEAD
+[0.3.10]: https://github.com/ikko-dev/gitlab-review/compare/0.3.9...0.3.10
+[0.3.9]: https://github.com/ikko-dev/gitlab-review/compare/0.3.8...0.3.9
 [0.3.8]: https://github.com/ikko-dev/gitlab-review/compare/0.3.7...0.3.8
 [0.3.7]: https://github.com/ikko-dev/gitlab-review/compare/0.3.6...0.3.7
 [0.3.6]: https://github.com/ikko-dev/gitlab-review/compare/0.3.5...0.3.6
