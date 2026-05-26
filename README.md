@@ -421,6 +421,18 @@ If a later CI job sees that the current MR head commit already appears in that f
 
 Disable with `--no-summary` or `GITLAB_REVIEW_POST_SUMMARY=false`. With `--dry-run`/`--no-post`, the summary is parsed but not posted, and the reviewed-commit skip guard is not applied.
 
+## Inline comment footer
+
+Each inline comment ends with a compact footer that mirrors the format used in the summary note:
+
+```md
+<sub>Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) for commit <sha>.</sub>
+```
+
+This lets developers see at a glance whether a comment was posted during the current review pass or an earlier one — useful when a long-lived MR accumulates comments across many commits.
+
+The footer is appended to the **payload body only**. Fingerprints are computed from the original reviewer output before the footer is added, so deduplication is unaffected by the SHA changing between review runs.
+
 ## Duplicate prevention
 
 Each generated comment body includes hidden markers:
