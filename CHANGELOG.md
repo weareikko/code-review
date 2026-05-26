@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.11] - 2026-05-26
+
 ### Added
 
 - **Commit footer on inline comments**: each inline review comment now ends with a `<sub>` footer — `Reviewed by [@ikko-dev/gitlab-review](…) for commit <sha>.` — identical in format to the summary-note footer. This lets developers see at a glance whether a comment was posted during the current review pass or an earlier one. The footer is appended to the payload body only; fingerprints continue to be computed from the original reviewer output so deduplication is unaffected by the SHA changing between runs.
