@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ConfigError } from './errors.js';
-import { loadNamedSkill, loadSkillFromDir, parseSkillSpec, resolveNpmSkillDir } from './skills.js';
+import {
+  loadAutoDiscoveredSkills,
+  loadNamedSkill,
+  loadSkillFromDir,
+  parseSkillSpec,
+  resolveNpmSkillDir,
+} from './skills.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -419,5 +425,84 @@ describe('loadSkillFromDir source field', () => {
     await writeSkillMd(dir, 'test-skill', 'Test');
     const skill = await loadSkillFromDir(dir, 'file');
     expect(skill?.source).toBe('file');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadAutoDiscoveredSkills — warn callback for invalid SKILL.md files
+// ---------------------------------------------------------------------------
+
+describe('loadAutoDiscoveredSkills warn callback', () => {
+  it('calls warn when a SKILL.md exists but is missing required frontmatter fields', async () => {
+    const root = await makeTmp('auto-disc-warn-');
+    const skillDir = join(root, '.claude', 'skills', 'bento-section');
+    await mkdir(skillDir, { recursive: true });
+    // description-only: missing required `name:` field
+    await writeFile(
+      join(skillDir, 'SKILL.md'),
+      '---\ndescription: A skill without a name field.\n---\nSkill body.',
+      'utf8',
+    );
+
+    const warnings: string[] = [];
+    const skills = await loadAutoDiscoveredSkills(root, root, (msg) => warnings.push(msg));
+
+    expect(skills).toHaveLength(0);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/bento-section/);
+    expect(warnings[0]).toMatch(/name/);
+  });
+
+  it('calls warn once per invalid skill when multiple bad SKILL.md files exist', async () => {
+    const root = await makeTmp('auto-disc-multi-warn-');
+    for (const name of ['bento-section', 'omy-audit', 'omy-markets']) {
+      const skillDir = join(root, '.claude', 'skills', name);
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        join(skillDir, 'SKILL.md'),
+        `---\ndescription: Description for ${name}.\n---\n`,
+        'utf8',
+      );
+    }
+
+    const warnings: string[] = [];
+    const skills = await loadAutoDiscoveredSkills(root, root, (msg) => warnings.push(msg));
+
+    expect(skills).toHaveLength(0);
+    expect(warnings).toHaveLength(3);
+  });
+
+  it('does not call warn for directories without a SKILL.md', async () => {
+    const root = await makeTmp('auto-disc-no-skill-');
+    const emptyDir = join(root, '.claude', 'skills', 'not-a-skill');
+    await mkdir(emptyDir, { recursive: true });
+    // no SKILL.md
+
+    const warnings: string[] = [];
+    await loadAutoDiscoveredSkills(root, root, (msg) => warnings.push(msg));
+
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('does not call warn for valid skills', async () => {
+    const root = await makeTmp('auto-disc-valid-');
+    const skillDir = join(root, '.claude', 'skills', 'good-skill');
+    await writeSkillMd(skillDir, 'good-skill', 'A well-formed skill.');
+
+    const warnings: string[] = [];
+    const skills = await loadAutoDiscoveredSkills(root, root, (msg) => warnings.push(msg));
+
+    expect(skills).toHaveLength(1);
+    expect(warnings).toHaveLength(0);
+  });
+
+  it('does not warn when no warn callback is provided (stays backward-compatible)', async () => {
+    const root = await makeTmp('auto-disc-no-cb-');
+    const skillDir = join(root, '.claude', 'skills', 'broken-skill');
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(join(skillDir, 'SKILL.md'), '---\ndescription: No name.\n---\n', 'utf8');
+
+    // Must not throw when no warn callback is passed
+    await expect(loadAutoDiscoveredSkills(root, root)).resolves.toEqual([]);
   });
 });
