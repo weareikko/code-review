@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.12] - 2026-05-26
+
 ### Added
 
 - **Warn on invalid auto-discovered skills**: `loadAutoDiscoveredSkills` now accepts an optional `warn` callback. When a `SKILL.md` file is found during auto-discovery but is missing required frontmatter fields (`name` or `description`), the callback is invoked with a message identifying the skill directory. In `runReview`, this is wired to `logger.warn`, so malformed project skills produce a visible warning in CLI output instead of silently being dropped.
