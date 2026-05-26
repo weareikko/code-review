@@ -6,6 +6,21 @@ import type {
   ReviewComment,
 } from './types.js';
 
+/**
+ * Builds the visible body of an inline comment by appending a commit footer
+ * after a horizontal rule. The footer mirrors the format used in the MR-level
+ * summary note so developers can tell at a glance which commit triggered the
+ * comment and whether it belongs to an earlier review pass.
+ *
+ * The footer is appended to the payload body only — it is NOT included in the
+ * fingerprint hash, so comment identity (deduplication) remains stable across
+ * commits even when the SHA in the footer changes.
+ */
+export function buildCommentBody(body: string, commitSha: string): string {
+  const footer = `<sub>Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) for commit ${commitSha}.</sub>`;
+  return `${body.trim()}\n\n---\n\n${footer}`;
+}
+
 export function buildPayload(
   comment: ReviewComment,
   body: string,
@@ -40,11 +55,16 @@ export function buildGeneratedComments(
     seen.add(fp.primary);
     seen.add(fp.secondary);
 
+    // Fingerprints are computed from comment.body (the raw reviewer output)
+    // before the commit footer is appended, so deduplication is unaffected by
+    // the SHA changing between review runs.
+    const bodyWithFooter = buildCommentBody(comment.body, refs.head_sha);
+
     return {
       comment,
       fingerprints: fp,
       duplicate,
-      payload: buildPayload(comment, appendFingerprintMarkers(comment.body, fp), refs),
+      payload: buildPayload(comment, appendFingerprintMarkers(bodyWithFooter, fp), refs),
     };
   });
 }
