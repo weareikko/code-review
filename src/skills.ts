@@ -78,7 +78,11 @@ export async function loadBuiltinSkill(name: string): Promise<Skill | null> {
   return loadSkillFromDir(join(resolveBuiltinSkillsDir(), name), 'builtin');
 }
 
-export async function loadAutoDiscoveredSkills(cwd: string, gitRoot: string): Promise<Skill[]> {
+export async function loadAutoDiscoveredSkills(
+  cwd: string,
+  gitRoot: string,
+  warn?: (msg: string) => void,
+): Promise<Skill[]> {
   const dirs: string[] = [];
   let current = cwd;
   while (true) {
@@ -101,8 +105,15 @@ export async function loadAutoDiscoveredSkills(cwd: string, gitRoot: string): Pr
         continue;
       }
       for (const entry of entries) {
-        const skill = await loadSkillFromDir(join(skillsPath, entry), 'project');
-        if (skill) found.set(skill.name, skill);
+        const entryPath = join(skillsPath, entry);
+        const skill = await loadSkillFromDir(entryPath, 'project');
+        if (skill) {
+          found.set(skill.name, skill);
+        } else if (warn && existsSync(join(entryPath, 'SKILL.md'))) {
+          warn(
+            `Skill at ${entryPath} has a SKILL.md but is missing required frontmatter fields (name, description) — skill not loaded.`,
+          );
+        }
       }
     }
   }

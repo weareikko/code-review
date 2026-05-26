@@ -176,12 +176,13 @@ async function walkUpContextFiles(
 export async function loadReviewContext(
   cwd: string,
   skillNames: string[] = [],
+  warn?: (msg: string) => void,
 ): Promise<ReviewContext> {
   const gitRoot = await findGitRoot(cwd);
   const [conventions, reviewRules, discovered] = await Promise.all([
     walkUpContextFiles(cwd, CONVENTION_FILES, gitRoot),
     walkUpContextFiles(cwd, REVIEW_RULE_FILES, gitRoot),
-    loadAutoDiscoveredSkills(cwd, gitRoot),
+    loadAutoDiscoveredSkills(cwd, gitRoot, warn),
   ]);
 
   const skills = [...discovered];
@@ -479,7 +480,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     });
   }
 
-  const context = await loadReviewContext(cwd, config.skills);
+  const context = await loadReviewContext(cwd, config.skills, (msg) => logger.warn(msg));
   const systemPrompt = buildJSONSystemPrompt(context, minSeverity);
   const userPrompt = buildUserPrompt(diff, skippedFiles);
 
