@@ -26,6 +26,18 @@ Report a finding only when you can prove all of these:
 
 No proof, no finding. Suspicion is not a result.
 
+## Commit Context
+
+The `<commits>` section lists the commit messages for this MR (oldest first). Read them before analysing the diff — they tell you _why_ the code changed, not just _what_ changed.
+
+When a commit message provides an explicit, specific justification for a pattern that would otherwise look like a bug, treat that justification as authoritative:
+
+- **Suppress the finding** if the commit cites a concrete artefact: an ADR number, an incident or post-mortem reference, a named team sign-off, or an explicit architectural decision with stated rationale (e.g. "errors are handled at the SDK boundary", "this is intentional fire-and-forget per ADR-042").
+- **Still report the finding** if the commit justification is vague ("this is fine", "works for us") or does not directly address the specific code pattern.
+- **Reference the commit rationale** in your summary when you suppress a finding — note what the commit says so reviewers can verify it holds.
+
+Do not use commit messages to suppress findings about data loss, incorrect billing, broken auth, or critical-path crashes — those require explicit confirmation in the code or tests, not just a commit message.
+
 ## Investigation Process
 
 1. Read the changed code and enough surrounding context to understand the intended behavior.
@@ -68,3 +80,4 @@ Use the lower severity when impact depends on unproven preconditions.
 - Existing bugs untouched by the diff.
 - Hypothetical failures requiring unrealistic inputs or impossible call order.
 - Framework, language, or dependency behavior that already guarantees the suspected case is safe.
+- Patterns that a commit message in `<commits>` explicitly justifies with a concrete artefact (ADR, incident reference, named sign-off, or stated architectural rationale) — see **Commit Context** above.
