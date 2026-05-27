@@ -1,0 +1,31 @@
+diff --git a/src/services/order.ts b/src/services/order.ts
+index 3a1b2c4..d5e6f78 100644
+--- a/src/services/order.ts
++++ b/src/services/order.ts
+@@ -1,6 +1,5 @@
+ import { logger } from '../logger.js';
+ import { analytics } from './analytics.js';
+-import type { Order } from './types.js';
++import type { Order } from '../types.js';
+
+ export async function completeOrder(order: Order): Promise<void> {
+   await saveOrder(order);
+@@ -8,11 +7,7 @@ export async function completeOrder(order: Order): Promise<void> {
+   await chargePayment(order);
+
+-  try {
+-    await analytics.track('order_completed', {
+-      orderId: order.id,
+-      amount: order.total,
+-      userId: order.userId,
+-    });
+-  } catch (e) {
+-    logger.error('Analytics tracking failed', { error: e, orderId: order.id });
+-    throw e;
+-  }
++  analytics
++    .track('order_completed', { orderId: order.id, amount: order.total, userId: order.userId })
++    .catch(() => {});
+
+   await fulfillOrder(order);
+   await notifyUser(order.userId);

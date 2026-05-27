@@ -139,3 +139,23 @@ export async function getMergeDiff(
 ): Promise<string> {
   return git(['diff', ...getMergeDiffArguments(targetBranch, options)], options);
 }
+
+export function getMergeCommitLogArguments(
+  targetBranch: string,
+  options: { remote?: string } = {},
+): string[] {
+  const remote = options.remote ?? 'origin';
+  return [
+    `${remoteRef(remote, targetBranch)}...HEAD`,
+    '--pretty=tformat:commit %h%nAuthor: %an%nDate: %as%n%n%s%n%n%b',
+    '--reverse',
+    '--no-merges',
+  ];
+}
+
+export async function getMergeCommitLog(
+  targetBranch: string,
+  options: GitOptions & { remote?: string } = {},
+): Promise<string> {
+  return git(['log', ...getMergeCommitLogArguments(targetBranch, options)], options);
+}

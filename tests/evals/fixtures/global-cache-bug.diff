@@ -1,0 +1,36 @@
+diff --git a/src/services/auth.ts b/src/services/auth.ts
+index 3f8a1b2..a4c9d71 100644
+--- a/src/services/auth.ts
++++ b/src/services/auth.ts
+@@ -1,10 +1,30 @@
+ import type { ApiClient } from './api.js';
++import type { User } from './types.js';
++
++let tokenCache: string | null = null;
+
+ export class AuthService {
+   constructor(private readonly api: ApiClient) {}
+
+   async getUser(id: string): Promise<User> {
+     return this.api.get(`/users/${id}`);
+   }
++
++  /**
++   * Returns the caller's access token, fetching from the API if not cached.
++   */
++  async getAccessToken(userId: string): Promise<string> {
++    if (tokenCache) {
++      return tokenCache;
++    }
++    const response = await this.api.post<{ token: string }>('/tokens', { userId });
++    tokenCache = response.token;
++    return tokenCache;
++  }
++
++  /**
++   * Clears the cached token, e.g. on logout.
++   */
++  clearTokenCache(): void {
++    tokenCache = null;
++  }
+ }

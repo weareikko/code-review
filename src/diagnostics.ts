@@ -9,6 +9,7 @@ export type DiagnosticPhase =
   | 'gitlab.get_latest_version'
   | 'git.prepare_history'
   | 'git.get_merge_diff'
+  | 'git.get_commit_log'
   | 'reviewer.run'
   | 'review.parse'
   | 'gitlab.get_discussions'
@@ -77,6 +78,7 @@ export const DIAGNOSTIC_CHANNEL_NAMES = {
   getLatestVersion: `${DIAGNOSTIC_CHANNEL_PREFIX}:gitlab.get_latest_version`,
   prepareGitHistory: `${DIAGNOSTIC_CHANNEL_PREFIX}:git.prepare_history`,
   getMergeDiff: `${DIAGNOSTIC_CHANNEL_PREFIX}:git.get_merge_diff`,
+  getCommitLog: `${DIAGNOSTIC_CHANNEL_PREFIX}:git.get_commit_log`,
   runReviewer: `${DIAGNOSTIC_CHANNEL_PREFIX}:reviewer.run`,
   parseReview: `${DIAGNOSTIC_CHANNEL_PREFIX}:review.parse`,
   getDiscussions: `${DIAGNOSTIC_CHANNEL_PREFIX}:gitlab.get_discussions`,
@@ -92,6 +94,7 @@ export const diagnosticChannels = {
   getLatestVersion: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.getLatestVersion),
   prepareGitHistory: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.prepareGitHistory),
   getMergeDiff: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.getMergeDiff),
+  getCommitLog: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.getCommitLog),
   runReviewer: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.runReviewer),
   parseReview: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.parseReview),
   getDiscussions: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.getDiscussions),
@@ -107,6 +110,7 @@ const channelsByPhase: Record<DiagnosticPhase, TracingChannel<DiagnosticContext>
   'gitlab.get_latest_version': diagnosticChannels.getLatestVersion,
   'git.prepare_history': diagnosticChannels.prepareGitHistory,
   'git.get_merge_diff': diagnosticChannels.getMergeDiff,
+  'git.get_commit_log': diagnosticChannels.getCommitLog,
   'reviewer.run': diagnosticChannels.runReviewer,
   'review.parse': diagnosticChannels.parseReview,
   'gitlab.get_discussions': diagnosticChannels.getDiscussions,

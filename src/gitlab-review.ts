@@ -49,6 +49,13 @@ export type CreateAgent = (params: CreateAgentParams) => AgentLike;
 export interface RunReviewOptions {
   cwd?: string;
   diff: string;
+  /**
+   * Commit messages for all non-merge commits in the MR (merge-base…HEAD),
+   * in chronological order. When provided, a `<commits>` section is prepended
+   * to the user prompt so the reviewer understands the intent behind each change.
+   * Produced by `getMergeCommitLog` in `src/git.ts`.
+   */
+  commitLog?: string;
   createAgent?: CreateAgent;
   timeoutMs?: number;
   logger?: Logger;
@@ -327,8 +334,16 @@ export function buildJSONSystemPrompt(
   return sections.join('\n\n');
 }
 
-export function buildUserPrompt(diff: string, skippedFiles: string[] = []): string {
-  const parts = [`Review this diff:\n<diff>\n${diff}\n</diff>`];
+export function buildUserPrompt(
+  diff: string,
+  skippedFiles: string[] = [],
+  commitLog?: string,
+): string {
+  const parts: string[] = [];
+  if (commitLog?.trim()) {
+    parts.push(`Commits in this MR (oldest first):\n<commits>\n${commitLog.trim()}\n</commits>`);
+  }
+  parts.push(`Review this diff:\n<diff>\n${diff}\n</diff>`);
   if (skippedFiles.length > 0) {
     parts.push(
       `<skipped_files>\n${skippedFiles
@@ -482,7 +497,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
 
   const context = await loadReviewContext(cwd, config.skills, (msg) => logger.warn(msg));
   const systemPrompt = buildJSONSystemPrompt(context, minSeverity);
-  const userPrompt = buildUserPrompt(diff, skippedFiles);
+  const userPrompt = buildUserPrompt(diff, skippedFiles, options.commitLog);
 
   const skillNames = context.skills.map((s) => s.name);
   if (skillNames.length > 0) {

@@ -6,7 +6,13 @@ import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { describe, expect, it, vi } from 'vitest';
 import type { Config } from './config.js';
 import { ReviewerError } from './errors.js';
-import { buildJSONSystemPrompt, filterDiff, runReview, type AgentLike } from './gitlab-review.js';
+import {
+  buildJSONSystemPrompt,
+  buildUserPrompt,
+  filterDiff,
+  runReview,
+  type AgentLike,
+} from './gitlab-review.js';
 import { noopLogger, type Logger } from './logger.js';
 import type { Skill } from './skills.js';
 
@@ -653,5 +659,59 @@ describe('buildJSONSystemPrompt — skill section', () => {
     expect(prompt).toContain('<skill_file>/skills/security/SKILL.md</skill_file>');
     expect(prompt).toContain('<skill name="accessibility">');
     expect(prompt).toContain('<skill_file>/skills/a11y/SKILL.md</skill_file>');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildUserPrompt
+// ---------------------------------------------------------------------------
+
+describe('buildUserPrompt', () => {
+  const diff = 'diff --git a/src/a.ts b/src/a.ts\n+added';
+
+  it('without commitLog: wraps diff in <diff> and prompts to review', () => {
+    const prompt = buildUserPrompt(diff);
+    expect(prompt).toContain('Review this diff:');
+    expect(prompt).toContain('<diff>');
+    expect(prompt).toContain(diff);
+    expect(prompt).not.toContain('<commits>');
+  });
+
+  it('with commitLog: prepends <commits> section before <diff>', () => {
+    const log = 'commit abc123\nAuthor: Dev\nDate: 2025-05-23\n\nfeat: add feature\n';
+    const prompt = buildUserPrompt(diff, [], log);
+
+    expect(prompt).toContain('<commits>');
+    expect(prompt).toContain(log.trim());
+    expect(prompt).toContain('</commits>');
+    expect(prompt).toContain('<diff>');
+
+    // commits section must come before the diff section
+    expect(prompt.indexOf('<commits>')).toBeLessThan(prompt.indexOf('<diff>'));
+  });
+
+  it('with empty or whitespace-only commitLog: omits <commits> section', () => {
+    expect(buildUserPrompt(diff, [], '')).not.toContain('<commits>');
+    expect(buildUserPrompt(diff, [], '   \n  ')).not.toContain('<commits>');
+  });
+
+  it('with skippedFiles: appends <skipped_files> block after <diff>', () => {
+    const prompt = buildUserPrompt(diff, ['dist/bundle.js', 'package-lock.json']);
+    expect(prompt).toContain('<skipped_files>');
+    expect(prompt).toContain('- dist/bundle.js');
+    expect(prompt).toContain('- package-lock.json');
+    expect(prompt.indexOf('<diff>')).toBeLessThan(prompt.indexOf('<skipped_files>'));
+  });
+
+  it('with both commitLog and skippedFiles: order is <commits> → <diff> → <skipped_files>', () => {
+    const log = 'commit abc\nAuthor: Dev\nDate: 2025-05-23\n\nfeat: something\n';
+    const prompt = buildUserPrompt(diff, ['lock.json'], log);
+
+    const commitsPos = prompt.indexOf('<commits>');
+    const diffPos = prompt.indexOf('<diff>');
+    const skippedPos = prompt.indexOf('<skipped_files>');
+
+    expect(commitsPos).toBeLessThan(diffPos);
+    expect(diffPos).toBeLessThan(skippedPos);
   });
 });
