@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Prior developer replies as review context**: when the MR already has bot-posted review threads with developer replies, those threads are extracted and passed to the reviewer as a `<prior_review_feedback>` section in the prompt. The reviewer can use this to avoid re-raising already-acknowledged concerns and to provide informed follow-up. Threads are filtered to files in the current diff; resolved threads are included but marked as resolved.
+- **Commit log as review context**: commit messages for all non-merge commits in the MR are passed to the reviewer as a `<commits>` section prepended to the prompt, giving the reviewer intent context alongside the code diff.
+- **Commit message justifications in code-review skill**: the built-in `code-review` skill now instructs the reviewer to treat explicit commit artefacts (ADR numbers, incident references, named sign-offs) as authoritative evidence when justifying otherwise-suspicious patterns.
+
 ## [0.3.12] - 2026-05-26
 
 ### Added

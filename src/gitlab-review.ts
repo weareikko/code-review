@@ -11,6 +11,8 @@ import type { Config } from './config.js';
 import { ReviewerError } from './errors.js';
 import type { Logger } from './logger.js';
 import { noopLogger } from './logger.js';
+import type { PriorThread } from './prior-threads.js';
+import { renderPriorThreadsBlock } from './prior-threads.js';
 import type { Skill } from './skills.js';
 import { loadAutoDiscoveredSkills, loadNamedSkill } from './skills.js';
 import type { GitLabReviewSeverity, ThinkingLevel } from './types.js';
@@ -59,6 +61,14 @@ export interface RunReviewOptions {
   createAgent?: CreateAgent;
   timeoutMs?: number;
   logger?: Logger;
+  /**
+   * Prior developer replies to bot-posted review threads on the MR.
+   * When provided, a `<prior_review_feedback>` section is appended to the user
+   * prompt after `<diff>` so the reviewer can avoid re-raising already-acknowledged
+   * concerns and can provide contextual follow-up.
+   * Produced by `extractPriorThreads` in `src/prior-threads.ts`.
+   */
+  priorThreads?: PriorThread[];
   /**
    * Called with the agent after it is created, before the first prompt.
    * Use this to attach telemetry (e.g. `otelBridge.createAgentTelemetry(runId)`).
@@ -338,6 +348,7 @@ export function buildUserPrompt(
   diff: string,
   skippedFiles: string[] = [],
   commitLog?: string,
+  priorThreads?: PriorThread[],
 ): string {
   const parts: string[] = [];
   if (commitLog?.trim()) {
@@ -352,6 +363,14 @@ export function buildUserPrompt(
           '\n',
         )}\n</skipped_files>\nThe above files were not included because the diff exceeded the size limit. Mention them explicitly in your summary as not reviewed.`,
     );
+  }
+  if (priorThreads && priorThreads.length > 0) {
+    const block = renderPriorThreadsBlock(priorThreads);
+    if (block) {
+      parts.push(
+        `The following threads were posted by a previous review run and have received developer replies. Use this context to avoid repeating already-acknowledged concerns and to provide informed follow-up:\n${block}`,
+      );
+    }
   }
   return parts.join('\n\n');
 }
@@ -497,7 +516,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
 
   const context = await loadReviewContext(cwd, config.skills, (msg) => logger.warn(msg));
   const systemPrompt = buildJSONSystemPrompt(context, minSeverity);
-  const userPrompt = buildUserPrompt(diff, skippedFiles, options.commitLog);
+  const userPrompt = buildUserPrompt(diff, skippedFiles, options.commitLog, options.priorThreads);
 
   const skillNames = context.skills.map((s) => s.name);
   if (skillNames.length > 0) {

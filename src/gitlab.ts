@@ -29,9 +29,25 @@ export interface Version {
   head_commit_sha: string;
 }
 
+export interface DiscussionNoteAuthor {
+  id: number;
+  username?: string;
+}
+
+export interface DiscussionNotePosition {
+  old_path?: string | null;
+  new_path?: string | null;
+  old_line?: number | null;
+  new_line?: number | null;
+}
+
 export interface DiscussionNote {
   id?: number;
   body?: string | null;
+  author?: DiscussionNoteAuthor;
+  system?: boolean;
+  resolved?: boolean;
+  position?: DiscussionNotePosition;
 }
 
 export interface Discussion {

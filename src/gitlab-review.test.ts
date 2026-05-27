@@ -714,4 +714,44 @@ describe('buildUserPrompt', () => {
     expect(commitsPos).toBeLessThan(diffPos);
     expect(diffPos).toBeLessThan(skippedPos);
   });
+
+  it('with priorThreads: appends <prior_review_feedback> block after <diff>', () => {
+    const threads = [
+      {
+        file: 'src/a.ts',
+        line: 10,
+        resolved: false,
+        botComment: 'Missing null check.',
+        replies: ['Fixed in next commit.'],
+      },
+    ];
+    const prompt = buildUserPrompt(diff, [], undefined, threads);
+
+    expect(prompt).toContain('<prior_review_feedback>');
+    expect(prompt).toContain('Missing null check.');
+    expect(prompt).toContain('Fixed in next commit.');
+    expect(prompt.indexOf('<diff>')).toBeLessThan(prompt.indexOf('<prior_review_feedback>'));
+  });
+
+  it('with empty priorThreads array: omits <prior_review_feedback> section', () => {
+    const prompt = buildUserPrompt(diff, [], undefined, []);
+    expect(prompt).not.toContain('<prior_review_feedback>');
+  });
+
+  it('with all sections: order is <commits> → <diff> → <skipped_files> → <prior_review_feedback>', () => {
+    const log = 'commit abc\nAuthor: Dev\nDate: 2025-05-23\n\nfeat: x\n';
+    const threads = [
+      { file: 'src/a.ts', line: 1, resolved: false, botComment: 'Bug.', replies: ['Fixed.'] },
+    ];
+    const prompt = buildUserPrompt(diff, ['lock.json'], log, threads);
+
+    const commitsPos = prompt.indexOf('<commits>');
+    const diffPos = prompt.indexOf('<diff>');
+    const skippedPos = prompt.indexOf('<skipped_files>');
+    const priorPos = prompt.indexOf('<prior_review_feedback>');
+
+    expect(commitsPos).toBeLessThan(diffPos);
+    expect(diffPos).toBeLessThan(skippedPos);
+    expect(skippedPos).toBeLessThan(priorPos);
+  });
 });
