@@ -1,0 +1,18 @@
+commit e5f6a7b8
+Author: Product Dev
+Date: 2025-05-23
+
+feat: make analytics non-blocking — failures must never break the order flow
+
+Per ADR-042 and the post-mortem for INC-2891: a failed analytics call
+was causing the entire order-completion flow to roll back and surface a
+500 to the user. Analytics tracking is best-effort and must never
+affect the critical path.
+
+The empty .catch(() => {}) is intentional. The analytics SDK has its
+own internal error reporting and dead-letter queue, so errors are not
+silently lost — they are handled at the SDK boundary. The logger call
+was removed because it was logging noise: every analytics timeout in a
+high-traffic period was flooding PagerDuty with non-actionable alerts.
+
+Signed off by: @alice (backend lead), @bob (on-call SRE), @carol (product)

@@ -14,6 +14,7 @@ const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
 type EvalInput = {
   diff: string;
+  commitLog?: string;
   skills: string[];
 };
 
@@ -70,7 +71,7 @@ const reviewHarness = createHarness<EvalInput, EvalOutput, Record<string, unknow
     const dir = await mkdtemp(join(tmpdir(), 'gitlab-review-eval-'));
     try {
       const config = makeConfig({ cwd: dir, skills: input.skills });
-      const usage = await runReview(config, { diff: input.diff });
+      const usage = await runReview(config, { diff: input.diff, commitLog: input.commitLog });
 
       const reviewPath = join(dir, config.reviewFile);
       const raw = await readFile(reviewPath, 'utf8');
@@ -593,15 +594,16 @@ const CommitContextSurfacedJudge = createJudge(
 // The commit message explains it is an intentional architectural decision (ADR-042 / INC-2891).
 //
 // Expected signals:
-//   flat diff  → EmptyCatchFlaggedJudge=1  (correctly flags the pattern as suspicious)
-//                IntentRecognizedJudge=0   (no context, can't know it's intentional)
-//   patch      → EmptyCatchFlaggedJudge=0  (model reads the commit and doesn't over-flag)
-//                IntentRecognizedJudge=1   (model surfaces the ADR/incident context)
+//   flat diff           → EmptyCatchFlaggedJudge=1  (correctly flags the pattern as suspicious)
+//                         CommitContextSurfacedJudge=0 (no context, can't know it's intentional)
+//   <commits> section   → EmptyCatchFlaggedJudge=0  (model reads the commit and doesn't over-flag)
+//                         CommitContextSurfacedJudge=1 (model surfaces the ADR/incident context)
+//   patch as diff slot  → baseline comparison; model may read commit headers as diff noise
 //
-// If patch scores match flat scores, commit messages don't help on this class of change.
-// If patch EmptyCatchFlagged < flat, the feature is genuinely useful.
+// If <commits> scores match flat scores, commit messages don't help on this class of change.
+// If <commits> EmptyCatchFlagged < flat, the feature is genuinely useful.
 describeEval(
-  'patch format — intentional empty catch (commit justifies decision)',
+  'commit context — intentional empty catch (commit justifies decision)',
   {
     harness: reviewHarness,
     judges: [EmptyCatchFlaggedJudge, CommitContextSurfacedJudge],
@@ -615,7 +617,19 @@ describeEval(
       expect(result.output).toBeDefined();
     });
 
-    it('patch format: reviews empty catch with commit explaining ADR-042 / INC-2891', async ({
+    it('dedicated <commits> section: reviews empty catch with ADR-042 / INC-2891 context', async ({
+      run,
+    }) => {
+      const diff = await readFile(join(FIXTURES, 'analytics-fire-and-forget.diff'), 'utf8');
+      const commitLog = await readFile(
+        join(FIXTURES, 'analytics-fire-and-forget.commitlog'),
+        'utf8',
+      );
+      const result = await run({ diff, commitLog, skills: [] });
+      expect(result.output).toBeDefined();
+    });
+
+    it('patch as diff: reviews empty catch with commit header in <diff> slot (comparison baseline)', async ({
       run,
     }) => {
       const diff = await readFile(join(FIXTURES, 'analytics-fire-and-forget.patch'), 'utf8');
