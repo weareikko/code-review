@@ -9,12 +9,14 @@ import { createHarness, createJudge, describeEval } from 'vitest-evals';
 import type { Config } from '../../src/config.js';
 import { runReview } from '../../src/gitlab-review.js';
 import { parseReviewMarkdownWithWarnings } from '../../src/parser.js';
+import type { PriorThread } from '../../src/prior-threads.js';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
 type EvalInput = {
   diff: string;
   commitLog?: string;
+  priorThreads?: PriorThread[];
   skills: string[];
 };
 
@@ -71,7 +73,11 @@ const reviewHarness = createHarness<EvalInput, EvalOutput, Record<string, unknow
     const dir = await mkdtemp(join(tmpdir(), 'gitlab-review-eval-'));
     try {
       const config = makeConfig({ cwd: dir, skills: input.skills });
-      const usage = await runReview(config, { diff: input.diff, commitLog: input.commitLog });
+      const usage = await runReview(config, {
+        diff: input.diff,
+        commitLog: input.commitLog,
+        priorThreads: input.priorThreads,
+      });
 
       const reviewPath = join(dir, config.reviewFile);
       const raw = await readFile(reviewPath, 'utf8');
@@ -671,6 +677,214 @@ describeEval(
       const diff = await readFile(join(FIXTURES, 'clean-ts.diff'), 'utf8');
       const result = await run({ diff, skills: [] });
 
+      expect(result.output).toBeDefined();
+    });
+  },
+);
+
+// =============================================================================
+// Prior review feedback — <prior_review_feedback> context
+//
+// Two paired scenarios that test the new feature from opposite directions:
+//
+// Scenario A — JUSTIFIED prior thread suppresses a false positive
+//   Diff: new Express routes with no auth middleware
+//   Without prior thread: reviewer correctly flags the missing auth (true positive
+//     at review time, no context available)
+//   With prior thread: developer explained the routes are intentionally public
+//     for load-balancer health probes (specific, concrete justification)
+//   Expected: reviewer stops raising auth as a severe finding and surfaces the
+//     developer's explanation instead
+//
+// Scenario B — VAGUE prior thread does NOT suppress a concrete bug
+//   Diff: null dereference on an optional field (TypeScript type says product?)
+//   Without prior thread: reviewer flags the null deref
+//   With prior thread: developer replied "hasn't been a problem in production"
+//     (vague, no technical justification)
+//   Expected: reviewer still raises the null deref as a concrete bug — vague
+//     dismissals must not suppress provable defects
+//
+// All cases use judgeThreshold: null (recording only — LLM behaviour varies).
+// =============================================================================
+
+// Judge: does the reviewer raise a concern about missing authentication as a
+// CRITICAL or WARN finding? Score=1 means the concern was raised as severe.
+// For scenario A we expect this to drop from 1→0 when the prior thread explains
+// the endpoint is protected at the network layer — a concrete, specific reason.
+const AuthConcernRaisedJudge = createJudge(
+  'AuthConcernRaisedJudge',
+  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
+    const authKeywords = [
+      'auth',
+      'unauthenticated',
+      'unauthorized',
+      'authentication',
+      'authorization',
+      'access control',
+      'permission',
+    ];
+    const severeComments = output.comments.filter(
+      (c) => c.severity === 'critical' || c.severity === 'warn',
+    );
+    // Check severe comments AND summary — both carry meaningful findings.
+    const severeText = [...severeComments.map((c) => c.body), output.summary]
+      .join(' ')
+      .toLowerCase();
+    const flagged = authKeywords.some((k) => severeText.includes(k));
+    return {
+      score: flagged ? 1 : 0,
+      metadata: {
+        rationale: flagged
+          ? `Reviewer raised auth as a severe concern (${severeComments.length} severe comment(s))`
+          : 'Reviewer did not raise auth as a severe finding',
+        severeComments: severeComments.map((c) => ({
+          severity: c.severity,
+          body: c.body.slice(0, 120),
+        })),
+      },
+    };
+  },
+);
+
+// Judge: did the reviewer surface the specific context from the prior thread
+// reply? We require terms that can only come from the developer's explanation,
+// not from the diff code itself: "vpn", "ingress", "subnet", "network layer",
+// "network-level", "infrastructure level". These don't appear in the diff.
+const PriorThreadContextSurfacedJudge = createJudge(
+  'PriorThreadContextSurfacedJudge',
+  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
+    const priorOnlyKeywords = [
+      'vpn',
+      'ingress',
+      'subnet',
+      'network layer',
+      'network-level',
+      'infrastructure level',
+      '10.',
+      'internal network',
+    ];
+    const allText = [output.summary, ...output.comments.map((c) => c.body)].join(' ').toLowerCase();
+    const hits = priorOnlyKeywords.filter((k) => allText.includes(k));
+    const score = hits.length >= 1 ? 1 : 0;
+    return {
+      score,
+      metadata: {
+        rationale:
+          score === 1
+            ? `Reviewer surfaced prior thread context (matched: ${hits.join(', ')})`
+            : 'Reviewer did not reference network-layer justification from the prior thread',
+      },
+    };
+  },
+);
+
+// The fixture is /admin/config + /admin/features/:flag — routes that expose
+// environment variables, DB/Redis hosts, integration URLs, and allow toggling
+// feature flags, all without any authentication middleware. The model reliably
+// flags this as a severe auth issue when no context is provided. The prior
+// thread explains the routes are guarded at the network layer (VPN + ingress
+// controller subnet restriction), not the application layer.
+describeEval(
+  'prior review feedback — justified explanation suppresses false positive',
+  {
+    harness: reviewHarness,
+    judges: [AuthConcernRaisedJudge, PriorThreadContextSurfacedJudge],
+    judgeThreshold: null,
+    skipIf: missingApiKey,
+  },
+  (it) => {
+    it('no prior thread: reviewer flags unauthenticated admin routes as a concern', async ({
+      run,
+    }) => {
+      const diff = await readFile(join(FIXTURES, 'admin-config-endpoint.diff'), 'utf8');
+      const result = await run({ diff, skills: [] });
+      expect(result.output).toBeDefined();
+    });
+
+    it('with prior thread: reviewer acknowledges network-layer protection and does not re-raise', async ({
+      run,
+    }) => {
+      const diff = await readFile(join(FIXTURES, 'admin-config-endpoint.diff'), 'utf8');
+      const priorThreads: PriorThread[] = [
+        {
+          file: 'src/routes/admin.ts',
+          line: 8,
+          resolved: false,
+          botComment:
+            '/admin/config exposes environment variables, database hosts, and integration URLs without any authentication middleware. Any unauthenticated caller with network access can read this data or toggle feature flags via /admin/features/:flag.',
+          replies: [
+            'These routes are only reachable from inside our private VPN. The ingress controller restricts access to the 10.32.0.0/14 subnet — requests from the public internet never reach the application layer. Application-level auth would be redundant here and adds latency to internal tooling.',
+          ],
+        },
+      ];
+      const result = await run({ diff, priorThreads, skills: [] });
+      expect(result.output).toBeDefined();
+    });
+  },
+);
+
+// Judge: does the reviewer raise the null-dereference as a CRITICAL or WARN
+// finding? Score=1 means it was correctly flagged as a concrete defect.
+// For scenario B we expect this to stay at 1 even when the developer gave a
+// vague "hasn't been a problem" dismissal — that is not a technical justification.
+const NullDereferenceFlaggedJudge = createJudge(
+  'NullDereferenceFlaggedJudge',
+  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
+    const keywords = ['null', 'undefined', 'optional', 'product?', 'typeerror', 'dereference'];
+    const severeComments = output.comments.filter(
+      (c) => c.severity === 'critical' || c.severity === 'warn',
+    );
+    const severeText = severeComments
+      .map((c) => c.body)
+      .join(' ')
+      .toLowerCase();
+    const summaryText = output.summary.toLowerCase();
+    const flagged = keywords.some((k) => severeText.includes(k) || summaryText.includes(k));
+    return {
+      score: flagged ? 1 : 0,
+      metadata: {
+        rationale: flagged
+          ? `Reviewer correctly flagged the null/undefined dereference (${severeComments.length} severe comment(s))`
+          : 'Reviewer did not flag the null dereference — possible false negative',
+        severeComments: severeComments.map((c) => ({
+          severity: c.severity,
+          body: c.body.slice(0, 120),
+        })),
+      },
+    };
+  },
+);
+
+describeEval(
+  'prior review feedback — vague dismissal does not suppress a concrete bug',
+  {
+    harness: reviewHarness,
+    judges: [NullDereferenceFlaggedJudge],
+    judgeThreshold: null,
+    skipIf: missingApiKey,
+  },
+  (it) => {
+    it('no prior thread: reviewer flags the null dereference', async ({ run }) => {
+      const diff = await readFile(join(FIXTURES, 'null-deref-vague-dismissal.diff'), 'utf8');
+      const result = await run({ diff, skills: [] });
+      expect(result.output).toBeDefined();
+    });
+
+    it('with vague prior thread reply: reviewer still flags the null dereference', async ({
+      run,
+    }) => {
+      const diff = await readFile(join(FIXTURES, 'null-deref-vague-dismissal.diff'), 'utf8');
+      const priorThreads: PriorThread[] = [
+        {
+          file: 'src/billing/invoice.ts',
+          line: 14,
+          resolved: false,
+          botComment:
+            'item.product is declared as optional (Product | undefined). Accessing item.product.name and item.product.unitPrice without a null check will throw a TypeError at runtime when product is undefined.',
+          replies: ["We've never seen this throw in production."],
+        },
+      ];
+      const result = await run({ diff, priorThreads, skills: [] });
       expect(result.output).toBeDefined();
     });
   },

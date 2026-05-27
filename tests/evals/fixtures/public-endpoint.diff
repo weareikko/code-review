@@ -1,0 +1,27 @@
+diff --git a/src/routes/health.ts b/src/routes/health.ts
+new file mode 100644
+index 0000000..e1f2a3b
+--- /dev/null
++++ b/src/routes/health.ts
+@@ -0,0 +1,22 @@
++import { Router } from 'express';
++import { db } from '../db/client.js';
++
++const router = Router();
++
++// Health check for load balancer and uptime monitoring
++router.get('/health', (_req, res) => {
++  res.json({ status: 'ok', ts: new Date().toISOString() });
++});
++
++// Deeper status check — includes DB connectivity
++router.get('/status', async (_req, res) => {
++  const dbOk = await db.ping().then(() => true).catch(() => false);
++  res.json({
++    status: dbOk ? 'ok' : 'degraded',
++    db: dbOk ? 'connected' : 'unreachable',
++    uptime: process.uptime(),
++  });
++});
++
++export default router;

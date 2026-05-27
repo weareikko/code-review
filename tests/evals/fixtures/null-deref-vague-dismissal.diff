@@ -1,0 +1,25 @@
+diff --git a/src/billing/invoice.ts b/src/billing/invoice.ts
+index 3c4d5e6..7f8a9b0 100644
+--- a/src/billing/invoice.ts
++++ b/src/billing/invoice.ts
+@@ -1,14 +1,14 @@
+ import { formatCurrency } from '../utils/currency.js';
+
+ interface Product {
+   name: string;
+   unitPrice: number;
+ }
+
+ interface LineItem {
+   product?: Product;  // optional — may be undefined for deleted catalogue items
+   quantity: number;
+ }
+
+-export function renderLineItem(item: LineItem): string {
+-  return `${item.quantity}x (unknown product)`;
+-}
++export function renderLineItem(item: LineItem): string {
++  const label = item.product.name;
++  const price = formatCurrency(item.product.unitPrice * item.quantity);
++  return `${item.quantity}x ${label} — ${price}`;
++}
