@@ -643,6 +643,71 @@ describe('buildJSONSystemPrompt — skill section', () => {
     expect(prompt).not.toContain('<skills>');
   });
 
+  describe('format directives', () => {
+    const emptyContext = { conventions: [], reviewRules: [], skills: [] };
+
+    it('includes the Conventional Comments format block with label list and severity mapping', () => {
+      const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
+
+      expect(prompt).toContain('<comment_format>');
+      expect(prompt).toContain('conventionalcomments.org');
+      expect(prompt).toContain(
+        'Allowed labels: issue, suggestion, nitpick, question, todo, chore, note, thought',
+      );
+      expect(prompt).toContain('Allowed decorations: (blocking), (non-blocking), (if-minor)');
+      expect(prompt).toContain('CRITICAL → "issue (blocking): ..."');
+      expect(prompt).toContain('WARN     → "issue: ..."');
+      expect(prompt).toContain('INFO     → choose the fitting label');
+      expect(prompt).toContain('Do NOT emit "praise:" comments');
+    });
+
+    it('includes the summary skeleton with H3 sections and the empty-findings sentinel', () => {
+      const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
+
+      expect(prompt).toContain('<summary_skeleton>');
+      expect(prompt).toContain('### Overview');
+      expect(prompt).toContain('### Findings');
+      expect(prompt).toContain('### Notes');
+      expect(prompt).toContain('"No issues found in the reviewed diff."');
+    });
+
+    it('includes the anti-duplication rule in <rules>', () => {
+      const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
+
+      expect(prompt).toMatch(/summary lists findings by their Conventional Comment subject only/);
+      expect(prompt).toMatch(/MUST NOT repeat the discussion/);
+    });
+
+    it('includes the declarative tone rule excluding question and thought labels', () => {
+      const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
+
+      expect(prompt).toContain('Write declaratively.');
+      expect(prompt).toMatch(/question and thought labels are inherently tentative and exempt/);
+    });
+
+    it('drops severity emoji noise from the prompt', () => {
+      const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
+
+      // Severity tiers no longer carry decorative 🔴/🟡/🔵 emoji — labels alone
+      // carry the meaning, and comments now use Conventional Comments labels instead.
+      expect(prompt).not.toContain('🔴');
+      expect(prompt).not.toContain('🟡');
+      expect(prompt).not.toContain('🔵');
+    });
+
+    it('includes a worked example showing one issue (blocking) and one nitpick', () => {
+      const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
+
+      expect(prompt).toContain('<example>');
+      expect(prompt).toContain('"severity": "CRITICAL"');
+      expect(prompt).toContain('"severity": "INFO"');
+      expect(prompt).toContain('issue (blocking): Loop runs N+1 attempts');
+      expect(prompt).toContain('nitpick: Helper name shadows');
+      // Demonstrates a ```suggestion``` block in the example body
+      expect(prompt).toContain('```suggestion');
+    });
+  });
+
   it('renders multiple skills separated by blank lines', () => {
     const context = {
       conventions: [],
