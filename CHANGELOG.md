@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-28
+
 ### Changed
 
 - **Reviewer output adopts [Conventional Comments](https://conventionalcomments.org/) format**. Inline comment bodies now open with a `<label> [decoration]: <subject>` header followed by the discussion, replacing the previous freeform Markdown. Severity ↔ label mapping is enforced:
