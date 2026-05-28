@@ -1,0 +1,51 @@
+commit d4e5f6a7
+author Frontend Dev
+date 2025-05-22
+
+feat: add debounced auto-save hook
+
+Adds a useAutoSave hook that debounces saves so the API is not called
+on every keystroke. The hook manages saving state and surfaces errors.
+The debounce interval is configurable (default 1 second).
+
+diff --git a/src/hooks/useAutoSave.ts b/src/hooks/useAutoSave.ts
+new file mode 100644
+index 0000000..c2f3a19
+--- /dev/null
++++ b/src/hooks/useAutoSave.ts
+@@ -0,0 +1,33 @@
++import { useState, useEffect } from 'react';
++
++interface AutoSaveOptions {
++  onSave: (value: string) => Promise<void>;
++  debounceMs?: number;
++}
++
++/**
++ * Debounced auto-save hook. Saves the value debounceMs after the last change.
++ */
++export function useAutoSave(
++  initialValue: string,
++  { onSave, debounceMs = 1000 }: AutoSaveOptions,
++) {
++  const [value, setValue] = useState(initialValue);
++  const [saving, setSaving] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++
++  useEffect(() => {
++    const timer = setTimeout(async () => {
++      setSaving(true);
++      try {
++        await onSave(value);
++        setError(null);
++      } catch (e) {
++        setError(e instanceof Error ? e.message : 'Save failed');
++      } finally {
++        setSaving(false);
++      }
++    }, debounceMs);
++    return () => clearTimeout(timer);
++  }, [debounceMs]);
++
++  return { value, setValue, saving, error };
++}

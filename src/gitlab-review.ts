@@ -11,6 +11,8 @@ import type { Config } from './config.js';
 import { ReviewerError } from './errors.js';
 import type { Logger } from './logger.js';
 import { noopLogger } from './logger.js';
+import type { PriorThread } from './prior-threads.js';
+import { renderPriorThreadsBlock } from './prior-threads.js';
 import type { Skill } from './skills.js';
 import { loadAutoDiscoveredSkills, loadNamedSkill } from './skills.js';
 import type { GitLabReviewSeverity, ThinkingLevel } from './types.js';
@@ -49,9 +51,24 @@ export type CreateAgent = (params: CreateAgentParams) => AgentLike;
 export interface RunReviewOptions {
   cwd?: string;
   diff: string;
+  /**
+   * Commit messages for all non-merge commits in the MR (merge-base…HEAD),
+   * in chronological order. When provided, a `<commits>` section is prepended
+   * to the user prompt so the reviewer understands the intent behind each change.
+   * Produced by `getMergeCommitLog` in `src/git.ts`.
+   */
+  commitLog?: string;
   createAgent?: CreateAgent;
   timeoutMs?: number;
   logger?: Logger;
+  /**
+   * Prior developer replies to bot-posted review threads on the MR.
+   * When provided, a `<prior_review_feedback>` section is appended to the user
+   * prompt after `<diff>` so the reviewer can avoid re-raising already-acknowledged
+   * concerns and can provide contextual follow-up.
+   * Produced by `extractPriorThreads` in `src/prior-threads.ts`.
+   */
+  priorThreads?: PriorThread[];
   /**
    * Called with the agent after it is created, before the first prompt.
    * Use this to attach telemetry (e.g. `otelBridge.createAgentTelemetry(runId)`).
@@ -327,8 +344,17 @@ export function buildJSONSystemPrompt(
   return sections.join('\n\n');
 }
 
-export function buildUserPrompt(diff: string, skippedFiles: string[] = []): string {
-  const parts = [`Review this diff:\n<diff>\n${diff}\n</diff>`];
+export function buildUserPrompt(
+  diff: string,
+  skippedFiles: string[] = [],
+  commitLog?: string,
+  priorThreads?: PriorThread[],
+): string {
+  const parts: string[] = [];
+  if (commitLog?.trim()) {
+    parts.push(`Commits in this MR (oldest first):\n<commits>\n${commitLog.trim()}\n</commits>`);
+  }
+  parts.push(`Review this diff:\n<diff>\n${diff}\n</diff>`);
   if (skippedFiles.length > 0) {
     parts.push(
       `<skipped_files>\n${skippedFiles
@@ -337,6 +363,14 @@ export function buildUserPrompt(diff: string, skippedFiles: string[] = []): stri
           '\n',
         )}\n</skipped_files>\nThe above files were not included because the diff exceeded the size limit. Mention them explicitly in your summary as not reviewed.`,
     );
+  }
+  if (priorThreads && priorThreads.length > 0) {
+    const block = renderPriorThreadsBlock(priorThreads);
+    if (block) {
+      parts.push(
+        `The following threads were posted by a previous review run and have received developer replies. Use this context to avoid repeating already-acknowledged concerns and to provide informed follow-up:\n${block}`,
+      );
+    }
   }
   return parts.join('\n\n');
 }
@@ -482,7 +516,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
 
   const context = await loadReviewContext(cwd, config.skills, (msg) => logger.warn(msg));
   const systemPrompt = buildJSONSystemPrompt(context, minSeverity);
-  const userPrompt = buildUserPrompt(diff, skippedFiles);
+  const userPrompt = buildUserPrompt(diff, skippedFiles, options.commitLog, options.priorThreads);
 
   const skillNames = context.skills.map((s) => s.name);
   if (skillNames.length > 0) {

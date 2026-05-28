@@ -1,0 +1,30 @@
+diff --git a/src/routes/admin.ts b/src/routes/admin.ts
+new file mode 100644
+index 0000000..d4f8e3c
+--- /dev/null
++++ b/src/routes/admin.ts
+@@ -0,0 +1,24 @@
++import { Router } from 'express';
++import { config } from '../config.js';
++import { featureFlags } from '../features/flags.js';
++
++const router = Router();
++
++router.get('/admin/config', async (_req, res) => {
++  res.json({
++    environment: process.env.NODE_ENV,
++    version: process.env.APP_VERSION,
++    features: await featureFlags.getAll(),
++    dbHost: config.database.host,
++    redisHost: config.cache.host,
++    apiBaseUrl: config.integrations.apiBaseUrl,
++  });
++});
++
++router.post('/admin/features/:flag', async (req, res) => {
++  const { flag } = req.params;
++  await featureFlags.set(flag, req.body.enabled);
++  res.json({ ok: true, flag, enabled: req.body.enabled });
++});
++
++export default router;

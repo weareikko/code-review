@@ -10,7 +10,7 @@ import {
 } from './diagnostics.js';
 import { formatError, RuntimeError } from './errors.js';
 import { extractExistingFingerprints } from './fingerprints.js';
-import { getMergeDiff, prepareGitHistory } from './git.js';
+import { getMergeCommitLog, getMergeDiff, prepareGitHistory } from './git.js';
 import type { ReviewUsage } from './gitlab-review.js';
 import { runReview } from './gitlab-review.js';
 import { GitLabClient } from './gitlab.js';
@@ -25,6 +25,7 @@ import {
   postGeneratedComments,
   upsertSummaryNote,
 } from './posting.js';
+import { extractChangedFiles, extractPriorThreads } from './prior-threads.js';
 import type { DiffRefs, GeneratedComment } from './types.js';
 
 export type {
@@ -201,11 +202,24 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
     const diff = await traceDiagnosticPhase('git.get_merge_diff', config, runId, () =>
       getMergeDiff(mr.target_branch, { cwd: config.cwd }),
     );
+    const commitLog = await traceDiagnosticPhase('git.get_commit_log', config, runId, () =>
+      getMergeCommitLog(mr.target_branch, { cwd: config.cwd }),
+    );
+    const changedFiles = extractChangedFiles(diff);
+    const priorThreads = extractPriorThreads(initialDiscussions, changedFiles);
+    if (priorThreads.length > 0) {
+      logger.info(
+        `Found ${priorThreads.length} prior thread(s) with developer replies — including as context.`,
+      );
+    }
+
     logger.info('Running review...');
     const usage = await traceDiagnosticPhase('reviewer.run', config, runId, async (context) => {
       const result = await runReview(config, {
         cwd: config.cwd,
         diff,
+        commitLog,
+        priorThreads,
         logger,
         // Subscribe the OTel bridge to the agent's event stream so per-turn
         // and per-tool-call spans/metrics fire in real time.

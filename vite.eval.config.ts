@@ -1,4 +1,5 @@
 import { config as loadDotenv } from 'dotenv';
+import EvalReporter from 'vitest-evals/reporter';
 import { defineConfig } from 'vitest/config';
 
 // Load .env in the main process (covers env vars used at config time).
@@ -14,7 +15,7 @@ export default defineConfig({
     // Evals call real LLMs — give them generous time
     testTimeout: 120_000,
     hookTimeout: 30_000,
-    reporters: process.env.CI ? ['default', 'json'] : ['default'],
+    reporters: process.env.CI ? [new EvalReporter(), 'json'] : [new EvalReporter()],
     outputFile: {
       json: './test-results/evals.json',
     },
