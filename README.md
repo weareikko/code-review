@@ -393,6 +393,48 @@ await startOtelBridge({
 });
 ```
 
+## Review output format
+
+Reviewer output is structured so each MR review reads the same way across runs and reviewers.
+
+**Inline comments** use the [Conventional Comments](https://conventionalcomments.org/) shape:
+
+```md
+<label> [decoration]: <Subject — short, action-oriented>
+
+<Discussion: 1-2 sentences on the defect and impact, then the fix (often a `suggestion` block).>
+```
+
+Allowed labels: `issue`, `suggestion`, `nitpick`, `question`, `todo`, `chore`, `note`, `thought`. Decorations: `(blocking)`, `(non-blocking)`, `(if-minor)`. Severity ↔ label mapping is fixed:
+
+| `severity` field | Comment header                                                                 |
+| ---------------- | ------------------------------------------------------------------------------ |
+| `CRITICAL`       | `issue (blocking): ...`                                                        |
+| `WARN`           | `issue: ...` (unmarked, implicitly blocking)                                   |
+| `INFO`           | `nitpick:` / `suggestion (non-blocking):` / `note:` / `question:` / `thought:` |
+
+**Summary** follows a fixed skeleton (each section is omitted if empty):
+
+```md
+### Overview
+
+<2-3 sentences: what the MR does and the verdict.>
+
+### Findings
+
+<N> issue (blocking) · <N> issue · <N> suggestion · <N> nitpick
+
+- **<label>** — `path/to/file.ts:42` — <subject only — not the discussion>
+
+### Notes
+
+<Suppressed findings (with the commit/ADR they reference), unreviewed files, or anything inline comments cannot carry.>
+```
+
+When there are no findings, the summary is exactly: `No issues found in the reviewed diff.`
+
+The Findings bullets restate only the subject of each inline comment — the discussion, impact, and fix live in the inline comment itself, not in the summary.
+
 ## MR-level summary note
 
 In addition to inline discussions, the reviewer returns an overall `summary` (Markdown). The CLI posts it as a non-positional MR note — the same shape a human reviewer creates when typing in the MR comment box. The note carries a hidden marker:

@@ -855,6 +855,197 @@ const NullDereferenceFlaggedJudge = createJudge(
   },
 );
 
+// =============================================================================
+// Output format — Conventional Comments + summary skeleton
+//
+// These judges enforce the format directives in buildJSONSystemPrompt:
+//   1. Every inline comment body opens with a Conventional Comments header
+//      (https://conventionalcomments.org/): `<label> [decoration]: <subject>`
+//   2. Label and decoration match the structured severity field:
+//      CRITICAL → "issue (blocking):"
+//      WARN     → "issue:" (no decoration)
+//      INFO     → nitpick / suggestion (non-blocking) / note / question / thought
+//   3. The summary contains the skeleton sections (### Overview, ### Findings)
+//      and does NOT duplicate the discussion text from inline comments — the
+//      anti-duplication rule keeps the summary scannable.
+// =============================================================================
+
+const ALLOWED_LABELS = [
+  'issue',
+  'suggestion',
+  'nitpick',
+  'question',
+  'todo',
+  'chore',
+  'note',
+  'thought',
+] as const;
+
+const CONVENTIONAL_HEADER_RE = new RegExp(
+  String.raw`^\s*(${ALLOWED_LABELS.join('|')})(\s+\((?:blocking|non-blocking|if-minor)\))?:\s+\S`,
+);
+
+const ConventionalCommentFormatJudge = createJudge(
+  'ConventionalCommentFormatJudge',
+  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
+    if (output.comments.length === 0) {
+      return {
+        score: 1,
+        metadata: { rationale: 'No comments to validate (vacuous pass).' },
+      };
+    }
+
+    const violations: { file: string; line: number; reason: string; preview: string }[] = [];
+
+    for (const c of output.comments) {
+      const first = c.body.split('\n', 1)[0] ?? '';
+      if (!CONVENTIONAL_HEADER_RE.test(first)) {
+        violations.push({
+          file: c.file,
+          line: c.line,
+          reason: 'first line is not a Conventional Comments header',
+          preview: first.slice(0, 120),
+        });
+        continue;
+      }
+      // Severity → label/decoration mapping
+      const headerMatch = first.match(CONVENTIONAL_HEADER_RE);
+      const label = headerMatch?.[1];
+      const decoration = (headerMatch?.[2] ?? '').trim();
+      if (c.severity === 'critical' && !(label === 'issue' && decoration === '(blocking)')) {
+        violations.push({
+          file: c.file,
+          line: c.line,
+          reason: `CRITICAL must use "issue (blocking):" (got "${label}${decoration ? ` ${decoration}` : ''}:")`,
+          preview: first.slice(0, 120),
+        });
+      } else if (c.severity === 'warn' && !(label === 'issue' && decoration === '')) {
+        violations.push({
+          file: c.file,
+          line: c.line,
+          reason: `WARN must use bare "issue:" (got "${label}${decoration ? ` ${decoration}` : ''}:")`,
+          preview: first.slice(0, 120),
+        });
+      } else if (c.severity === 'info' && label === 'issue') {
+        violations.push({
+          file: c.file,
+          line: c.line,
+          reason: 'INFO must use nitpick / suggestion (non-blocking) / note / question / thought',
+          preview: first.slice(0, 120),
+        });
+      }
+    }
+
+    return {
+      score: violations.length === 0 ? 1 : 0,
+      metadata: {
+        rationale:
+          violations.length === 0
+            ? `All ${output.comments.length} comment(s) conform to Conventional Comments format and severity mapping`
+            : `${violations.length}/${output.comments.length} comment(s) violate the format/mapping`,
+        violations,
+      },
+    };
+  },
+);
+
+const SummarySkeletonJudge = createJudge(
+  'SummarySkeletonJudge',
+  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
+    // Empty-findings sentinel is also valid output.
+    if (output.summary.trim() === 'No issues found in the reviewed diff.') {
+      return {
+        score: 1,
+        metadata: { rationale: 'Used the empty-findings sentinel.' },
+      };
+    }
+    const hasOverview = /^###\s+Overview\b/m.test(output.summary);
+    const hasFindings = /^###\s+Findings\b/m.test(output.summary);
+    const score = hasOverview && hasFindings ? 1 : 0;
+    return {
+      score,
+      metadata: {
+        rationale:
+          score === 1 ? 'Summary follows the skeleton' : 'Summary missing skeleton sections',
+        hasOverview,
+        hasFindings,
+        summaryHead: output.summary.slice(0, 200),
+      },
+    };
+  },
+);
+
+// Anti-duplication: the summary's Findings bullets should restate only the
+// comment subject, not the comment's discussion. We extract the discussion
+// (everything after the first newline of each comment body) and check that no
+// distinctive sentence from it appears verbatim in the summary.
+const NoDuplicationJudge = createJudge(
+  'NoDuplicationJudge',
+  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
+    if (output.comments.length === 0) {
+      return {
+        score: 1,
+        metadata: { rationale: 'No comments to check for duplication.' },
+      };
+    }
+    const summary = output.summary;
+    const dupes: { file: string; line: number; sentence: string }[] = [];
+
+    for (const c of output.comments) {
+      const newlineIdx = c.body.indexOf('\n');
+      if (newlineIdx === -1) continue;
+      const discussion = c.body.slice(newlineIdx + 1).trim();
+      if (!discussion) continue;
+      // Take the first sentence of the discussion (trim noise like code fences).
+      const cleaned = discussion.replace(/^[`*\s>]+/, '').trim();
+      const sentence = cleaned.split(/[.!?]\s|\n/)[0]?.trim() ?? '';
+      // Skip very short sentences that may legitimately overlap (e.g. file names).
+      if (sentence.length < 40) continue;
+      if (summary.includes(sentence)) {
+        dupes.push({ file: c.file, line: c.line, sentence: sentence.slice(0, 120) });
+      }
+    }
+
+    return {
+      score: dupes.length === 0 ? 1 : 0,
+      metadata: {
+        rationale:
+          dupes.length === 0
+            ? 'Summary does not duplicate comment discussion text'
+            : `Summary duplicates ${dupes.length} comment discussion sentence(s)`,
+        duplicates: dupes,
+      },
+    };
+  },
+);
+
+describeEval(
+  'output format — Conventional Comments + summary skeleton',
+  {
+    harness: reviewHarness,
+    judges: [ConventionalCommentFormatJudge, SummarySkeletonJudge, NoDuplicationJudge],
+    // Format/mapping conformance is required; duplication is recorded but soft.
+    judgeThreshold: 1,
+    skipIf: missingApiKey,
+  },
+  (it) => {
+    it('async/forEach diff: comments use Conventional Comments + summary follows skeleton', async ({
+      run,
+    }) => {
+      const diff = await readFile(join(FIXTURES, 'async-foreach-bug.diff'), 'utf8');
+      const result = await run({ diff, skills: ['code-review'] });
+      expect(result.output).toBeDefined();
+      expect(result.output.summary.length).toBeGreaterThan(0);
+    });
+
+    it('clean diff: emits the empty-findings sentinel or a conforming summary', async ({ run }) => {
+      const diff = await readFile(join(FIXTURES, 'clean-ts.diff'), 'utf8');
+      const result = await run({ diff, skills: ['code-review'] });
+      expect(result.output).toBeDefined();
+    });
+  },
+);
+
 describeEval(
   'prior review feedback — vague dismissal does not suppress a concrete bug',
   {

@@ -7,11 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Reviewer output uses Conventional Comments format**: `buildJSONSystemPrompt` now pins inline comment bodies to the [Conventional Comments](https://conventionalcomments.org/) shape (`<label> [decoration]: <subject>` followed by discussion), and the summary follows a fixed skeleton (`### Overview`, `### Findings`, `### Notes`). Severity ↔ label mapping is enforced: `CRITICAL → "issue (blocking):"`, `WARN → "issue:"`, `INFO → nitpick / suggestion (non-blocking) / note / question / thought`. Severity emoji (🔴/🟡/🔵) is dropped from the prompt to remove visual noise — the structured `severity` JSON field remains the source of truth. The summary's Findings section restates only the subject of each inline comment; it must not duplicate the discussion or fix.
+- **Stricter prompt rules**: declarative-tone rule (no hedging in `issue`/`suggestion` subjects) and explicit anti-duplication rule between summary and inline comments. A worked example is included in the prompt to anchor the output shape.
+
 ### Added
 
 - **Prior developer replies as review context**: when the MR already has bot-posted review threads with developer replies, those threads are extracted and passed to the reviewer as a `<prior_review_feedback>` section in the prompt. The reviewer can use this to avoid re-raising already-acknowledged concerns and to provide informed follow-up. Threads are filtered to files in the current diff; resolved threads are included but marked as resolved.
 - **Commit log as review context**: commit messages for all non-merge commits in the MR are passed to the reviewer as a `<commits>` section prepended to the prompt, giving the reviewer intent context alongside the code diff.
 - **Commit message justifications in code-review skill**: the built-in `code-review` skill now instructs the reviewer to treat explicit commit artefacts (ADR numbers, incident references, named sign-offs) as authoritative evidence when justifying otherwise-suspicious patterns.
+- **Format-conformance eval scenarios**: `tests/evals/review.eval.ts` adds `ConventionalCommentFormatJudge`, `SummarySkeletonJudge`, and `NoDuplicationJudge` to verify reviewer output conforms to the new format.
 
 ## [0.3.12] - 2026-05-26
 
