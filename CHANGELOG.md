@@ -9,7 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Reviewer output uses Conventional Comments format**: `buildJSONSystemPrompt` now pins inline comment bodies to the [Conventional Comments](https://conventionalcomments.org/) shape (`<label> [decoration]: <subject>` followed by discussion), and the summary follows a fixed skeleton (`### Overview`, `### Findings`, `### Notes`). Severity ↔ label mapping is enforced: `CRITICAL → "issue (blocking):"`, `WARN → "issue:"`, `INFO → nitpick / suggestion (non-blocking) / note / question / thought`. Severity emoji (🔴/🟡/🔵) is dropped from the prompt to remove visual noise — the structured `severity` JSON field remains the source of truth. The summary's Findings section restates only the subject of each inline comment; it must not duplicate the discussion or fix.
+- **Reviewer output adopts [Conventional Comments](https://conventionalcomments.org/) format**. Inline comment bodies now open with a `<label> [decoration]: <subject>` header followed by the discussion, replacing the previous freeform Markdown. Severity ↔ label mapping is enforced:
+  - `CRITICAL` → `issue (blocking): ...`
+  - `WARN` → `issue: ...` (unmarked, implicitly blocking per the spec)
+  - `INFO` → `nitpick: ...` / `suggestion (non-blocking): ...` / `note: ...` / `question: ...` / `thought: ...`
+- **Summary follows a fixed skeleton**: `### Overview`, `### Findings`, `### Notes`. The Findings section restates only each comment's subject — the discussion, impact, and fix live in the inline comment itself (anti-duplication rule). When there are no findings, the summary is exactly `"No issues found in the reviewed diff."`.
+- **Severity emoji (🔴/🟡/🔵) dropped from prompt and output** to remove visual noise; the structured `severity` JSON field remains the source of truth for filtering and posting.
 - **Stricter prompt rules**: declarative-tone rule (no hedging in `issue`/`suggestion` subjects) and explicit anti-duplication rule between summary and inline comments. A worked example is included in the prompt to anchor the output shape.
 
 ### Added
@@ -17,7 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Prior developer replies as review context**: when the MR already has bot-posted review threads with developer replies, those threads are extracted and passed to the reviewer as a `<prior_review_feedback>` section in the prompt. The reviewer can use this to avoid re-raising already-acknowledged concerns and to provide informed follow-up. Threads are filtered to files in the current diff; resolved threads are included but marked as resolved.
 - **Commit log as review context**: commit messages for all non-merge commits in the MR are passed to the reviewer as a `<commits>` section prepended to the prompt, giving the reviewer intent context alongside the code diff.
 - **Commit message justifications in code-review skill**: the built-in `code-review` skill now instructs the reviewer to treat explicit commit artefacts (ADR numbers, incident references, named sign-offs) as authoritative evidence when justifying otherwise-suspicious patterns.
-- **Format-conformance eval scenarios**: `tests/evals/review.eval.ts` adds `ConventionalCommentFormatJudge`, `SummarySkeletonJudge`, and `NoDuplicationJudge` to verify reviewer output conforms to the new format.
+- **Format-conformance eval scenarios**: `tests/evals/review.eval.ts` adds `ConventionalCommentFormatJudge`, `SummarySkeletonJudge`, and `NoDuplicationJudge` to verify reviewer output conforms to the new format on every eval run.
+- **`README.md` — `## Review output format` section** documenting the Conventional Comments inline shape, severity-to-label mapping table, summary skeleton, and the empty-findings sentinel.
 
 ## [0.3.12] - 2026-05-26
 
