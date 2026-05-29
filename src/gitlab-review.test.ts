@@ -685,6 +685,20 @@ describe('buildJSONSystemPrompt — skill section', () => {
       expect(prompt).toMatch(/question and thought labels are inherently tentative and exempt/);
     });
 
+    it('anchors severity to certainty and impact, not just topic', () => {
+      const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
+
+      // The tiers must explicitly state the certainty/impact pairing and the
+      // downgrade-when-uncertain rule. These signals were missing from the
+      // earlier topic-only list ("bugs causing runtime failures, ...") which
+      // led to severe over-flagging on clean and justified-intentional code.
+      expect(prompt).toMatch(/severity reflects BOTH the impact .* AND your certainty/i);
+      expect(prompt).toMatch(/lowest tier that fits/i);
+      expect(prompt).toMatch(/demonstrate from the diff alone/i);
+      expect(prompt).toMatch(/justified by an in-file comment, commit message, or referenced ADR/i);
+      expect(prompt).toMatch(/silence beats fabrication/i);
+    });
+
     it('drops severity emoji noise from the prompt', () => {
       const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
 
