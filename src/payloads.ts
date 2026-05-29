@@ -6,6 +6,8 @@ import type {
   ReviewComment,
 } from './types.js';
 
+declare const __PKG_VERSION__: string;
+
 const CONVENTIONAL_TITLE_RE = /^[a-z]+(?:\s*\([^)]+\))?:\s.+$/;
 
 function boldCommentTitle(body: string): string {
@@ -27,7 +29,7 @@ function boldCommentTitle(body: string): string {
  * commits even when the SHA in the footer changes.
  */
 export function buildCommentBody(body: string, commitSha: string): string {
-  const footer = `<sub>Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) for commit ${commitSha}.</sub>`;
+  const footer = `<sub>Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) v${__PKG_VERSION__} for commit ${commitSha}.</sub>`;
   return `${boldCommentTitle(body.trim())}\n\n---\n\n${footer}`;
 }
 

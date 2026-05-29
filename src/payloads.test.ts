@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { buildCommentBody, buildGeneratedComments } from './payloads.js';
 import type { DiffRefs, ReviewComment } from './types.js';
 
+declare const __PKG_VERSION__: string;
+
 const COMMIT_SHA = 'a'.repeat(40);
 const BASE_SHA = 'b'.repeat(40);
 const START_SHA = 'c'.repeat(40);
-const EXPECTED_FOOTER = `<sub>Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) for commit ${COMMIT_SHA}.</sub>`;
+const EXPECTED_FOOTER = `<sub>Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) v${__PKG_VERSION__} for commit ${COMMIT_SHA}.</sub>`;
 
 const refs: DiffRefs = {
   base_sha: BASE_SHA,
@@ -27,6 +29,11 @@ describe('buildCommentBody', () => {
   it('embeds the full 40-character SHA', () => {
     const body = buildCommentBody('ok', COMMIT_SHA);
     expect(body).toContain(COMMIT_SHA);
+  });
+
+  it('includes the package version in the footer', () => {
+    const body = buildCommentBody('ok', COMMIT_SHA);
+    expect(body).toContain(`v${__PKG_VERSION__} for commit ${COMMIT_SHA}`);
   });
 
   it('bolds the Conventional Comment title line', () => {

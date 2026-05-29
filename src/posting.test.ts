@@ -16,6 +16,8 @@ import {
 } from './posting.js';
 import type { GeneratedComment } from './review.js';
 
+declare const __PKG_VERSION__: string;
+
 const LEGACY_PROJECT_MARKER = ['pi', 'reviewer'].join('-');
 const LEGACY_PACKAGE_NAME = `@ikko-dev/${LEGACY_PROJECT_MARKER}`;
 
@@ -59,7 +61,7 @@ describe('summary note upsert', () => {
     const body = buildSummaryBody('Great work.', undefined, { reviewedCommitSha: commit });
 
     expect(body).toContain(
-      '---\n\nReviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) for commit 27dab603346bcb994190042029ce7368021ff21e.',
+      `---\n\nReviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) v${__PKG_VERSION__} for commit 27dab603346bcb994190042029ce7368021ff21e.`,
     );
     expect(extractReviewedCommitSha(body)).toBe(commit);
   });

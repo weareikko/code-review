@@ -25,9 +25,11 @@ const SUMMARY_HISTORY_ENTRY_MARKER_PAIRS = [
 ] as const;
 const REVIEWED_COMMIT_PROJECT_RE = String.raw`(?:gitlab-review|${LEGACY_PROJECT_MARKER})`;
 export const REVIEWED_COMMIT_FOOTER_PATTERN = new RegExp(
-  String.raw`Reviewed by \[@ikko-dev\/${REVIEWED_COMMIT_PROJECT_RE}\]\(https:\/\/github\.com\/ikko-dev\/${REVIEWED_COMMIT_PROJECT_RE}\) for commit ([a-f0-9]{40})\.`,
+  String.raw`Reviewed by \[@ikko-dev\/${REVIEWED_COMMIT_PROJECT_RE}\]\(https:\/\/github\.com\/ikko-dev\/${REVIEWED_COMMIT_PROJECT_RE}\)(?: v\S+)? for commit ([a-f0-9]{40})\.`,
   'i',
 );
+
+declare const __PKG_VERSION__: string;
 
 export type SummaryAction = 'created' | 'updated';
 
@@ -73,7 +75,7 @@ export function buildSummaryBody(
 }
 
 export function buildReviewedCommitFooter(commitSha: string): string {
-  return `Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) for commit ${commitSha}.`;
+  return `Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) v${__PKG_VERSION__} for commit ${commitSha}.`;
 }
 
 export function extractReviewedCommitSha(body: string): string | null {

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Bot comment titles are bolded** so the Conventional Comment header (`<label> [decoration]: <subject>`) stands out from the discussion that follows.
+- **Commit footer now includes the package version**: footers on inline comments and summary notes read `Reviewed by [@ikko-dev/gitlab-review](…) v<VERSION> for commit <sha>.`, making it easy to tell which reviewer version produced a given comment. Extraction of the reviewed-commit SHA stays backwards-compatible with footers from earlier versions that omit the version.
 
 ## [0.4.0] - 2026-05-28
 
