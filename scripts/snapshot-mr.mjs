@@ -193,7 +193,9 @@ function buildStub(name, hasCommitLog, hasPriorThreads) {
     `      const diff = await readFile(join(FIXTURES, '${name}.diff'), 'utf8');`,
   ];
   if (hasCommitLog) {
-    lines.push(`      const commitLog = await readFile(join(FIXTURES, '${name}.commitlog'), 'utf8');`);
+    lines.push(
+      `      const commitLog = await readFile(join(FIXTURES, '${name}.commitlog'), 'utf8');`,
+    );
   }
   if (hasPriorThreads) {
     lines.push(
@@ -221,7 +223,10 @@ async function main() {
   const mr = args.mr;
   const name = args.name;
   const gitlabUrl =
-    args['gitlab-url'] ?? process.env.GITLAB_URL ?? process.env.CI_SERVER_URL ?? 'https://gitlab.com';
+    args['gitlab-url'] ??
+    process.env.GITLAB_URL ??
+    process.env.CI_SERVER_URL ??
+    'https://gitlab.com';
   const token =
     args.token ?? process.env.GITLAB_TOKEN ?? process.env.GITLAB_REVIEW_GITLAB_TOKEN ?? '';
   const authHeader = args['auth-header'] ?? 'PRIVATE-TOKEN';
@@ -230,7 +235,8 @@ async function main() {
   if (!mr) die('--mr is required (e.g. --mr 123)');
   if (!name) die('--name is required (e.g. --name auth-regression)');
   if (!token) die('token is required (set GITLAB_TOKEN or pass --token)');
-  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(name)) die(`--name must be a safe filename slug, got "${name}"`);
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(name))
+    die(`--name must be a safe filename slug, got "${name}"`);
 
   const client = makeClient({ gitlabUrl, token, authHeader });
   const encodedProject = encodeURIComponent(project);
