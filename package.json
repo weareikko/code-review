@@ -47,6 +47,7 @@
     "test": "vitest run",
     "test:ci": "vitest run --coverage",
     "test:evals": "vitest run --config vite.eval.config.ts",
+    "snapshot:mr": "node scripts/snapshot-mr.mjs",
     "typecheck": "tsgo --noEmit",
     "typecheck:tests": "tsgo -p tsconfig.test.json --noEmit",
     "lint": "oxlint",
