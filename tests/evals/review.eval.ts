@@ -10,6 +10,7 @@ import type { Config } from '../../src/config.js';
 import { runReview } from '../../src/gitlab-review.js';
 import { parseReviewMarkdownWithWarnings } from '../../src/parser.js';
 import type { PriorThread } from '../../src/prior-threads.js';
+import { createLlmJudge } from './llm-judge.js';
 import type { Trajectory } from './trajectory.js';
 import { createTrajectoryCollector } from './trajectory.js';
 
@@ -115,33 +116,12 @@ const reviewHarness = createHarness<EvalInput, EvalOutput, Record<string, unknow
   },
 });
 
-// Judge: review mentions the async/forEach pattern (any comment or summary body)
-const AsyncBugDetectedJudge = createJudge(
+// Judge: review clearly identifies the async/forEach bug. The keyword-matching
+// version of this judge was too lenient — any mention of "promise" in any
+// context scored 1. The LLM judge instead requires a clear identification.
+const AsyncBugDetectedJudge = createLlmJudge<EvalInput, EvalOutput>(
   'AsyncBugDetectedJudge',
-  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
-    const patterns = [
-      'foreach',
-      'fire-and-forget',
-      'not awaited',
-      'unhandled',
-      'promise',
-      'swallowed',
-      'never resolves',
-      'never await',
-      "won't be awaited",
-    ];
-    const allText = [output.summary, ...output.comments.map((c) => c.body)].join(' ').toLowerCase();
-    const hit = patterns.some((p) => allText.includes(p));
-    return {
-      score: hit ? 1 : 0,
-      metadata: {
-        rationale: hit
-          ? 'Review correctly mentions the async/forEach bug'
-          : 'Review did not identify the async/forEach issue',
-        commentCount: output.comments.length,
-      },
-    };
-  },
+  'The review must clearly identify that calling Array.prototype.forEach with an async callback is a bug — either because the returned promises are not awaited, errors are swallowed, or callers cannot observe completion. A bare mention of "promise" or "async" without explaining the forEach-specific problem does NOT pass.',
 );
 
 // Judge: the review has at least one CRITICAL or WARN finding
@@ -318,57 +298,16 @@ describeEval(
   },
 );
 
-// Judge: review identifies the missing deps / stale closure in useEffect
-const StaleClosureJudge = createJudge(
+// Judge: review identifies the missing deps / stale closure in useEffect.
+const StaleClosureJudge = createLlmJudge<EvalInput, EvalOutput>(
   'StaleClosureJudge',
-  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
-    const keywords = [
-      'stale',
-      'closure',
-      'dependency',
-      'dependencies',
-      'dep',
-      'useeffect',
-      'missing',
-      'debounce',
-      'initial',
-    ];
-    const allText = [output.summary, ...output.comments.map((c) => c.body)].join(' ').toLowerCase();
-    const hit = keywords.filter((k) => allText.includes(k));
-    // Require at least 2 distinct keywords to avoid accidental matches
-    const score = hit.length >= 2 ? 1 : 0;
-    return {
-      score,
-      metadata: {
-        rationale:
-          score === 1
-            ? `Detected stale closure/missing dep issue (matched: ${hit.join(', ')})`
-            : `Did not identify stale closure — only matched: ${hit.join(', ') || 'none'}`,
-        commentCount: output.comments.length,
-      },
-    };
-  },
+  'The review must clearly identify a React stale-closure bug: a useEffect (or similar hook) that reads a value but omits it from the dependency array, so the effect captures the stale initial value. A generic warning about "missing dependencies" without explaining the resulting incorrect behaviour does NOT pass.',
 );
 
-// Judge: review identifies the race condition in the PHP promo code handler
-const RaceConditionJudge = createJudge(
+// Judge: review identifies the race condition in the PHP promo code handler.
+const RaceConditionJudge = createLlmJudge<EvalInput, EvalOutput>(
   'RaceConditionJudge',
-  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
-    const keywords = ['race', 'concurrent', 'atomic', 'lock', 'transaction', 'updateorcreate'];
-    const allText = [output.summary, ...output.comments.map((c) => c.body)].join(' ').toLowerCase();
-    const hit = keywords.filter((k) => allText.includes(k));
-    const score = hit.length >= 1 ? 1 : 0;
-    return {
-      score,
-      metadata: {
-        rationale:
-          score === 1
-            ? `Detected race condition issue (matched: ${hit.join(', ')})`
-            : 'Did not identify the race condition or non-atomic update',
-        commentCount: output.comments.length,
-      },
-    };
-  },
+  'The review must clearly identify that two concurrent requests can both succeed in claiming the same promo code because the read-then-write sequence is not atomic. Equivalent framings (race condition, non-atomic update, missing row lock, missing transaction, TOCTOU) all count. A vague suggestion to "use a transaction" without naming the race does NOT pass.',
 );
 
 describeEval(
@@ -532,39 +471,11 @@ describeEval(
   },
 );
 
-// Judge: review identifies that the cache is not keyed by userId, so it
-// returns the first user's token to every subsequent caller.
-const GlobalCacheBugJudge = createJudge(
+// Judge: review identifies that the module-level cache is not keyed by user,
+// so it leaks one user's token to every subsequent caller.
+const GlobalCacheBugJudge = createLlmJudge<EvalInput, EvalOutput>(
   'GlobalCacheBugJudge',
-  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
-    const keywords = [
-      'user',
-      'key',
-      'keyed',
-      'global',
-      'shared',
-      'all users',
-      'module',
-      'wrong user',
-      'another user',
-      'different user',
-      'not scoped',
-      'not per',
-    ];
-    const allText = [output.summary, ...output.comments.map((c) => c.body)].join(' ').toLowerCase();
-    const hits = keywords.filter((k) => allText.includes(k));
-    const score = hits.length >= 2 ? 1 : 0;
-    return {
-      score,
-      metadata: {
-        rationale:
-          score === 1
-            ? `Identified cross-user cache pollution (matched: ${hits.join(', ')})`
-            : `Did not flag the global cache as user-specific bug (matched: ${hits.join(', ') || 'none'})`,
-        commentCount: output.comments.length,
-      },
-    };
-  },
+  "The review must clearly identify that a module-level / shared cache is missing a per-user key, so the first user's cached value is returned to every subsequent user. Calling out cross-user leakage, shared state, or that the cache should be keyed by userId all count. A general comment about caching strategy without the cross-user defect does NOT pass.",
 );
 
 // This is the most diagnostic fixture for the flat-vs-patch question:
@@ -785,43 +696,13 @@ describeEval(
 // All cases use judgeThreshold: null (recording only — LLM behaviour varies).
 // =============================================================================
 
-// Judge: does the reviewer raise a concern about missing authentication as a
-// CRITICAL or WARN finding? Score=1 means the concern was raised as severe.
+// Judge: does the reviewer raise missing authentication as a SEVERE concern?
+// Score=1 means the concern was raised at CRITICAL or WARN level.
 // For scenario A we expect this to drop from 1→0 when the prior thread explains
-// the endpoint is protected at the network layer — a concrete, specific reason.
-const AuthConcernRaisedJudge = createJudge(
+// the endpoint is protected at the network layer.
+const AuthConcernRaisedJudge = createLlmJudge<EvalInput, EvalOutput>(
   'AuthConcernRaisedJudge',
-  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
-    const authKeywords = [
-      'auth',
-      'unauthenticated',
-      'unauthorized',
-      'authentication',
-      'authorization',
-      'access control',
-      'permission',
-    ];
-    const severeComments = output.comments.filter(
-      (c) => c.severity === 'critical' || c.severity === 'warn',
-    );
-    // Check severe comments AND summary — both carry meaningful findings.
-    const severeText = [...severeComments.map((c) => c.body), output.summary]
-      .join(' ')
-      .toLowerCase();
-    const flagged = authKeywords.some((k) => severeText.includes(k));
-    return {
-      score: flagged ? 1 : 0,
-      metadata: {
-        rationale: flagged
-          ? `Reviewer raised auth as a severe concern (${severeComments.length} severe comment(s))`
-          : 'Reviewer did not raise auth as a severe finding',
-        severeComments: severeComments.map((c) => ({
-          severity: c.severity,
-          body: c.body.slice(0, 120),
-        })),
-      },
-    };
-  },
+  'The review must raise missing authentication / authorization / access control as a CRITICAL or WARN concern (not just an INFO suggestion). Score=1 only if at least one CRITICAL- or WARN-severity finding clearly flags the lack of auth. INFO-level mentions, suggestions to "consider adding auth", or summary-only remarks without a severe inline finding do NOT pass.',
 );
 
 // Judge: did the reviewer surface the specific context from the prior thread
@@ -905,32 +786,9 @@ describeEval(
 // finding? Score=1 means it was correctly flagged as a concrete defect.
 // For scenario B we expect this to stay at 1 even when the developer gave a
 // vague "hasn't been a problem" dismissal — that is not a technical justification.
-const NullDereferenceFlaggedJudge = createJudge(
+const NullDereferenceFlaggedJudge = createLlmJudge<EvalInput, EvalOutput>(
   'NullDereferenceFlaggedJudge',
-  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
-    const keywords = ['null', 'undefined', 'optional', 'product?', 'typeerror', 'dereference'];
-    const severeComments = output.comments.filter(
-      (c) => c.severity === 'critical' || c.severity === 'warn',
-    );
-    const severeText = severeComments
-      .map((c) => c.body)
-      .join(' ')
-      .toLowerCase();
-    const summaryText = output.summary.toLowerCase();
-    const flagged = keywords.some((k) => severeText.includes(k) || summaryText.includes(k));
-    return {
-      score: flagged ? 1 : 0,
-      metadata: {
-        rationale: flagged
-          ? `Reviewer correctly flagged the null/undefined dereference (${severeComments.length} severe comment(s))`
-          : 'Reviewer did not flag the null dereference — possible false negative',
-        severeComments: severeComments.map((c) => ({
-          severity: c.severity,
-          body: c.body.slice(0, 120),
-        })),
-      },
-    };
-  },
+  'The review must flag a concrete null / undefined dereference as CRITICAL or WARN: an optional field (e.g. typed as `Product | undefined`) being accessed without a null check, which will throw a TypeError at runtime. INFO-level suggestions, generic type-safety nits, or a vague mention without identifying the actual unguarded access do NOT pass.',
 );
 
 // =============================================================================
