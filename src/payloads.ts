@@ -6,6 +6,16 @@ import type {
   ReviewComment,
 } from './types.js';
 
+const CONVENTIONAL_TITLE_RE = /^[a-z]+(?:\s*\([^)]+\))?:\s.+$/;
+
+function boldCommentTitle(body: string): string {
+  const newlineIndex = body.indexOf('\n');
+  const firstLine = newlineIndex === -1 ? body : body.slice(0, newlineIndex);
+  if (!CONVENTIONAL_TITLE_RE.test(firstLine)) return body;
+  const rest = newlineIndex === -1 ? '' : body.slice(newlineIndex);
+  return `**${firstLine}**${rest}`;
+}
+
 /**
  * Builds the visible body of an inline comment by appending a commit footer
  * after a horizontal rule. The footer mirrors the format used in the MR-level
@@ -18,7 +28,7 @@ import type {
  */
 export function buildCommentBody(body: string, commitSha: string): string {
   const footer = `<sub>Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) for commit ${commitSha}.</sub>`;
-  return `${body.trim()}\n\n---\n\n${footer}`;
+  return `${boldCommentTitle(body.trim())}\n\n---\n\n${footer}`;
 }
 
 export function buildPayload(

@@ -28,6 +28,25 @@ describe('buildCommentBody', () => {
     const body = buildCommentBody('ok', COMMIT_SHA);
     expect(body).toContain(COMMIT_SHA);
   });
+
+  it('bolds the Conventional Comment title line', () => {
+    const body = buildCommentBody(
+      'issue (blocking): Loop runs N+1 attempts\n\nDiscussion text.',
+      COMMIT_SHA,
+    );
+    expect(body).toContain('**issue (blocking): Loop runs N+1 attempts**\n\nDiscussion text.');
+  });
+
+  it('bolds a title-only body without a discussion', () => {
+    const body = buildCommentBody('nitpick: Helper name shadows the type', COMMIT_SHA);
+    expect(body.startsWith('**nitpick: Helper name shadows the type**')).toBe(true);
+  });
+
+  it('leaves bodies that do not look like a Conventional Comment alone', () => {
+    const body = buildCommentBody('Plain feedback without a label.', COMMIT_SHA);
+    expect(body.startsWith('Plain feedback without a label.')).toBe(true);
+    expect(body).not.toContain('**Plain feedback');
+  });
 });
 
 describe('buildGeneratedComments', () => {
