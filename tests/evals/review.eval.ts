@@ -210,9 +210,13 @@ const TrajectoryShapeJudge = createJudge(
 const SkillFileReadJudge = createJudge(
   'SkillFileReadJudge',
   ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
+    // pi-coding-agent's read tool uses `args.path`; older wrappers used
+    // `args.file_path`. Accept either. The first incarnation of this judge
+    // only checked `file_path` and produced false negatives across every
+    // skill-enabled run — the agent was reading skills all along.
     const reads = output.trajectory.toolCalls
       .filter((c) => c.name === 'Read' || c.name === 'read')
-      .map((c) => String(c.args.file_path ?? ''));
+      .map((c) => String(c.args.path ?? c.args.file_path ?? ''));
     const skillReads = reads.filter((p) => p.includes('skills/') || p.includes('SKILL.md'));
     return {
       score: skillReads.length > 0 ? 1 : 0,
