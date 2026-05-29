@@ -403,8 +403,16 @@ export function buildJSONSystemPrompt(
   const reviewRules = mergeContent(context.reviewRules).trim();
   if (reviewRules) sections.push(`<review_rules>\n${reviewRules}\n</review_rules>`);
   if (context.skills.length > 0) {
-    const preamble =
-      'Read each skill file before applying it. Skills contain additional review guidelines specific to this project.';
+    const preamble = [
+      'Read each skill file before applying it. Skills are mandatory rule sets — the actual review criteria live in the SKILL.md body, not in the one-line description below.',
+      '',
+      'For every skill listed below, you MUST:',
+      '  1. Call the Read tool with the path in <skill_file> to load the SKILL.md content. Example: Read({ file_path: "/abs/path/to/skills/code-review/SKILL.md" }).',
+      '  2. If the skill lists <skill_resources>, Read the references relevant to the languages or frameworks present in this diff (skip references that do not match the diff).',
+      "  3. Apply the skill's criteria when forming and grading findings.",
+      '',
+      'A skill loaded but never read is a no-op — the description alone is not enough to apply the rules correctly.',
+    ].join('\n');
     const skillSections = context.skills.map(buildSkillSection).join('\n\n');
     sections.push(`<skills>\n${preamble}\n\n${skillSections}\n</skills>`);
   }

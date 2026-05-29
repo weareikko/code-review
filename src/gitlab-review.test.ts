@@ -609,6 +609,26 @@ describe('buildJSONSystemPrompt — skill section', () => {
     expect(prompt).toContain('<skills>');
   });
 
+  it('makes the skill Read instruction mandatory with a worked tool-call example', () => {
+    const context = {
+      conventions: [],
+      reviewRules: [],
+      skills: [makeTestSkill()],
+    };
+
+    const prompt = buildJSONSystemPrompt(context, 'INFO');
+
+    // The earlier one-line preamble ("Read each skill file before applying
+    // it") was too soft — SkillFileReadJudge consistently scored 0 in eval
+    // runs because the agent skipped the Read call entirely. The new
+    // preamble adds an explicit MUST, a worked Read({ file_path: ... }) tool
+    // call, and an explanation that the description alone is not enough.
+    expect(prompt).toMatch(/you MUST/);
+    expect(prompt).toContain('Read({ file_path:');
+    expect(prompt).toMatch(/a no-op/i);
+    expect(prompt).toMatch(/description alone is not enough/i);
+  });
+
   it('includes skill name and description', () => {
     const context = {
       conventions: [],
