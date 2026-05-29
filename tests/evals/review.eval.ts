@@ -10,6 +10,8 @@ import type { Config } from '../../src/config.js';
 import { runReview } from '../../src/gitlab-review.js';
 import { parseReviewMarkdownWithWarnings } from '../../src/parser.js';
 import type { PriorThread } from '../../src/prior-threads.js';
+import type { Trajectory } from './trajectory.js';
+import { createTrajectoryCollector } from './trajectory.js';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
@@ -31,6 +33,7 @@ type ReviewComment = {
 type EvalOutput = {
   summary: string;
   comments: ReviewComment[];
+  trajectory: Trajectory;
 };
 
 function makeConfig(overrides: Partial<Config>): Config {
@@ -73,10 +76,12 @@ const reviewHarness = createHarness<EvalInput, EvalOutput, Record<string, unknow
     const dir = await mkdtemp(join(tmpdir(), 'gitlab-review-eval-'));
     try {
       const config = makeConfig({ cwd: dir, skills: input.skills });
+      const { trajectory, attach } = createTrajectoryCollector();
       const usage = await runReview(config, {
         diff: input.diff,
         commitLog: input.commitLog,
         priorThreads: input.priorThreads,
+        attachTelemetry: (agent) => attach(agent),
       });
 
       const reviewPath = join(dir, config.reviewFile);
@@ -91,6 +96,7 @@ const reviewHarness = createHarness<EvalInput, EvalOutput, Record<string, unknow
           severity: c.severity,
           body: c.body,
         })),
+        trajectory,
       };
 
       return {
@@ -192,11 +198,61 @@ const missingApiKey = () => {
   );
 };
 
+// Recording-only trajectory judge: surfaces turn count and tool call summary in
+// the judge metadata so eval runs reveal the agent's path, not just its output.
+// Always scores 1 — used purely for observability. Loop detection lives in
+// its own recording-only block below.
+const TrajectoryShapeJudge = createJudge(
+  'TrajectoryShapeJudge',
+  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
+    const traj = output.trajectory;
+    const toolCounts: Record<string, number> = {};
+    for (const call of traj.toolCalls) {
+      toolCounts[call.name] = (toolCounts[call.name] ?? 0) + 1;
+    }
+    return {
+      score: 1,
+      metadata: {
+        rationale: `Agent ran ${traj.turns} turn(s) with ${traj.toolCalls.length} tool call(s)`,
+        turns: traj.turns,
+        toolCallCount: traj.toolCalls.length,
+        toolCounts,
+      },
+    };
+  },
+);
+
+// Judge: when skills are configured, the agent should Read at least one skill
+// file. A skill loaded but never read is a silent regression — the system
+// prompt references the skill, but the model ignored the instruction to load
+// it. Used in a recording-only block so a single miss doesn't flake CI, but
+// persistent score=0 across runs signals broken skill loading.
+const SkillFileReadJudge = createJudge(
+  'SkillFileReadJudge',
+  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
+    const reads = output.trajectory.toolCalls
+      .filter((c) => c.name === 'Read' || c.name === 'read')
+      .map((c) => String(c.args.file_path ?? ''));
+    const skillReads = reads.filter((p) => p.includes('skills/') || p.includes('SKILL.md'));
+    return {
+      score: skillReads.length > 0 ? 1 : 0,
+      metadata: {
+        rationale:
+          skillReads.length > 0
+            ? `Agent read ${skillReads.length} skill file(s)`
+            : 'Agent did not read any skill file — skill loading may be ineffective',
+        skillReads,
+        allReads: reads.slice(0, 10),
+      },
+    };
+  },
+);
+
 describeEval(
   'code-review skill — bug detection',
   {
     harness: reviewHarness,
-    judges: [AsyncBugDetectedJudge, HasSevereFindingJudge],
+    judges: [AsyncBugDetectedJudge, HasSevereFindingJudge, TrajectoryShapeJudge],
     judgeThreshold: 1,
     skipIf: missingApiKey,
   },
@@ -216,6 +272,28 @@ describeEval(
 
       expect(mentionedAsync).toBe(true);
       expect(result.output.comments.length).toBeGreaterThan(0);
+    });
+  },
+);
+
+// Recording-only trajectory health: surfaces whether the agent is reading
+// configured skill files and whether turn counts are reasonable. These signals
+// are not enforced (LLM behaviour varies), but persistent score=0 across runs
+// is the first place to look when reviews start regressing for non-obvious
+// reasons.
+describeEval(
+  'trajectory — skill file is read when configured (recording only)',
+  {
+    harness: reviewHarness,
+    judges: [SkillFileReadJudge],
+    judgeThreshold: null,
+    skipIf: missingApiKey,
+  },
+  (it) => {
+    it('reads skill file when code-review skill is enabled', async ({ run }) => {
+      const diff = await readFile(join(FIXTURES, 'async-foreach-bug.diff'), 'utf8');
+      const result = await run({ diff, skills: ['code-review'] });
+      expect(result.output.trajectory.turns).toBeGreaterThan(0);
     });
   },
 );
