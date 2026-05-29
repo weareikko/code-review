@@ -685,6 +685,19 @@ describe('buildJSONSystemPrompt — skill section', () => {
       expect(prompt).toMatch(/question and thought labels are inherently tentative and exempt/);
     });
 
+    it('requires the Notes section to echo suppressed severe findings with their context', () => {
+      const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
+
+      // Eval runs showed the reviewer silently dropping CRITICAL/WARN findings
+      // when commit messages or prior threads justified them, without
+      // surfacing the suppression in Notes. Developers had no audit trail of
+      // which context the reviewer actually read. The new rule makes the
+      // suppression bullet mandatory.
+      expect(prompt).toMatch(/suppress(es|ed).*would otherwise be a CRITICAL or WARN finding/i);
+      expect(prompt).toMatch(/MUST add a one-line bullet/i);
+      expect(prompt).toMatch(/Silent suppression is not acceptable/i);
+    });
+
     it('anchors severity to certainty and impact, not just topic', () => {
       const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
 

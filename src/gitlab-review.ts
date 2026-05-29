@@ -304,6 +304,7 @@ function buildSharedBase(minSeverity: GitLabReviewSeverity): string[] {
     '- Write declaratively. Avoid "consider", "might want to", "could potentially", "you may want to" in issue and suggestion subjects. State the defect and the fix directly. If unsure it is wrong, omit it. (The question and thought labels are inherently tentative and exempt.)',
     '- The summary lists findings by their Conventional Comment subject only; it MUST NOT repeat the discussion, impact ("why it matters"), or suggested fix from any inline comment',
     "- Cross-cutting content (suppressed findings, unreviewed files, overall verdict) goes in the summary's Notes section, never in inline comments",
+    '- When a commit message, prior thread reply, or in-file ADR/incident reference suppresses what would otherwise be a CRITICAL or WARN finding, you MUST add a one-line bullet to the summary Notes section naming the file:line, the pattern, and the context that suppressed it (e.g. "src/probe.ts:13 — empty .catch() suppressed per ADR-042 / INC-2891"). Silent suppression is not acceptable: the developer must be able to audit what context you applied.',
     ...(rule ? [rule] : []),
     '</rules>',
   ];
@@ -365,7 +366,7 @@ export function buildJSONSystemPrompt(
     '  <One bullet per finding, grouped by label, linking the file:line. Show only the comment\'s subject (the text after "<label>:"). Do NOT restate the discussion, impact, or fix — those live in the inline comment.>',
     '',
     '  ### Notes',
-    '  <Suppressed findings (with the commit/ADR they reference), unreviewed/skipped files, or anything inline comments cannot carry. Omit the section entirely if nothing applies.>',
+    '  <Suppressed findings — one bullet each, naming file:line, the pattern, and the commit/ADR/prior-thread that justified leaving it un-flagged. Then unreviewed/skipped files and any cross-cutting note. Omit the section entirely only if nothing was suppressed and nothing was skipped.>',
     '',
     'If comments is empty, summary must be exactly: "No issues found in the reviewed diff."',
     '</summary_skeleton>',
