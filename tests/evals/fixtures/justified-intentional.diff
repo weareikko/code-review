@@ -1,0 +1,38 @@
+diff --git a/src/probe.ts b/src/probe.ts
+new file mode 100644
+index 0000000..b3c4d5e
+--- /dev/null
++++ b/src/probe.ts
+@@ -0,0 +1,32 @@
++import { existsSync } from 'node:fs';
++
++// readyz endpoint poll. We intentionally swallow probe errors here:
++// any transient connect/parse failure must result in `false`, never a
++// thrown rejection that the supervisor would interpret as a worker crash.
++// See ARCH-021: liveness probes never propagate errors to the runtime.
++export async function isReady(url: string, timeoutMs = 1000): Promise<boolean> {
++  const controller = new AbortController();
++  const timer = setTimeout(() => controller.abort(), timeoutMs);
++  try {
++    const res = await fetch(url, { signal: controller.signal });
++    if (!res.ok) return false;
++    const body = (await res.json()) as { ready?: boolean };
++    return body.ready === true;
++  } catch {
++    return false;
++  } finally {
++    clearTimeout(timer);
++  }
++}
++
++// The pidfile is removed on graceful shutdown. If it exists but the
++// process is gone (post-SIGKILL), the next start will overwrite it —
++// this is the documented behaviour, not a race.
++export function pidfileExists(path: string): boolean {
++  return existsSync(path);
++}
++
++export function logReadyState(ready: boolean): void {
++  // Intentionally synchronous: log calls must not yield in this hot path.
++  process.stdout.write(ready ? 'ready\n' : 'not-ready\n');
++}
