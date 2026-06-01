@@ -718,18 +718,30 @@ describe('buildJSONSystemPrompt — skill section', () => {
       expect(prompt).toMatch(/Silent suppression is not acceptable/i);
     });
 
-    it('anchors severity to certainty and impact, not just topic', () => {
+    it('splits severity (impact) from confidence (certainty) into two separate tier blocks', () => {
       const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
 
-      // The tiers must explicitly state the certainty/impact pairing and the
-      // downgrade-when-uncertain rule. These signals were missing from the
-      // earlier topic-only list ("bugs causing runtime failures, ...") which
-      // led to severe over-flagging on clean and justified-intentional code.
-      expect(prompt).toMatch(/severity reflects BOTH the impact .* AND your certainty/i);
-      expect(prompt).toMatch(/lowest tier that fits/i);
-      expect(prompt).toMatch(/demonstrate from the diff alone/i);
-      expect(prompt).toMatch(/justified by an in-file comment, commit message, or referenced ADR/i);
+      // The earlier rubric conflated impact and certainty into one block,
+      // which led to severe over-flagging on uncertain-but-bad-looking code.
+      // Now severity carries impact only, confidence carries certainty, and
+      // an explicit interaction block governs how they combine.
+      expect(prompt).toMatch(/<severity_tiers>/);
+      expect(prompt).toMatch(/<confidence_tiers>/);
+      expect(prompt).toMatch(/<severity_confidence_interaction>/);
+      expect(prompt).toMatch(/Severity reflects the IMPACT/);
+      expect(prompt).toMatch(/Confidence reflects how certain/);
+      expect(prompt).toMatch(/CRITICAL finding MUST be high confidence/);
       expect(prompt).toMatch(/silence beats fabrication/i);
+    });
+
+    it('declares confidence as a required JSON field with three allowed values', () => {
+      const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
+
+      // The output_format example must include confidence so the model
+      // produces it; the field-rules list must mark it required.
+      expect(prompt).toContain('"confidence": "high"');
+      expect(prompt).toMatch(/confidence: "high" \| "medium" \| "low"/);
+      expect(prompt).toMatch(/Required on every comment\./);
     });
 
     it('drops severity emoji noise from the prompt', () => {

@@ -1,4 +1,10 @@
-import { normalizeSeverity, type ReviewComment, type Severity, type Side } from './types.js';
+import {
+  normalizeConfidence,
+  normalizeSeverity,
+  type ReviewComment,
+  type Severity,
+  type Side,
+} from './types.js';
 
 export interface ParseResult {
   comments: ReviewComment[];
@@ -53,7 +59,14 @@ function addJsonComment(out: ReviewComment[], item: unknown): void {
     line > 0 &&
     body.length > 0
   ) {
-    out.push({ file, line, side, severity: normalizeSeverity(value.severity), body });
+    out.push({
+      file,
+      line,
+      side,
+      severity: normalizeSeverity(value.severity),
+      confidence: normalizeConfidence(value.confidence),
+      body,
+    });
   }
 }
 
@@ -128,11 +141,14 @@ function parseInlineSection(markdown: string, out: ReviewComment[], warnings: st
     if (!current) return;
     const body = current.body.join('\n').replace(FINGERPRINT_MARKER_RE, '').trim();
     if (body.length > 0) {
+      // Legacy markdown comments have no confidence signal — default to 'high'
+      // so the renderer can decide whether to surface a Confidence line.
       out.push({
         file: current.file,
         line: current.line,
         side: current.side,
         severity: inferSeverity(body, current.severity),
+        confidence: 'high',
         body,
       });
     }

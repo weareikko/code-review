@@ -16,23 +16,28 @@ const refs: DiffRefs = {
 };
 
 describe('buildCommentBody', () => {
-  it('appends the commit footer after a horizontal rule', () => {
-    const body = buildCommentBody('This looks off.', COMMIT_SHA);
-    expect(body).toBe(`This looks off.\n\n---\n\n${EXPECTED_FOOTER}`);
+  it('renders confidence between the body and the horizontal rule, before the footer', () => {
+    const body = buildCommentBody('This looks off.', COMMIT_SHA, 'high');
+    expect(body).toBe(`This looks off.\n\n_Confidence: high._\n\n---\n\n${EXPECTED_FOOTER}`);
+  });
+
+  it('reflects medium and low confidence values verbatim', () => {
+    expect(buildCommentBody('ok', COMMIT_SHA, 'medium')).toContain('_Confidence: medium._');
+    expect(buildCommentBody('ok', COMMIT_SHA, 'low')).toContain('_Confidence: low._');
   });
 
   it('trims leading/trailing whitespace from the reviewer body', () => {
-    const body = buildCommentBody('  Trim me.  ', COMMIT_SHA);
+    const body = buildCommentBody('  Trim me.  ', COMMIT_SHA, 'high');
     expect(body.startsWith('Trim me.')).toBe(true);
   });
 
   it('embeds the full 40-character SHA', () => {
-    const body = buildCommentBody('ok', COMMIT_SHA);
+    const body = buildCommentBody('ok', COMMIT_SHA, 'high');
     expect(body).toContain(COMMIT_SHA);
   });
 
   it('includes the package version in the footer', () => {
-    const body = buildCommentBody('ok', COMMIT_SHA);
+    const body = buildCommentBody('ok', COMMIT_SHA, 'high');
     expect(body).toContain(`v${__PKG_VERSION__} for commit ${COMMIT_SHA}`);
   });
 
@@ -40,19 +45,30 @@ describe('buildCommentBody', () => {
     const body = buildCommentBody(
       'issue (blocking): Loop runs N+1 attempts\n\nDiscussion text.',
       COMMIT_SHA,
+      'high',
     );
     expect(body).toContain('**issue (blocking): Loop runs N+1 attempts**\n\nDiscussion text.');
   });
 
   it('bolds a title-only body without a discussion', () => {
-    const body = buildCommentBody('nitpick: Helper name shadows the type', COMMIT_SHA);
+    const body = buildCommentBody('nitpick: Helper name shadows the type', COMMIT_SHA, 'high');
     expect(body.startsWith('**nitpick: Helper name shadows the type**')).toBe(true);
   });
 
   it('leaves bodies that do not look like a Conventional Comment alone', () => {
-    const body = buildCommentBody('Plain feedback without a label.', COMMIT_SHA);
+    const body = buildCommentBody('Plain feedback without a label.', COMMIT_SHA, 'high');
     expect(body.startsWith('Plain feedback without a label.')).toBe(true);
     expect(body).not.toContain('**Plain feedback');
+  });
+
+  it('places the confidence line BEFORE the horizontal rule and footer', () => {
+    const body = buildCommentBody('Body text.', COMMIT_SHA, 'low');
+    const confIndex = body.indexOf('_Confidence: low._');
+    const ruleIndex = body.indexOf('---');
+    const footerIndex = body.indexOf(EXPECTED_FOOTER);
+    expect(confIndex).toBeGreaterThan(0);
+    expect(ruleIndex).toBeGreaterThan(confIndex);
+    expect(footerIndex).toBeGreaterThan(ruleIndex);
   });
 });
 
@@ -62,6 +78,7 @@ describe('buildGeneratedComments', () => {
     line: 10,
     side: 'RIGHT',
     severity: 'warn',
+    confidence: 'high',
     body: 'Consider using const here.',
   };
 
@@ -95,6 +112,18 @@ describe('buildGeneratedComments', () => {
     const refs2 = { ...refs, head_sha: 'd'.repeat(40) };
     const [gen1] = buildGeneratedComments([comment], diff, refs1, new Set());
     const [gen2] = buildGeneratedComments([comment], diff, refs2, new Set());
+    expect(gen1.fingerprints.primary).toBe(gen2.fingerprints.primary);
+    expect(gen1.fingerprints.secondary).toBe(gen2.fingerprints.secondary);
+  });
+
+  it('fingerprints are stable when only the confidence changes', () => {
+    // Confidence is a display-only field rendered into the body wrapper. If
+    // the reviewer revises its certainty across runs we must not duplicate
+    // the comment.
+    const high: ReviewComment = { ...comment, confidence: 'high' };
+    const low: ReviewComment = { ...comment, confidence: 'low' };
+    const [gen1] = buildGeneratedComments([high], diff, refs, new Set());
+    const [gen2] = buildGeneratedComments([low], diff, refs, new Set());
     expect(gen1.fingerprints.primary).toBe(gen2.fingerprints.primary);
     expect(gen1.fingerprints.secondary).toBe(gen2.fingerprints.secondary);
   });

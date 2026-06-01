@@ -1,5 +1,6 @@
 import { appendFingerprintMarkers, extractDiffHunkContext, fingerprints } from './fingerprints.js';
 import type {
+  Confidence,
   DiffRefs,
   GeneratedComment,
   GitLabDiscussionPayload,
@@ -19,18 +20,32 @@ function boldCommentTitle(body: string): string {
 }
 
 /**
- * Builds the visible body of an inline comment by appending a commit footer
- * after a horizontal rule. The footer mirrors the format used in the MR-level
- * summary note so developers can tell at a glance which commit triggered the
- * comment and whether it belongs to an earlier review pass.
+ * Builds the visible body of an inline comment.
  *
- * The footer is appended to the payload body only — it is NOT included in the
- * fingerprint hash, so comment identity (deduplication) remains stable across
- * commits even when the SHA in the footer changes.
+ * Layout:
+ *   <bold Conventional Comment title>
+ *   <discussion>
+ *
+ *   _Confidence: <level>._
+ *
+ *   ---
+ *
+ *   <commit footer>
+ *
+ * The confidence line sits between the reviewer's discussion and the
+ * horizontal rule so developers can see the reviewer's certainty without
+ * scrolling past the footer. The footer mirrors the format used in the
+ * MR-level summary note.
+ *
+ * Neither the confidence line nor the footer is included in the fingerprint
+ * hash, so comment identity (deduplication) remains stable across commits
+ * even when the SHA in the footer changes or the reviewer revises its
+ * confidence judgment.
  */
-export function buildCommentBody(body: string, commitSha: string): string {
+export function buildCommentBody(body: string, commitSha: string, confidence: Confidence): string {
+  const confidenceLine = `_Confidence: ${confidence}._`;
   const footer = `<sub>Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) v${__PKG_VERSION__} for commit ${commitSha}.</sub>`;
-  return `${boldCommentTitle(body.trim())}\n\n---\n\n${footer}`;
+  return `${boldCommentTitle(body.trim())}\n\n${confidenceLine}\n\n---\n\n${footer}`;
 }
 
 export function buildPayload(
@@ -70,7 +85,7 @@ export function buildGeneratedComments(
     // Fingerprints are computed from comment.body (the raw reviewer output)
     // before the commit footer is appended, so deduplication is unaffected by
     // the SHA changing between review runs.
-    const bodyWithFooter = buildCommentBody(comment.body, refs.head_sha);
+    const bodyWithFooter = buildCommentBody(comment.body, refs.head_sha, comment.confidence);
 
     return {
       comment,

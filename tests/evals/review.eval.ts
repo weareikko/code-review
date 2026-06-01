@@ -28,6 +28,7 @@ type ReviewComment = {
   line: number;
   side: 'LEFT' | 'RIGHT';
   severity: 'critical' | 'warn' | 'info';
+  confidence: 'high' | 'medium' | 'low';
   body: string;
 };
 
@@ -95,6 +96,7 @@ const reviewHarness = createHarness<EvalInput, EvalOutput, Record<string, unknow
           line: c.line,
           side: c.side,
           severity: c.severity,
+          confidence: c.confidence,
           body: c.body,
         })),
         trajectory,
