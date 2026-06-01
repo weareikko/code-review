@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Reviewer findings now carry a `confidence` field** (`high` | `medium` | `low`) separate from `severity`. Severity tracks the impact of the defect; confidence tracks the reviewer's certainty that the code is wrong. The system prompt splits the two into `<severity_tiers>` and `<confidence_tiers>` with an explicit interaction rule: a CRITICAL finding MUST be high confidence, and a WARN finding at low confidence should be re-classified as INFO unless impact is severe.
+- **Confidence is rendered inline in every comment** as `_Confidence: <level>._` between the discussion and the commit footer, so developers can see the reviewer's certainty at a glance. The confidence value is excluded from the fingerprint hash, so a confidence revision across review runs does not produce a duplicate comment.
+
+### Changed
+
+- The reviewer JSON schema gains a required `confidence` field on every comment. Output from earlier reviewer versions without the field is parsed with `confidence: 'high'` for backward compatibility.
+
 ## [0.4.1] - 2026-05-29
 
 ### Changed
