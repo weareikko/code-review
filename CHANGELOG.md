@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-06-01
+
 ### Added
 
 - **Reviewer findings now carry a `confidence` field** (`high` | `medium` | `low`) separate from `severity`. Severity tracks the impact of the defect; confidence tracks the reviewer's certainty that the code is wrong. The system prompt splits the two into `<severity_tiers>` and `<confidence_tiers>` with an explicit interaction rule: a CRITICAL finding MUST be high confidence, and a WARN finding at low confidence should be re-classified as INFO unless impact is severe.
@@ -15,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The reviewer JSON schema gains a required `confidence` field on every comment. Output from earlier reviewer versions without the field is parsed with `confidence: 'high'` for backward compatibility.
+- **Severity rubric anchored to impact + certainty**. The reviewer is now explicitly directed to use the lowest tier that fits, demonstrate the failing path from the diff for CRITICAL findings, and prefer silence over fabrication when uncertain. Reduces severe over-flagging on uncertain-but-suspicious code.
+- **Context-suppressed findings must be echoed in the summary Notes section**. When a commit message, prior thread reply, or referenced ADR/incident justifies a pattern the reviewer would otherwise flag, the suppression must appear as a one-line bullet (file:line, pattern, suppressing context) so developers can audit which context the reviewer applied. Silent suppression is no longer acceptable.
+- **Strengthened skill-Read instruction**. The `<skills>` preamble now states explicitly that skills are mandatory rule sets, includes a worked `Read({ file_path: "..." })` tool-call example, and makes loading the SKILL.md body and matching references a MUST. Skills should now contribute their full content rather than only the one-line description.
 
 ## [0.4.1] - 2026-05-29
 
