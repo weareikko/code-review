@@ -645,33 +645,26 @@ describeEval(
   {
     harness: reviewHarness,
     judges: [NoSevereFindingsJudge],
-    // Use null so false positives are recorded without hard-failing CI (LLM non-determinism)
-    judgeThreshold: null,
+    // Enforcing. The fixture is now a truly concern-free HTTP-status
+    // constants module — there is nothing the reviewer can legitimately
+    // flag at CRITICAL or WARN. If this judge starts scoring 0, the
+    // reviewer is fabricating severe findings and needs investigation.
+    // (The previous MemoryCache fixture genuinely had an unbounded-growth
+    // concern; the eval was kept recording-only because the model was
+    // correct to flag it.)
+    judgeThreshold: 1,
     skipIf: missingApiKey,
   },
   (it) => {
     it('produces no severe findings on clean code with skill enabled', async ({ run }) => {
       const diff = await readFile(join(FIXTURES, 'clean-ts.diff'), 'utf8');
       const result = await run({ diff, skills: ['code-review'] });
-
-      const severe = result.output.comments.filter(
-        (c) => c.severity === 'CRITICAL' || c.severity === 'WARN',
-      );
-      // Soft assertion — recorded but not a hard test failure
-      if (severe.length > 0) {
-        console.warn(
-          '[eval] code-review skill produced unexpected severe findings on clean code:',
-          severe.map((c) => `${c.severity} ${c.file}:${c.line}`).join(', '),
-        );
-      }
-
       expect(result.output).toBeDefined();
     });
 
     it('produces no severe findings on clean code without skill (baseline)', async ({ run }) => {
       const diff = await readFile(join(FIXTURES, 'clean-ts.diff'), 'utf8');
       const result = await run({ diff, skills: [] });
-
       expect(result.output).toBeDefined();
     });
   },

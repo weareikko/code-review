@@ -1,47 +1,37 @@
-diff --git a/src/cache.ts b/src/cache.ts
+diff --git a/src/constants/http-status.ts b/src/constants/http-status.ts
 new file mode 100644
 index 0000000..a8b2c34
 --- /dev/null
-+++ b/src/cache.ts
-@@ -0,0 +1,38 @@
-+const DEFAULT_TTL_MS = 5 * 60 * 1000;
++++ b/src/constants/http-status.ts
+@@ -0,0 +1,31 @@
++/**
++ * Subset of HTTP status codes used in this codebase. Add new entries
++ * here when a new code is referenced from application code so the type
++ * stays in sync with what callers can pass to the helpers below.
++ */
++export const HTTP_STATUS = {
++  OK: 200,
++  CREATED: 201,
++  NO_CONTENT: 204,
++  BAD_REQUEST: 400,
++  UNAUTHORIZED: 401,
++  FORBIDDEN: 403,
++  NOT_FOUND: 404,
++  CONFLICT: 409,
++  UNPROCESSABLE_ENTITY: 422,
++  INTERNAL_ERROR: 500,
++  BAD_GATEWAY: 502,
++  SERVICE_UNAVAILABLE: 503,
++} as const;
 +
-+interface CacheEntry<T> {
-+  value: T;
-+  expiresAt: number;
++export type HttpStatusCode = (typeof HTTP_STATUS)[keyof typeof HTTP_STATUS];
++
++/** True for any 4xx response. */
++export function isClientError(status: number): boolean {
++  return status >= 400 && status < 500;
 +}
 +
-+export class MemoryCache<T> {
-+  private readonly store = new Map<string, CacheEntry<T>>();
-+  private readonly ttlMs: number;
-+
-+  constructor(ttlMs = DEFAULT_TTL_MS) {
-+    this.ttlMs = ttlMs;
-+  }
-+
-+  get(key: string): T | undefined {
-+    const entry = this.store.get(key);
-+    if (!entry) return undefined;
-+    if (Date.now() > entry.expiresAt) {
-+      this.store.delete(key);
-+      return undefined;
-+    }
-+    return entry.value;
-+  }
-+
-+  set(key: string, value: T): void {
-+    this.store.set(key, { value, expiresAt: Date.now() + this.ttlMs });
-+  }
-+
-+  delete(key: string): void {
-+    this.store.delete(key);
-+  }
-+
-+  clear(): void {
-+    this.store.clear();
-+  }
-+
-+  get size(): number {
-+    return this.store.size;
-+  }
++/** True for any 5xx response. */
++export function isServerError(status: number): boolean {
++  return status >= 500 && status < 600;
 +}
