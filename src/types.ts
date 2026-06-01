@@ -1,5 +1,6 @@
 export type Severity = 'info' | 'warn' | 'critical';
 export type GitLabReviewSeverity = 'INFO' | 'WARN' | 'CRITICAL';
+export type Confidence = 'high' | 'medium' | 'low';
 export type Side = 'RIGHT' | 'LEFT';
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
@@ -17,6 +18,12 @@ export interface ReviewComment {
   line: number;
   side: Side;
   severity: Severity;
+  /**
+   * The reviewer's certainty that the finding is a real defect, separate from
+   * its impact (encoded in `severity`). Defaults to 'high' when absent so
+   * legacy reviewer outputs continue to parse unchanged.
+   */
+  confidence: Confidence;
   body: string;
 }
 
@@ -63,4 +70,20 @@ export function normalizeSeverity(value: unknown): Severity {
   if (normalized === 'critical' || normalized === 'error' || normalized === '🔴') return 'critical';
   if (normalized === 'warn' || normalized === 'warning' || normalized === '🟡') return 'warn';
   return 'info';
+}
+
+/**
+ * Normalize a raw confidence value from reviewer JSON into the strict enum.
+ * Defaults to 'high' for absent / unrecognised values: a missing field is
+ * assumed to come from a pre-confidence reviewer output, and the reviewer
+ * historically only emitted findings it considered provable, which maps to
+ * high confidence.
+ */
+export function normalizeConfidence(value: unknown): Confidence {
+  const normalized = String(value ?? '')
+    .trim()
+    .toLowerCase();
+  if (normalized === 'low') return 'low';
+  if (normalized === 'medium' || normalized === 'med') return 'medium';
+  return 'high';
 }

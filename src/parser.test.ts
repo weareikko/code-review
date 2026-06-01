@@ -21,6 +21,7 @@ describe('gitlab-review parsing', () => {
         line: 10,
         side: 'RIGHT',
         severity: 'warn',
+        confidence: 'high',
         body: 'Please simplify this branch.',
       },
       {
@@ -28,6 +29,7 @@ describe('gitlab-review parsing', () => {
         line: 5,
         side: 'LEFT',
         severity: 'critical',
+        confidence: 'high',
         body: 'remove dead code',
       },
     ]);
@@ -43,9 +45,30 @@ describe('gitlab-review parsing', () => {
     ].join('\n');
 
     expect(parseReviewMarkdown(markdown)).toEqual([
-      { file: 'src/a.ts', line: 3, side: 'RIGHT', severity: 'info', body: 'Fix this' },
-      { file: 'src/b.ts', line: 9, side: 'LEFT', severity: 'info', body: 'Old side' },
-      { file: 'src/c.ts', line: 11, side: 'RIGHT', severity: 'info', body: 'Older side' },
+      {
+        file: 'src/a.ts',
+        line: 3,
+        side: 'RIGHT',
+        severity: 'info',
+        confidence: 'high',
+        body: 'Fix this',
+      },
+      {
+        file: 'src/b.ts',
+        line: 9,
+        side: 'LEFT',
+        severity: 'info',
+        confidence: 'high',
+        body: 'Old side',
+      },
+      {
+        file: 'src/c.ts',
+        line: 11,
+        side: 'RIGHT',
+        severity: 'info',
+        confidence: 'high',
+        body: 'Older side',
+      },
     ]);
   });
 
@@ -69,9 +92,35 @@ describe('gitlab-review parsing', () => {
         line: 8,
         side: 'RIGHT',
         severity: 'critical',
+        confidence: 'high',
         body: 'Use this syntax:\n\n```yaml\n- if: $CI_PIPELINE_SOURCE == "web"\n```',
       },
     ]);
+  });
+
+  it('reads the confidence field and normalises common aliases', () => {
+    const markdown = [
+      '```json',
+      JSON.stringify({
+        comments: [
+          {
+            file: 'a.ts',
+            line: 1,
+            side: 'RIGHT',
+            severity: 'WARN',
+            confidence: 'medium',
+            body: 'a',
+          },
+          { file: 'b.ts', line: 2, side: 'RIGHT', severity: 'WARN', confidence: 'LOW', body: 'b' },
+          { file: 'c.ts', line: 3, side: 'RIGHT', severity: 'WARN', confidence: 'med', body: 'c' },
+          { file: 'd.ts', line: 4, side: 'RIGHT', severity: 'WARN', body: 'd' },
+        ],
+      }),
+      '```',
+    ].join('\n');
+
+    const result = parseReviewMarkdown(markdown);
+    expect(result.map((c) => c.confidence)).toEqual(['medium', 'low', 'medium', 'high']);
   });
 
   it('emits warnings for text before the first parseable inline header', () => {
