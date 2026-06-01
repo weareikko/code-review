@@ -288,9 +288,13 @@ function buildSharedBase(minSeverity: GitLabReviewSeverity): string[] {
     `You are a code reviewer. Review the following PR diff carefully. Today's date is ${today}.`,
     '',
     '<severity_tiers>',
-    '- CRITICAL: bugs causing runtime failures, security vulnerabilities, data loss risks',
-    '- WARN: type errors, missing error handling, logic issues, test gaps',
-    '- INFO: style, naming, performance hints, suggestions',
+    'Severity reflects BOTH the impact of the defect AND your certainty the code is wrong. Pick the lowest tier that fits.',
+    '',
+    '- CRITICAL: you can demonstrate from the diff alone that the code WILL fail at runtime, lose or corrupt data, or open a security hole. Name the failing input or the exact line. If you cannot show the failing path from the diff, downgrade.',
+    '- WARN: a concrete, observable defect visible in the diff (logic error, missing await, type-unsafe access, dropped error, etc.) that is NOT justified by an in-file comment, commit message, or referenced ADR/incident. If a pattern that looks defective is accompanied by such a justification, do not raise it as WARN — surface it in the summary Notes instead.',
+    '- INFO: nits, style, naming, hints, suggestions. Anything you suspect but cannot prove from the diff goes here, OR is omitted entirely.',
+    '',
+    'When uncertain between two tiers, choose the lower one. A confident wrong CRITICAL is worse than a missed bug — silence beats fabrication.',
     '</severity_tiers>',
     '',
     '<rules>',
@@ -300,6 +304,7 @@ function buildSharedBase(minSeverity: GitLabReviewSeverity): string[] {
     '- Write declaratively. Avoid "consider", "might want to", "could potentially", "you may want to" in issue and suggestion subjects. State the defect and the fix directly. If unsure it is wrong, omit it. (The question and thought labels are inherently tentative and exempt.)',
     '- The summary lists findings by their Conventional Comment subject only; it MUST NOT repeat the discussion, impact ("why it matters"), or suggested fix from any inline comment',
     "- Cross-cutting content (suppressed findings, unreviewed files, overall verdict) goes in the summary's Notes section, never in inline comments",
+    '- When a commit message, prior thread reply, or in-file ADR/incident reference suppresses what would otherwise be a CRITICAL or WARN finding, you MUST add a one-line bullet to the summary Notes section naming the file:line, the pattern, and the context that suppressed it (e.g. "src/probe.ts:13 — empty .catch() suppressed per ADR-042 / INC-2891"). Silent suppression is not acceptable: the developer must be able to audit what context you applied.',
     ...(rule ? [rule] : []),
     '</rules>',
   ];
@@ -361,7 +366,7 @@ export function buildJSONSystemPrompt(
     '  <One bullet per finding, grouped by label, linking the file:line. Show only the comment\'s subject (the text after "<label>:"). Do NOT restate the discussion, impact, or fix — those live in the inline comment.>',
     '',
     '  ### Notes',
-    '  <Suppressed findings (with the commit/ADR they reference), unreviewed/skipped files, or anything inline comments cannot carry. Omit the section entirely if nothing applies.>',
+    '  <Suppressed findings — one bullet each, naming file:line, the pattern, and the commit/ADR/prior-thread that justified leaving it un-flagged. Then unreviewed/skipped files and any cross-cutting note. Omit the section entirely only if nothing was suppressed and nothing was skipped.>',
     '',
     'If comments is empty, summary must be exactly: "No issues found in the reviewed diff."',
     '</summary_skeleton>',
@@ -398,8 +403,16 @@ export function buildJSONSystemPrompt(
   const reviewRules = mergeContent(context.reviewRules).trim();
   if (reviewRules) sections.push(`<review_rules>\n${reviewRules}\n</review_rules>`);
   if (context.skills.length > 0) {
-    const preamble =
-      'Read each skill file before applying it. Skills contain additional review guidelines specific to this project.';
+    const preamble = [
+      'Read each skill file before applying it. Skills are mandatory rule sets — the actual review criteria live in the SKILL.md body, not in the one-line description below.',
+      '',
+      'For every skill listed below, you MUST:',
+      '  1. Call the Read tool with the path in <skill_file> to load the SKILL.md content. Example: Read({ file_path: "/abs/path/to/skills/code-review/SKILL.md" }).',
+      '  2. If the skill lists <skill_resources>, Read the references relevant to the languages or frameworks present in this diff (skip references that do not match the diff).',
+      "  3. Apply the skill's criteria when forming and grading findings.",
+      '',
+      'A skill loaded but never read is a no-op — the description alone is not enough to apply the rules correctly.',
+    ].join('\n');
     const skillSections = context.skills.map(buildSkillSection).join('\n\n');
     sections.push(`<skills>\n${preamble}\n\n${skillSections}\n</skills>`);
   }

@@ -609,6 +609,26 @@ describe('buildJSONSystemPrompt — skill section', () => {
     expect(prompt).toContain('<skills>');
   });
 
+  it('makes the skill Read instruction mandatory with a worked tool-call example', () => {
+    const context = {
+      conventions: [],
+      reviewRules: [],
+      skills: [makeTestSkill()],
+    };
+
+    const prompt = buildJSONSystemPrompt(context, 'INFO');
+
+    // The earlier one-line preamble ("Read each skill file before applying
+    // it") was too soft — SkillFileReadJudge consistently scored 0 in eval
+    // runs because the agent skipped the Read call entirely. The new
+    // preamble adds an explicit MUST, a worked Read({ file_path: ... }) tool
+    // call, and an explanation that the description alone is not enough.
+    expect(prompt).toMatch(/you MUST/);
+    expect(prompt).toContain('Read({ file_path:');
+    expect(prompt).toMatch(/a no-op/i);
+    expect(prompt).toMatch(/description alone is not enough/i);
+  });
+
   it('includes skill name and description', () => {
     const context = {
       conventions: [],
@@ -683,6 +703,33 @@ describe('buildJSONSystemPrompt — skill section', () => {
 
       expect(prompt).toContain('Write declaratively.');
       expect(prompt).toMatch(/question and thought labels are inherently tentative and exempt/);
+    });
+
+    it('requires the Notes section to echo suppressed severe findings with their context', () => {
+      const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
+
+      // Eval runs showed the reviewer silently dropping CRITICAL/WARN findings
+      // when commit messages or prior threads justified them, without
+      // surfacing the suppression in Notes. Developers had no audit trail of
+      // which context the reviewer actually read. The new rule makes the
+      // suppression bullet mandatory.
+      expect(prompt).toMatch(/suppress(es|ed).*would otherwise be a CRITICAL or WARN finding/i);
+      expect(prompt).toMatch(/MUST add a one-line bullet/i);
+      expect(prompt).toMatch(/Silent suppression is not acceptable/i);
+    });
+
+    it('anchors severity to certainty and impact, not just topic', () => {
+      const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
+
+      // The tiers must explicitly state the certainty/impact pairing and the
+      // downgrade-when-uncertain rule. These signals were missing from the
+      // earlier topic-only list ("bugs causing runtime failures, ...") which
+      // led to severe over-flagging on clean and justified-intentional code.
+      expect(prompt).toMatch(/severity reflects BOTH the impact .* AND your certainty/i);
+      expect(prompt).toMatch(/lowest tier that fits/i);
+      expect(prompt).toMatch(/demonstrate from the diff alone/i);
+      expect(prompt).toMatch(/justified by an in-file comment, commit message, or referenced ADR/i);
+      expect(prompt).toMatch(/silence beats fabrication/i);
     });
 
     it('drops severity emoji noise from the prompt', () => {

@@ -34,11 +34,13 @@ export function createTrajectoryCollector(): {
 }
 
 export function filesRead(trajectory: Trajectory): string[] {
+  // pi-coding-agent's read tool uses `path`; other harnesses use `file_path`.
+  // Accept both so trajectory consumers don't silently miss reads.
   const paths = new Set<string>();
   for (const call of trajectory.toolCalls) {
     if (call.name !== 'Read' && call.name !== 'read') continue;
-    const path = call.args.file_path;
-    if (typeof path === 'string') paths.add(path);
+    const candidate = call.args.path ?? call.args.file_path;
+    if (typeof candidate === 'string') paths.add(candidate);
   }
   return [...paths];
 }
