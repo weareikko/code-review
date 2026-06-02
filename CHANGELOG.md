@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Internal refactors with no behaviour change.** The GitLab client's `request()` and `paginate()` now share a single private `fetchWithTimeout()` helper instead of each duplicating the `AbortController`/timeout/abort-error handling; `diagnosticChannels` is derived from `DIAGNOSTIC_CHANNEL_NAMES` via `Object.fromEntries` instead of a hand-maintained parallel table; and the parser's JSON-fence and inline-section regexes are hoisted to module scope. Public behaviour, reviewer output, and all marker formats are unchanged.
+
 ## [0.6.0] - 2026-06-02
 
 ### Changed
