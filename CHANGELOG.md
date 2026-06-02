@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The MR summary now uses a standardized, scannable layout.** Under the `## Code Review` heading the reviewer always emits a `**Risk: Low | Medium | High**` line (the impact of merging and how to handle it) followed by a short overview, then a `**N issues found:**` bullet list when there are inline comments and an optional `**Notes:**` block for suppressed findings and unreviewed files. This replaces the previous `### Overview` / `### Findings` / `### Notes` heading structure so every review reads the same way.
+- **Skill `SKILL.md` frontmatter is now parsed with a real YAML parser** (the `yaml` package) instead of line regexes. Quoted values are handled correctly (the old regex kept the surrounding quotes) and frontmatter that is not valid YAML is rejected — the skill is skipped with the existing warning — rather than salvaged. `yaml` is added as a runtime dependency. The bundled `code-review` skill is unaffected.
+- **The review-completed OTel log record's `gen_ai.request.model` now uses the full model ID** (everything after the first `/`), consistent with the span and metric attributes. Previously this one field used the second path segment, which differed for multi-slash model IDs such as `openrouter/anthropic/claude-3`. Single-slash IDs are unaffected.
+
+### Removed
+
+- **BREAKING:** dropped the deprecated `body` field from the exported `Skill` type. Prompts reference skill content via `filePath`; read the `SKILL.md` from there instead.
+- **BREAKING:** dropped all `pi-reviewer` backward compatibility. Legacy `pi-reviewer:*` markers are no longer recognised — fingerprint markers (`<!-- pi-reviewer:fingerprint-* -->`), the summary and summary-history markers, the reviewed-commit footer, and the `pi-reviewer-comment` embedded marker. Only the `gitlab-review:*` equivalents are read and written. MR threads and summary notes created by `pi-reviewer` before the rename will no longer be deduplicated, detected as prior context, or treated as already-reviewed; the first `gitlab-review` run re-establishes the renamed markers.
+- **BREAKING:** dropped severity emoji (🔴/🟡/🔵) handling from reviewer-output parsing. `normalizeSeverity` no longer maps emoji to a tier, markdown inline-comment headers no longer derive severity from a leading emoji (they now always parse as `INFO`), and `normalizeBody` no longer strips a leading emoji. The reviewer emits an explicit `severity` field in its JSON output and the prompt no longer uses emoji, so this only affected pre-rename markdown output.
+
 ## [0.5.0] - 2026-06-02
 
 ### Changed

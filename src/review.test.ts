@@ -9,12 +9,6 @@ import {
   normalizeBody,
 } from './review.js';
 
-const LEGACY_PROJECT_MARKER = ['pi', 'reviewer'].join('-');
-
-function legacyHiddenMarker(name: string): string {
-  return `<!-- ${LEGACY_PROJECT_MARKER}:${name} -->`;
-}
-
 describe('diff hunk context', () => {
   const diff = [
     'diff --git a/src/a.ts b/src/a.ts',
@@ -59,13 +53,6 @@ describe('diff hunk context', () => {
 describe('fingerprints and duplicate detection', () => {
   it('normalizes comment bodies consistently', () => {
     const a = 'Fix   this\n\n<!-- gitlab-review:fingerprint-primary:abcd -->';
-    const b = 'Fix this';
-
-    expect(normalizeBody(a)).toBe(normalizeBody(b));
-  });
-
-  it('normalizes comment bodies with legacy fingerprint markers', () => {
-    const a = `Fix   this\n\n${legacyHiddenMarker('fingerprint-primary:abcd')}`;
     const b = 'Fix this';
 
     expect(normalizeBody(a)).toBe(normalizeBody(b));
@@ -125,37 +112,6 @@ describe('fingerprints and duplicate detection', () => {
     expect(generated).toHaveLength(2);
     expect(generated[0].duplicate).toBe(true);
     expect(generated[1].duplicate).toBe(true);
-  });
-
-  it('extracts existing legacy markers and marks generated duplicates', () => {
-    const baseComment = {
-      file: 'src/a.ts',
-      line: 2,
-      side: 'RIGHT' as const,
-      severity: 'info' as const,
-      body: 'Please rename this variable',
-    };
-    const hunk = '@@ -1,1 +1,2 @@\n old\n+new';
-    const existing = fingerprints(baseComment, hunk);
-    const existingSet = extractExistingFingerprints([
-      {
-        notes: [
-          {
-            body: `Existing ${legacyHiddenMarker(`fingerprint-primary:${existing.primary}`)}`,
-          },
-        ],
-      },
-    ]);
-
-    const generated = buildGeneratedComments(
-      [baseComment],
-      ['diff --git a/src/a.ts b/src/a.ts', '--- a/src/a.ts', '+++ b/src/a.ts', hunk].join('\n'),
-      { base_sha: 'base', start_sha: 'start', head_sha: 'head' },
-      existingSet,
-    );
-
-    expect(generated).toHaveLength(1);
-    expect(generated[0].duplicate).toBe(true);
   });
 });
 

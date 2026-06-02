@@ -2,27 +2,23 @@ import { createHash } from 'node:crypto';
 import type { Discussion } from './gitlab.js';
 import type { Fingerprints, ReviewComment, Side } from './types.js';
 
-const LEGACY_FINGERPRINT_MARKER_PROJECT = ['pi', 'reviewer'].join('-');
-const FINGERPRINT_MARKER_PROJECT_RE = String.raw`(?:gitlab-review|${LEGACY_FINGERPRINT_MARKER_PROJECT})`;
-const FINGERPRINT_MARKER_RE = new RegExp(
-  String.raw`<!--\s*${FINGERPRINT_MARKER_PROJECT_RE}:fingerprint-(?:primary|secondary):([a-f0-9]+)\s*-->`,
-  'gi',
-);
-const STRIP_FINGERPRINT_MARKER_RE = new RegExp(
-  String.raw`<!--\s*${FINGERPRINT_MARKER_PROJECT_RE}:fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->`,
-  'gi',
-);
+/**
+ * Pattern source for the hidden fingerprint marker, capturing the hash group.
+ * Shared with the parser and prior-thread detection so the marker format is
+ * defined in one place; each call site builds its own RegExp with the flags it
+ * needs (the capture group is harmless when only stripping or testing). This is
+ * a stable wire contract — see CLAUDE.md before changing it.
+ */
+export const FINGERPRINT_MARKER_PATTERN = String.raw`<!--\s*gitlab-review:fingerprint-(?:primary|secondary):([a-f0-9]+)\s*-->`;
+
+const FINGERPRINT_MARKER_RE = new RegExp(FINGERPRINT_MARKER_PATTERN, 'gi');
 
 export function sha256(input: string): string {
   return createHash('sha256').update(input).digest('hex');
 }
 
 export function normalizeBody(body: string): string {
-  return body
-    .replace(STRIP_FINGERPRINT_MARKER_RE, '')
-    .replace(/^(?:🔴|🟡|🔵)\s*/gmu, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return body.replace(FINGERPRINT_MARKER_RE, '').replace(/\s+/g, ' ').trim();
 }
 
 interface FileState {

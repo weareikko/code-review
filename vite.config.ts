@@ -6,6 +6,7 @@ import { defineConfig } from 'vitest/config';
 const external = [
   ...builtinModules,
   ...builtinModules.map((moduleName) => `node:${moduleName}`),
+  'yaml',
   /^@earendil-works\//,
   /^@opentelemetry\//,
   /^@grpc\//,

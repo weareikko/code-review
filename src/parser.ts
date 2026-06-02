@@ -1,10 +1,5 @@
-import {
-  normalizeConfidence,
-  normalizeSeverity,
-  type ReviewComment,
-  type Severity,
-  type Side,
-} from './types.js';
+import { FINGERPRINT_MARKER_PATTERN } from './fingerprints.js';
+import { normalizeConfidence, normalizeSeverity, type ReviewComment, type Side } from './types.js';
 
 export interface ParseResult {
   comments: ReviewComment[];
@@ -12,31 +7,11 @@ export interface ParseResult {
   warnings: string[];
 }
 
-const HEADER_RE = /^\s*(?<emoji>[🔴🟡🔵])?\s*(?<file>.+):(\d+)\s+\((?<side>LEFT|RIGHT)\)\s*$/u;
+const HEADER_RE = /^\s*(?<file>.+):(?<line>\d+)\s+\((?<side>LEFT|RIGHT)\)\s*$/u;
 const GITHUB_STYLE_HEADER_RE =
-  /^\s*(?<emoji>[🔴🟡🔵])?\s*(?:\*\*)?`?(?<file>.+):(\d+)`?(?:\*\*)?\s*(?:[·-]|\()\s*(?<side>LEFT|RIGHT)\)?\s*$/u;
-const LEGACY_PROJECT_MARKER = ['pi', 'reviewer'].join('-');
-const PROJECT_MARKER_RE = String.raw`(?:gitlab-review|${LEGACY_PROJECT_MARKER})`;
-const FINGERPRINT_MARKER_RE = new RegExp(
-  String.raw`<!--\s*${PROJECT_MARKER_RE}:fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->`,
-  'gi',
-);
-const JSON_COMMENT_MARKER_RE = new RegExp(
-  String.raw`<!--\s*(?:gitlab-review|${LEGACY_PROJECT_MARKER})-comment\s*([\s\S]*?)-->`,
-  'gi',
-);
-
-function severityFromEmoji(emoji: string | undefined): Severity {
-  if (emoji === '🔴') return 'critical';
-  if (emoji === '🟡') return 'warn';
-  return 'info';
-}
-
-function inferSeverity(body: string, fallback: Severity): Severity {
-  const first = body.trimStart()[0];
-  if (first === '🔴' || first === '🟡' || first === '🔵') return normalizeSeverity(first);
-  return fallback;
-}
+  /^\s*(?:\*\*)?`?(?<file>.+):(?<line>\d+)`?(?:\*\*)?\s*(?:[·-]|\()\s*(?<side>LEFT|RIGHT)\)?\s*$/u;
+const FINGERPRINT_MARKER_RE = new RegExp(FINGERPRINT_MARKER_PATTERN, 'gi');
+const JSON_COMMENT_MARKER_RE = /<!--\s*gitlab-review-comment\s*([\s\S]*?)-->/gi;
 
 function normalizeSide(value: unknown): Side {
   return String(value ?? '').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
@@ -172,19 +147,15 @@ function parseJsonComments(markdown: string, out: ReviewComment[]): string | nul
   return summary;
 }
 
-function matchHeader(
-  line: string,
-): { file: string; line: number; side: Side; severity: Severity } | null {
+function matchHeader(line: string): { file: string; line: number; side: Side } | null {
   const match = line.match(HEADER_RE) ?? line.match(GITHUB_STYLE_HEADER_RE);
   if (!match?.groups) return null;
-  const rawLine = match[3];
-  const number = Number(rawLine);
+  const number = Number(match.groups.line);
   if (!Number.isInteger(number) || number <= 0) return null;
   return {
     file: match.groups.file.trim().replace(/^`|`$/g, ''),
     line: number,
     side: match.groups.side as Side,
-    severity: severityFromEmoji(match.groups.emoji),
   };
 }
 
@@ -197,7 +168,6 @@ function parseInlineSection(markdown: string, out: ReviewComment[], warnings: st
     file: string;
     line: number;
     side: Side;
-    severity: Severity;
     body: string[];
   } | null = null;
   let sawBodyBeforeHeader = false;
@@ -206,13 +176,13 @@ function parseInlineSection(markdown: string, out: ReviewComment[], warnings: st
     if (!current) return;
     const body = current.body.join('\n').replace(FINGERPRINT_MARKER_RE, '').trim();
     if (body.length > 0) {
-      // Legacy markdown comments have no confidence signal — default to 'high'
-      // so the renderer can decide whether to surface a Confidence line.
+      // Markdown inline comments carry no severity or confidence signal —
+      // default to the lowest severity and high confidence.
       out.push({
         file: current.file,
         line: current.line,
         side: current.side,
-        severity: inferSeverity(body, current.severity),
+        severity: 'info',
         confidence: 'high',
         body,
       });

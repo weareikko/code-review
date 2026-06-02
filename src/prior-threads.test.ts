@@ -28,14 +28,6 @@ describe('isBotNote', () => {
     ).toBe(true);
   });
 
-  it('returns true for legacy pi-reviewer fingerprint markers', () => {
-    expect(
-      isBotNote({
-        body: 'Old comment\n\n<!-- pi-reviewer:fingerprint-primary:aaa111 -->',
-      }),
-    ).toBe(true);
-  });
-
   it('returns false for a plain human note', () => {
     expect(isBotNote({ body: 'Thanks, fixed.' })).toBe(false);
   });

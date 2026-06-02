@@ -104,22 +104,6 @@ export const diagnosticChannels = {
   upsertSummary: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.upsertSummary),
 } as const;
 
-const channelsByPhase: Record<DiagnosticPhase, TracingChannel<DiagnosticContext>> = {
-  run: diagnosticChannels.run,
-  'gitlab.get_merge_request': diagnosticChannels.getMergeRequest,
-  'gitlab.get_latest_version': diagnosticChannels.getLatestVersion,
-  'git.prepare_history': diagnosticChannels.prepareGitHistory,
-  'git.get_merge_diff': diagnosticChannels.getMergeDiff,
-  'git.get_commit_log': diagnosticChannels.getCommitLog,
-  'reviewer.run': diagnosticChannels.runReviewer,
-  'review.parse': diagnosticChannels.parseReview,
-  'gitlab.get_discussions': diagnosticChannels.getDiscussions,
-  'comments.build': diagnosticChannels.buildComments,
-  'artifact.write_output': diagnosticChannels.writeOutput,
-  'gitlab.post_comments': diagnosticChannels.postComments,
-  'gitlab.upsert_summary': diagnosticChannels.upsertSummary,
-};
-
 export function createDiagnosticRunId(): string {
   return randomUUID();
 }
@@ -177,7 +161,16 @@ export function traceDiagnosticPhase<T>(
   overrides: Partial<DiagnosticContext> = {},
 ): Promise<T> {
   const context = createDiagnosticContext(phase, config, runId, overrides);
-  return traceDiagnostic(channelsByPhase[phase], context, operation);
+  // The phase string is exactly the channel-name suffix, so the tracing channel
+  // is derived directly rather than kept in a parallel phase→channel table. The
+  // tracing sub-channels are process-wide singletons keyed by name, so this
+  // publishes to the same channels `diagnosticChannels` exposes for subscription
+  // (e.g. the OTel bridge).
+  return traceDiagnostic(
+    tracingChannel<DiagnosticContext>(`${DIAGNOSTIC_CHANNEL_PREFIX}:${phase}`),
+    context,
+    operation,
+  );
 }
 
 function toDiagnosticError(error: unknown): DiagnosticError {

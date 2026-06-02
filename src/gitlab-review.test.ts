@@ -681,17 +681,15 @@ describe('buildJSONSystemPrompt — skill section', () => {
       expect(prompt).toContain('Do NOT emit "praise:" comments');
     });
 
-    it('includes the summary skeleton with H3 sections and always-Overview rule', () => {
+    it('includes the standardized summary skeleton with an always-present risk line', () => {
       const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
 
       expect(prompt).toContain('<summary_skeleton>');
-      expect(prompt).toContain('### Overview');
-      expect(prompt).toContain('### Findings');
-      expect(prompt).toContain('### Notes');
+      expect(prompt).toContain('**Risk: <Low | Medium | High>**');
+      expect(prompt).toContain('**<N> issue(s) found:**');
+      expect(prompt).toContain('**Notes:**');
       expect(prompt).not.toContain('No issues found in the reviewed diff.');
-      expect(prompt).toContain(
-        'When comments is empty, the summary still includes the `### Overview` section',
-      );
+      expect(prompt).toContain('The risk line and the overview are ALWAYS present');
     });
 
     it('includes the anti-duplication rule in <rules>', () => {

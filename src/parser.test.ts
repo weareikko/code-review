@@ -1,17 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { parseReviewMarkdown, parseReviewMarkdownWithWarnings } from './parser.js';
 
-const LEGACY_PROJECT_MARKER = ['pi', 'reviewer'].join('-');
-
 describe('gitlab-review parsing', () => {
-  it('parses inline comment blocks with severity and body normalization', () => {
+  it('parses inline comment blocks with body normalization', () => {
     const markdown = [
       'Review summary',
       '== Inline Comments ==',
-      '🟡 src/app.ts:10 (RIGHT)',
+      'src/app.ts:10 (RIGHT)',
       'Please simplify this branch.',
       '',
-      '🔴 `src/legacy.ts:5` - LEFT',
+      '`src/legacy.ts:5` - LEFT',
       'remove dead code <!-- gitlab-review:fingerprint-primary:abcd -->',
     ].join('\n');
 
@@ -20,7 +18,7 @@ describe('gitlab-review parsing', () => {
         file: 'src/app.ts',
         line: 10,
         side: 'RIGHT',
-        severity: 'warn',
+        severity: 'info',
         confidence: 'high',
         body: 'Please simplify this branch.',
       },
@@ -28,20 +26,19 @@ describe('gitlab-review parsing', () => {
         file: 'src/legacy.ts',
         line: 5,
         side: 'LEFT',
-        severity: 'critical',
+        severity: 'info',
         confidence: 'high',
         body: 'remove dead code',
       },
     ]);
   });
 
-  it('parses JSON comment fences and legacy markers', () => {
+  it('parses JSON comment fences and embedded comment markers', () => {
     const markdown = [
       '```json',
       '{"comments":[{"file":"src/a.ts","line":3,"side":"RIGHT","body":"Fix this"}]}',
       '```',
       '<!-- gitlab-review-comment {"file":"src/b.ts","old_line":9,"body":"Old side"} -->',
-      `<!-- ${LEGACY_PROJECT_MARKER}-comment {"file":"src/c.ts","line":11,"body":"Older side"} -->`,
     ].join('\n');
 
     expect(parseReviewMarkdown(markdown)).toEqual([
@@ -60,14 +57,6 @@ describe('gitlab-review parsing', () => {
         severity: 'info',
         confidence: 'high',
         body: 'Old side',
-      },
-      {
-        file: 'src/c.ts',
-        line: 11,
-        side: 'RIGHT',
-        severity: 'info',
-        confidence: 'high',
-        body: 'Older side',
       },
     ]);
   });
@@ -127,7 +116,7 @@ describe('gitlab-review parsing', () => {
     const markdown = [
       '== Inline Comments ==',
       'I should be ignored',
-      '🔵 src/file.ts:1 (RIGHT)',
+      'src/file.ts:1 (RIGHT)',
       'Valid comment',
     ].join('\n');
 

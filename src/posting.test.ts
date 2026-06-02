@@ -18,13 +18,6 @@ import type { GeneratedComment } from './review.js';
 
 declare const __PKG_VERSION__: string;
 
-const LEGACY_PROJECT_MARKER = ['pi', 'reviewer'].join('-');
-const LEGACY_PACKAGE_NAME = `@ikko-dev/${LEGACY_PROJECT_MARKER}`;
-
-function legacyHiddenMarker(name: string): string {
-  return `<!-- ${LEGACY_PROJECT_MARKER}:${name} -->`;
-}
-
 describe('summary note upsert', () => {
   it('wraps the summary with the hidden marker on its own line', () => {
     const body = buildSummaryBody('Looks good. **Nice work.**');
@@ -86,21 +79,6 @@ describe('summary note upsert', () => {
     expect(findExistingReviewedCommitSha(discussions)).toBe(current);
   });
 
-  it('finds reviewed commit footers on legacy summary notes', () => {
-    const commit = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-    const body = [
-      legacyHiddenMarker('summary'),
-      '',
-      'previous summary',
-      '',
-      '---',
-      '',
-      `Reviewed by [${LEGACY_PACKAGE_NAME}](https://github.com/ikko-dev/${LEGACY_PROJECT_MARKER}) for commit ${commit}.`,
-    ].join('\n');
-
-    expect(findExistingReviewedCommitSha([{ notes: [{ id: 12, body }] }])).toBe(commit);
-  });
-
   it('ignores reviewed commit footers from archived summary history', () => {
     const older = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
     const discussions = [
@@ -129,14 +107,6 @@ describe('summary note upsert', () => {
         ],
       },
     ];
-    expect(findExistingSummaryNoteId(discussions)).toBe(12);
-  });
-
-  it('finds existing legacy summary notes to avoid duplicate MR summaries', () => {
-    const discussions = [
-      { notes: [{ id: 12, body: `${legacyHiddenMarker('summary')}\n\nprevious summary` }] },
-    ];
-
     expect(findExistingSummaryNoteId(discussions)).toBe(12);
   });
 
@@ -188,27 +158,6 @@ describe('summary note upsert', () => {
     expect(updatedBody.indexOf('latest summary')).toBeLessThan(
       updatedBody.indexOf('prior summary'),
     );
-    expect(createMergeRequestNote).not.toHaveBeenCalled();
-  });
-
-  it('updates legacy summary notes while emitting the renamed marker', async () => {
-    const createMergeRequestNote = vi.fn();
-    const updateMergeRequestNote = vi.fn().mockResolvedValue({ id: 12, body: 'x' });
-    const gitlab = { createMergeRequestNote, updateMergeRequestNote } as unknown as GitLabClient;
-
-    await upsertSummaryNote(
-      gitlab,
-      'group/repo',
-      '12',
-      'latest summary',
-      [{ notes: [{ id: 12, body: `${legacyHiddenMarker('summary')}\n\nprior summary` }] }],
-      { archivedAt: new Date('2026-05-19T15:00:00Z') },
-    );
-
-    const updatedBody = updateMergeRequestNote.mock.calls[0][3] as string;
-    expect(updatedBody).toContain(SUMMARY_MARKER);
-    expect(updatedBody).not.toContain(legacyHiddenMarker('summary'));
-    expect(updatedBody).toContain('prior summary');
     expect(createMergeRequestNote).not.toHaveBeenCalled();
   });
 

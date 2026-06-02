@@ -864,9 +864,10 @@ const NullDereferenceFlaggedJudge = createLlmJudge<EvalInput, EvalOutput>(
 //      CRITICAL → "issue (blocking):"
 //      WARN     → "issue:" (no decoration)
 //      INFO     → nitpick / suggestion (non-blocking) / note / question / thought
-//   3. The summary contains the skeleton sections (### Overview, ### Findings)
-//      and does NOT duplicate the discussion text from inline comments — the
-//      anti-duplication rule keeps the summary scannable.
+//   3. The summary follows the standardized skeleton (an always-present
+//      "**Risk: <level>**" line and overview, plus an "**N issues found:**"
+//      block when there are comments) and does NOT duplicate the discussion
+//      text from inline comments — the anti-duplication rule keeps it scannable.
 // =============================================================================
 
 const ALLOWED_LABELS = [
@@ -951,33 +952,33 @@ const ConventionalCommentFormatJudge = createJudge(
 const SummarySkeletonJudge = createJudge(
   'SummarySkeletonJudge',
   ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
-    const hasOverview = /^###\s+Overview\b/m.test(output.summary);
-    const hasFindings = /^###\s+Findings\b/m.test(output.summary);
+    const hasRisk = /^\*\*Risk:\s+(Low|Medium|High)\b/m.test(output.summary);
+    const hasIssuesBlock = /^\*\*\d+\s+issues?\s+found:\*\*/im.test(output.summary);
     const isCleanReview = output.comments.length === 0;
 
-    // Overview is always required. With findings, the Findings section is
-    // required too; on a clean review the Findings section must be absent.
-    const score = hasOverview && (isCleanReview ? !hasFindings : hasFindings) ? 1 : 0;
+    // The risk line is always required. With findings, the issues block is
+    // required too; on a clean review the issues block must be absent.
+    const score = hasRisk && (isCleanReview ? !hasIssuesBlock : hasIssuesBlock) ? 1 : 0;
 
     let rationale: string;
     if (score === 1) {
       rationale = isCleanReview
-        ? 'Clean review: Overview present, Findings absent'
-        : 'Summary follows the skeleton';
-    } else if (!hasOverview) {
-      rationale = 'Summary missing the always-required Overview section';
+        ? 'Clean review: risk line present, issues block absent'
+        : 'Summary follows the standardized skeleton';
+    } else if (!hasRisk) {
+      rationale = 'Summary missing the always-required "**Risk: <level>**" line';
     } else if (isCleanReview) {
-      rationale = 'Clean review unexpectedly includes a Findings section';
+      rationale = 'Clean review unexpectedly includes an issues block';
     } else {
-      rationale = 'Summary with comments missing the Findings section';
+      rationale = 'Summary with comments missing the "**N issues found:**" block';
     }
 
     return {
       score,
       metadata: {
         rationale,
-        hasOverview,
-        hasFindings,
+        hasRisk,
+        hasIssuesBlock,
         isCleanReview,
         summaryHead: output.summary.slice(0, 200),
       },
@@ -1048,7 +1049,7 @@ describeEval(
       expect(result.output.summary.length).toBeGreaterThan(0);
     });
 
-    it('clean diff: emits the empty-findings sentinel or a conforming summary', async ({ run }) => {
+    it('clean diff: summary has the risk line and no issues block', async ({ run }) => {
       const diff = await readFile(join(FIXTURES, 'clean-ts.diff'), 'utf8');
       const result = await run({ diff, skills: ['code-review'] });
       expect(result.output).toBeDefined();

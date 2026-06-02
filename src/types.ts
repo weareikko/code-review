@@ -67,8 +67,8 @@ export function normalizeSeverity(value: unknown): Severity {
   const normalized = String(value ?? '')
     .trim()
     .toLowerCase();
-  if (normalized === 'critical' || normalized === 'error' || normalized === '🔴') return 'critical';
-  if (normalized === 'warn' || normalized === 'warning' || normalized === '🟡') return 'warn';
+  if (normalized === 'critical' || normalized === 'error') return 'critical';
+  if (normalized === 'warn' || normalized === 'warning') return 'warn';
   return 'info';
 }
 
@@ -86,4 +86,19 @@ export function normalizeConfidence(value: unknown): Confidence {
   if (normalized === 'low') return 'low';
   if (normalized === 'medium' || normalized === 'med') return 'medium';
   return 'high';
+}
+
+/**
+ * Split a `"provider/modelId"` model string on the FIRST slash. Multi-slash
+ * model IDs (e.g. `openrouter/anthropic/claude-3`) keep everything after the
+ * first slash as the model ID. When the string has no slash, `provider` is
+ * `undefined` and `modelId` is the whole string (or `undefined` when empty).
+ */
+export function splitModel(model: string): {
+  provider: string | undefined;
+  modelId: string | undefined;
+} {
+  const idx = model.indexOf('/');
+  if (idx < 0) return { provider: undefined, modelId: model || undefined };
+  return { provider: model.slice(0, idx), modelId: model.slice(idx + 1) };
 }

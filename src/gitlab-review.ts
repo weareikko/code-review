@@ -16,7 +16,7 @@ import { renderPriorThreadsBlock } from './prior-threads.js';
 import type { Skill } from './skills.js';
 import { loadAutoDiscoveredSkills, loadNamedSkill } from './skills.js';
 import type { GitLabReviewSeverity, ThinkingLevel } from './types.js';
-import { toGitLabReviewSeverity } from './types.js';
+import { splitModel, toGitLabReviewSeverity } from './types.js';
 
 export interface UsageBreakdown {
   input: number;
@@ -316,7 +316,7 @@ function buildSharedBase(minSeverity: GitLabReviewSeverity): string[] {
     '- Do not make claims about external state (dates, library versions, deprecation status, API availability) that cannot be verified from the diff itself',
     '- Write declaratively. Avoid "consider", "might want to", "could potentially", "you may want to" in issue and suggestion subjects. State the defect and the fix directly. If unsure it is wrong, omit it. (The question and thought labels are inherently tentative and exempt.)',
     '- The summary lists findings by their Conventional Comment subject only; it MUST NOT repeat the discussion, impact ("why it matters"), or suggested fix from any inline comment',
-    "- Cross-cutting content (suppressed findings, unreviewed files, overall verdict) goes in the summary's Notes section, never in inline comments",
+    '- Cross-cutting content (suppressed findings, unreviewed files, overall verdict) goes in the summary, never in inline comments',
     '- When a commit message, prior thread reply, or in-file ADR/incident reference suppresses what would otherwise be a CRITICAL or WARN finding, you MUST add a one-line bullet to the summary Notes section naming the file:line, the pattern, and the context that suppressed it (e.g. "src/probe.ts:13 — empty .catch() suppressed per ADR-042 / INC-2891"). Silent suppression is not acceptable: the developer must be able to audit what context you applied.',
     ...(rule ? [rule] : []),
     '</rules>',
@@ -369,27 +369,25 @@ export function buildJSONSystemPrompt(
     '</comment_format>',
     '',
     '<summary_skeleton>',
-    'Write the summary in this exact order, omitting any section that would be empty. Use level-3 headings so they nest under the wrapping `## Code Review` heading:',
+    'The summary is rendered under a fixed "## Code Review" heading so every review looks the same and is easy to scan. Write the summary content in this EXACT order. The risk line and the overview are ALWAYS present; the issues block and the notes block appear only when they have content.',
     '',
-    '  ### Overview',
-    '  <2-3 sentences: what the MR does and an explicit overall review verdict. ALWAYS include this section, even when comments is empty — in that case give a positive verdict such as "No blocking issues found.">',
+    '  **Risk: <Low | Medium | High>** — <one sentence: the impact of merging this MR and how it should be handled. Low = no blocking issues, safe to merge aside from nits. Medium = wrong behaviour or missed cases that should be fixed before merge. High = data loss, security, broken auth, or a critical-path crash — do not merge until resolved. Anchor the level to the most severe finding.>',
     '',
-    '  ### Findings',
-    '  <N> issue (blocking) · <N> issue · <N> suggestion · <N> nitpick',
+    '  <2-3 sentence plain-prose overview of what the MR does. ALWAYS present, including on a clean review.>',
     '',
-    '  <One bullet per finding, grouped by label, linking the file:line. Show only the comment\'s subject (the text after "<label>:"). Do NOT restate the discussion, impact, or fix — those live in the inline comment.>',
+    '  **<N> issue(s) found:**',
+    '  - **<label>** — `file:line` — <subject>',
+    '  <One bullet per inline comment. Show only the subject (the text after the comment label); never restate the discussion, impact, or fix — those live in the inline comment. Omit this entire block when there are no inline comments.>',
     '',
-    '  ### Notes',
-    '  <Suppressed findings — one bullet each, naming file:line, the pattern, and the commit/ADR/prior-thread that justified leaving it un-flagged. Then unreviewed/skipped files and any cross-cutting note. Omit the section entirely only if nothing was suppressed and nothing was skipped.>',
-    '',
-    'When comments is empty, the summary still includes the `### Overview` section (with the MR description and a positive verdict); simply omit the `### Findings` and `### Notes` sections.',
+    '  **Notes:**',
+    '  <Only when there is something to surface: suppressed CRITICAL/WARN findings (one bullet each — file:line, the pattern, and the commit/ADR/prior-thread that justified leaving it un-flagged) and any unreviewed/skipped files. Omit this entire block when there is nothing to note.>',
     '</summary_skeleton>',
     '',
     '<example>',
     'Example output for a diff that introduces one real bug and one style nit:',
     '```json',
     '{',
-    '  "summary": "### Overview\\n\\nAdds a checkout retry helper used by the cart route. The loop has a critical off-by-one and the helper has a minor naming nit.\\n\\n### Findings\\n\\n1 issue (blocking) · 1 nitpick\\n\\n- **issue (blocking)** — `src/cart/retry.ts:42` — Loop runs N+1 attempts on first call\\n- **nitpick** — `src/cart/retry.ts:8` — Helper name shadows the `Retry` type",',
+    '  "summary": "**Risk: High** — The retry loop overcharges customers on the free-tier path; do not merge until the off-by-one is fixed.\\n\\nAdds a checkout retry helper used by the cart route, with one blocking off-by-one and one naming nit.\\n\\n**2 issues found:**\\n- **issue (blocking)** — `src/cart/retry.ts:42` — Loop runs N+1 attempts on first call\\n- **nitpick** — `src/cart/retry.ts:8` — Helper name shadows the `Retry` type",',
     '  "comments": [',
     '    {',
     '      "file": "src/cart/retry.ts",',
@@ -529,14 +527,12 @@ function buildOllamaModel(
  * @param maxTokens   - Max output tokens; 0 means use the model's default.
  */
 function resolveModel(modelString: string, baseUrl: string, maxTokens: number): Model<string> {
-  const idx = modelString.indexOf('/');
-  if (idx < 0) {
+  const { provider, modelId } = splitModel(modelString);
+  if (provider === undefined || modelId === undefined) {
     throw new ReviewerError(
       `Invalid model format "${modelString}". Expected "provider/modelId" (e.g. "anthropic/claude-sonnet-4-5").`,
     );
   }
-  const provider = modelString.slice(0, idx);
-  const modelId = modelString.slice(idx + 1);
 
   // Built-in Ollama support via the OpenAI-compatible API.
   if (provider === 'ollama') {
