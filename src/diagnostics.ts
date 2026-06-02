@@ -88,21 +88,15 @@ export const DIAGNOSTIC_CHANNEL_NAMES = {
   upsertSummary: `${DIAGNOSTIC_CHANNEL_PREFIX}:gitlab.upsert_summary`,
 } as const;
 
-export const diagnosticChannels = {
-  run: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.run),
-  getMergeRequest: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.getMergeRequest),
-  getLatestVersion: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.getLatestVersion),
-  prepareGitHistory: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.prepareGitHistory),
-  getMergeDiff: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.getMergeDiff),
-  getCommitLog: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.getCommitLog),
-  runReviewer: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.runReviewer),
-  parseReview: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.parseReview),
-  getDiscussions: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.getDiscussions),
-  buildComments: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.buildComments),
-  writeOutput: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.writeOutput),
-  postComments: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.postComments),
-  upsertSummary: tracingChannel<DiagnosticContext>(DIAGNOSTIC_CHANNEL_NAMES.upsertSummary),
-} as const;
+export const diagnosticChannels = Object.fromEntries(
+  Object.entries(DIAGNOSTIC_CHANNEL_NAMES).map(([key, name]) => [
+    key,
+    tracingChannel<DiagnosticContext>(name),
+  ]),
+) as Record<
+  keyof typeof DIAGNOSTIC_CHANNEL_NAMES,
+  ReturnType<typeof tracingChannel<DiagnosticContext>>
+>;
 
 export function createDiagnosticRunId(): string {
   return randomUUID();
