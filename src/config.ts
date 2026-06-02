@@ -1,7 +1,7 @@
 import { getEnvApiKey } from '@earendil-works/pi-ai';
 import { ConfigError } from './errors.js';
 import { POSTING_MODES, type PostingMode } from './posting.js';
-import { THINKING_LEVELS, type Severity, type ThinkingLevel } from './types.js';
+import { splitModel, THINKING_LEVELS, type Severity, type ThinkingLevel } from './types.js';
 
 export type GitLabAuthHeader = 'PRIVATE-TOKEN' | 'JOB-TOKEN';
 
@@ -110,19 +110,7 @@ function resolvePostSummary(args: ParsedArgs, env: NodeJS.ProcessEnv): boolean {
   return true;
 }
 
-function resolveMinSeverity(value: unknown): string {
-  return String(value ?? '')
-    .trim()
-    .toLowerCase();
-}
-
-function resolveThinkingLevel(value: unknown): string {
-  return String(value ?? '')
-    .trim()
-    .toLowerCase();
-}
-
-function resolvePostingMode(value: unknown): string {
+function normalizeChoice(value: unknown): string {
   return String(value ?? '')
     .trim()
     .toLowerCase();
@@ -133,8 +121,7 @@ function resolvePostingMode(value: unknown): string {
  * Returns an empty string when the model string contains no slash.
  */
 export function parseModelProvider(model: string): string {
-  const idx = model.indexOf('/');
-  return idx >= 0 ? model.slice(0, idx) : '';
+  return splitModel(model).provider ?? '';
 }
 
 /**
@@ -238,13 +225,13 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     gitlabToken: token.token,
     gitlabAuthHeader: token.header,
     model,
-    minSeverity: resolveMinSeverity(
+    minSeverity: normalizeChoice(
       args.minSeverity ?? env.GITLAB_REVIEW_MIN_SEVERITY ?? 'info',
     ) as Severity,
-    thinkingLevel: resolveThinkingLevel(
+    thinkingLevel: normalizeChoice(
       args.thinking ?? env.GITLAB_REVIEW_THINKING_LEVEL ?? 'off',
     ) as ThinkingLevel,
-    postingMode: resolvePostingMode(
+    postingMode: normalizeChoice(
       args.postingMode ?? env.GITLAB_REVIEW_POSTING_MODE ?? 'direct',
     ) as PostingMode,
     apiKey,

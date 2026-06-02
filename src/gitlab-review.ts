@@ -16,7 +16,7 @@ import { renderPriorThreadsBlock } from './prior-threads.js';
 import type { Skill } from './skills.js';
 import { loadAutoDiscoveredSkills, loadNamedSkill } from './skills.js';
 import type { GitLabReviewSeverity, ThinkingLevel } from './types.js';
-import { toGitLabReviewSeverity } from './types.js';
+import { splitModel, toGitLabReviewSeverity } from './types.js';
 
 export interface UsageBreakdown {
   input: number;
@@ -529,14 +529,12 @@ function buildOllamaModel(
  * @param maxTokens   - Max output tokens; 0 means use the model's default.
  */
 function resolveModel(modelString: string, baseUrl: string, maxTokens: number): Model<string> {
-  const idx = modelString.indexOf('/');
-  if (idx < 0) {
+  const { provider, modelId } = splitModel(modelString);
+  if (provider === undefined || modelId === undefined) {
     throw new ReviewerError(
       `Invalid model format "${modelString}". Expected "provider/modelId" (e.g. "anthropic/claude-sonnet-4-5").`,
     );
   }
-  const provider = modelString.slice(0, idx);
-  const modelId = modelString.slice(idx + 1);
 
   // Built-in Ollama support via the OpenAI-compatible API.
   if (provider === 'ollama') {

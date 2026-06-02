@@ -65,7 +65,7 @@ import {
   type DiagnosticUsage,
 } from './diagnostics.js';
 import type { AgentLike } from './gitlab-review.js';
-import type { GeneratedComment } from './types.js';
+import { splitModel, type GeneratedComment } from './types.js';
 
 // Inlined at build time by Vite's `define` (see vite.config.ts). Keeps
 // `service.version` accurate under `npx`/standalone bin invocations, where
@@ -612,20 +612,10 @@ function buildAgentSubscriber(
         // emit bare IDs like 'claude-sonnet-4-5' without a provider prefix; in
         // that case fall back to the configured model string to populate
         // gen_ai.system so all per-turn metrics share a consistent label set.
-        const rawModel = String(msg.model ?? '');
-        const slashIdx = rawModel.indexOf('/');
-        let provider: string | undefined;
-        let modelId: string | undefined;
-        if (slashIdx >= 0) {
-          provider = rawModel.slice(0, slashIdx);
-          modelId = rawModel.slice(slashIdx + 1);
-        } else {
-          modelId = rawModel || undefined;
-          if (configuredModel) {
-            const cfgSlash = configuredModel.indexOf('/');
-            if (cfgSlash >= 0) provider = configuredModel.slice(0, cfgSlash);
-          }
-        }
+        const parts = splitModel(String(msg.model ?? ''));
+        const modelId = parts.modelId;
+        const provider =
+          parts.provider ?? (configuredModel ? splitModel(configuredModel).provider : undefined);
 
         const metricAttrs: Attributes = {
           'gen_ai.operation.name': 'invoke_agent',
@@ -807,8 +797,7 @@ function emitReviewCompletedLog(
   isError: boolean,
 ): void {
   const usage = meta?.usage;
-  const rawModel = usage?.model ?? ctx.model ?? '';
-  const modelId = rawModel.includes('/') ? rawModel.split('/')[1] : rawModel || undefined;
+  const modelId = splitModel(usage?.model ?? ctx.model ?? '').modelId;
   const cost = usage?.cost.total;
   const costStr = cost !== undefined ? ` $${cost.toFixed(4)}` : '';
   const commentStr = ctx.generated !== undefined ? ` → ${ctx.generated} comments` : '';
@@ -1002,10 +991,7 @@ function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
   // OpenTelemetry GenAI semantic conventions — currently experimental, opt-in
   // via OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental.
   // Spec: https://opentelemetry.io/docs/specs/semconv/gen-ai/
-  const rawModel = ctx.model ?? '';
-  const slashIdx = rawModel.indexOf('/');
-  const provider = slashIdx >= 0 ? rawModel.slice(0, slashIdx) : undefined;
-  const modelId = slashIdx >= 0 ? rawModel.slice(slashIdx + 1) : undefined;
+  const { provider, modelId } = splitModel(ctx.model ?? '');
   if (provider) span.setAttribute('gen_ai.system', provider);
   if (modelId) {
     span.setAttribute('gen_ai.request.model', modelId);
@@ -1055,10 +1041,7 @@ function recordGenAiMetrics(
   isError: boolean,
   ciAttrs: Record<string, string> = {},
 ): void {
-  const rawModel = ctx.model ?? '';
-  const slashIdx = rawModel.indexOf('/');
-  const provider = slashIdx >= 0 ? rawModel.slice(0, slashIdx) : undefined;
-  const modelId = slashIdx >= 0 ? rawModel.slice(slashIdx + 1) : undefined;
+  const { provider, modelId } = splitModel(ctx.model ?? '');
   const attrs: Attributes = {
     'gen_ai.operation.name': 'invoke_agent',
     ...REVIEW_SERVICE_ATTRS,
