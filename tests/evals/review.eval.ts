@@ -951,23 +951,34 @@ const ConventionalCommentFormatJudge = createJudge(
 const SummarySkeletonJudge = createJudge(
   'SummarySkeletonJudge',
   ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
-    // Empty-findings sentinel is also valid output.
-    if (output.summary.trim() === 'No issues found in the reviewed diff.') {
-      return {
-        score: 1,
-        metadata: { rationale: 'Used the empty-findings sentinel.' },
-      };
-    }
     const hasOverview = /^###\s+Overview\b/m.test(output.summary);
     const hasFindings = /^###\s+Findings\b/m.test(output.summary);
-    const score = hasOverview && hasFindings ? 1 : 0;
+    const isCleanReview = output.comments.length === 0;
+
+    // Overview is always required. With findings, the Findings section is
+    // required too; on a clean review the Findings section must be absent.
+    const score = hasOverview && (isCleanReview ? !hasFindings : hasFindings) ? 1 : 0;
+
+    let rationale: string;
+    if (score === 1) {
+      rationale = isCleanReview
+        ? 'Clean review: Overview present, Findings absent'
+        : 'Summary follows the skeleton';
+    } else if (!hasOverview) {
+      rationale = 'Summary missing the always-required Overview section';
+    } else if (isCleanReview) {
+      rationale = 'Clean review unexpectedly includes a Findings section';
+    } else {
+      rationale = 'Summary with comments missing the Findings section';
+    }
+
     return {
       score,
       metadata: {
-        rationale:
-          score === 1 ? 'Summary follows the skeleton' : 'Summary missing skeleton sections',
+        rationale,
         hasOverview,
         hasFindings,
+        isCleanReview,
         summaryHead: output.summary.slice(0, 200),
       },
     };
