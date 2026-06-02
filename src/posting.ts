@@ -8,26 +8,8 @@ export const SUMMARY_HISTORY_END = '<!-- gitlab-review:summary-history:end -->';
 export const SUMMARY_HISTORY_ENTRY_START = '<!-- gitlab-review:summary-history-entry:start -->';
 export const SUMMARY_HISTORY_ENTRY_END = '<!-- gitlab-review:summary-history-entry:end -->';
 export const SUMMARY_HISTORY_LIMIT = 10;
-const LEGACY_PROJECT_MARKER = ['pi', 'reviewer'].join('-');
-const LEGACY_SUMMARY_MARKER = `<!-- ${LEGACY_PROJECT_MARKER}:summary -->`;
-const LEGACY_SUMMARY_HISTORY_START = `<!-- ${LEGACY_PROJECT_MARKER}:summary-history:start -->`;
-const LEGACY_SUMMARY_HISTORY_END = `<!-- ${LEGACY_PROJECT_MARKER}:summary-history:end -->`;
-const LEGACY_SUMMARY_HISTORY_ENTRY_START = `<!-- ${LEGACY_PROJECT_MARKER}:summary-history-entry:start -->`;
-const LEGACY_SUMMARY_HISTORY_ENTRY_END = `<!-- ${LEGACY_PROJECT_MARKER}:summary-history-entry:end -->`;
-const SUMMARY_MARKERS = [SUMMARY_MARKER, LEGACY_SUMMARY_MARKER] as const;
-const SUMMARY_HISTORY_MARKER_PAIRS = [
-  { start: SUMMARY_HISTORY_START, end: SUMMARY_HISTORY_END },
-  { start: LEGACY_SUMMARY_HISTORY_START, end: LEGACY_SUMMARY_HISTORY_END },
-] as const;
-const SUMMARY_HISTORY_ENTRY_MARKER_PAIRS = [
-  { start: SUMMARY_HISTORY_ENTRY_START, end: SUMMARY_HISTORY_ENTRY_END },
-  { start: LEGACY_SUMMARY_HISTORY_ENTRY_START, end: LEGACY_SUMMARY_HISTORY_ENTRY_END },
-] as const;
-const REVIEWED_COMMIT_PROJECT_RE = String.raw`(?:gitlab-review|${LEGACY_PROJECT_MARKER})`;
-export const REVIEWED_COMMIT_FOOTER_PATTERN = new RegExp(
-  String.raw`Reviewed by \[@ikko-dev\/${REVIEWED_COMMIT_PROJECT_RE}\]\(https:\/\/github\.com\/ikko-dev\/${REVIEWED_COMMIT_PROJECT_RE}\)(?: v\S+)? for commit ([a-f0-9]{40})\.`,
-  'i',
-);
+export const REVIEWED_COMMIT_FOOTER_PATTERN =
+  /Reviewed by \[@ikko-dev\/gitlab-review\]\(https:\/\/github\.com\/ikko-dev\/gitlab-review\)(?: v\S+)? for commit ([a-f0-9]{40})\./i;
 
 declare const __PKG_VERSION__: string;
 
@@ -93,7 +75,7 @@ export function findExistingSummaryNote(discussions: Discussion[]): SummaryNote 
       const id = note.id;
       if (typeof id !== 'number') continue;
       const body = note.body;
-      if (typeof body === 'string' && SUMMARY_MARKERS.some((marker) => body.includes(marker))) {
+      if (typeof body === 'string' && body.includes(SUMMARY_MARKER)) {
         return { id, body };
       }
     }
@@ -118,30 +100,29 @@ export function buildArchivedSummaryEntry(body: string, archivedAt = new Date())
 
 export function extractSummaryHistoryEntries(body: string): string[] {
   const entries: string[] = [];
-  for (const markers of SUMMARY_HISTORY_ENTRY_MARKER_PAIRS) {
-    const entryPattern = new RegExp(
-      `${escapeRegExp(markers.start)}\\s*([\\s\\S]*?)\\s*${escapeRegExp(markers.end)}`,
-      'g',
-    );
-    for (const match of body.matchAll(entryPattern)) {
-      const entry = match[1]?.trim();
-      if (entry)
-        entries.push(`${SUMMARY_HISTORY_ENTRY_START}\n${entry}\n${SUMMARY_HISTORY_ENTRY_END}`);
-    }
+  const entryPattern = new RegExp(
+    `${escapeRegExp(SUMMARY_HISTORY_ENTRY_START)}\\s*([\\s\\S]*?)\\s*${escapeRegExp(SUMMARY_HISTORY_ENTRY_END)}`,
+    'g',
+  );
+  for (const match of body.matchAll(entryPattern)) {
+    const entry = match[1]?.trim();
+    if (entry)
+      entries.push(`${SUMMARY_HISTORY_ENTRY_START}\n${entry}\n${SUMMARY_HISTORY_ENTRY_END}`);
   }
   return entries;
 }
 
 export function stripSummaryHistory(body: string): string {
-  const historyMarker = findFirstSummaryHistoryMarker(body);
-  if (!historyMarker) return body.trim();
+  const start = body.indexOf(SUMMARY_HISTORY_START);
+  if (start === -1) return body.trim();
 
-  const { index: start, markers } = historyMarker;
   const detailsStart = body.lastIndexOf('<details>', start);
   const blockStart = detailsStart === -1 ? start : detailsStart;
-  const endMarkerStart = body.indexOf(markers.end, start);
+  const endMarkerStart = body.indexOf(SUMMARY_HISTORY_END, start);
   const endMarkerEnd =
-    endMarkerStart === -1 ? start + markers.start.length : endMarkerStart + markers.end.length;
+    endMarkerStart === -1
+      ? start + SUMMARY_HISTORY_START.length
+      : endMarkerStart + SUMMARY_HISTORY_END.length;
   const detailsEnd = body.indexOf('</details>', endMarkerEnd);
   const blockEnd = detailsEnd === -1 ? endMarkerEnd : detailsEnd + '</details>'.length;
 
@@ -149,9 +130,7 @@ export function stripSummaryHistory(body: string): string {
 }
 
 export function stripSummaryMarker(body: string): string {
-  let stripped = body;
-  for (const marker of SUMMARY_MARKERS) stripped = stripped.replace(marker, '');
-  return stripped.trim();
+  return body.replace(SUMMARY_MARKER, '').trim();
 }
 
 export function buildSummaryHistoryEntries(
@@ -193,18 +172,6 @@ export async function upsertSummaryNote(
   }
   const created = await gitlab.createMergeRequestNote(project, mr, body);
   return { action: 'created', noteId: created.id };
-}
-
-function findFirstSummaryHistoryMarker(
-  body: string,
-): { index: number; markers: (typeof SUMMARY_HISTORY_MARKER_PAIRS)[number] } | null {
-  let first: { index: number; markers: (typeof SUMMARY_HISTORY_MARKER_PAIRS)[number] } | null =
-    null;
-  for (const markers of SUMMARY_HISTORY_MARKER_PAIRS) {
-    const index = body.indexOf(markers.start);
-    if (index !== -1 && (!first || index < first.index)) first = { index, markers };
-  }
-  return first;
 }
 
 function buildSummaryHistoryBlock(entries: string[]): string {

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **BREAKING:** dropped all `pi-reviewer` backward compatibility. Legacy `pi-reviewer:*` markers are no longer recognised — fingerprint markers (`<!-- pi-reviewer:fingerprint-* -->`), the summary and summary-history markers, the reviewed-commit footer, and the `pi-reviewer-comment` embedded marker. Only the `gitlab-review:*` equivalents are read and written. MR threads and summary notes created by `pi-reviewer` before the rename will no longer be deduplicated, detected as prior context, or treated as already-reviewed; the first `gitlab-review` run re-establishes the renamed markers.
+- **BREAKING:** dropped severity emoji (🔴/🟡/🔵) handling from reviewer-output parsing. `normalizeSeverity` no longer maps emoji to a tier, markdown inline-comment headers no longer derive severity from a leading emoji (they now always parse as `INFO`), and `normalizeBody` no longer strips a leading emoji. The reviewer emits an explicit `severity` field in its JSON output and the prompt no longer uses emoji, so this only affected pre-rename markdown output.
+
 ## [0.5.0] - 2026-06-02
 
 ### Changed

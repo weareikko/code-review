@@ -2,7 +2,7 @@ import { normalizeBody } from './fingerprints.js';
 import type { Discussion, DiscussionNote } from './gitlab.js';
 
 const FINGERPRINT_MARKER_RE =
-  /<!--\s*(?:gitlab-review|pi-reviewer):fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->/i;
+  /<!--\s*gitlab-review:fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->/i;
 
 export interface PriorThread {
   file: string;

@@ -67,8 +67,8 @@ export function normalizeSeverity(value: unknown): Severity {
   const normalized = String(value ?? '')
     .trim()
     .toLowerCase();
-  if (normalized === 'critical' || normalized === 'error' || normalized === '🔴') return 'critical';
-  if (normalized === 'warn' || normalized === 'warning' || normalized === '🟡') return 'warn';
+  if (normalized === 'critical' || normalized === 'error') return 'critical';
+  if (normalized === 'warn' || normalized === 'warning') return 'warn';
   return 'info';
 }
 

@@ -2,27 +2,17 @@ import { createHash } from 'node:crypto';
 import type { Discussion } from './gitlab.js';
 import type { Fingerprints, ReviewComment, Side } from './types.js';
 
-const LEGACY_FINGERPRINT_MARKER_PROJECT = ['pi', 'reviewer'].join('-');
-const FINGERPRINT_MARKER_PROJECT_RE = String.raw`(?:gitlab-review|${LEGACY_FINGERPRINT_MARKER_PROJECT})`;
-const FINGERPRINT_MARKER_RE = new RegExp(
-  String.raw`<!--\s*${FINGERPRINT_MARKER_PROJECT_RE}:fingerprint-(?:primary|secondary):([a-f0-9]+)\s*-->`,
-  'gi',
-);
-const STRIP_FINGERPRINT_MARKER_RE = new RegExp(
-  String.raw`<!--\s*${FINGERPRINT_MARKER_PROJECT_RE}:fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->`,
-  'gi',
-);
+const FINGERPRINT_MARKER_RE =
+  /<!--\s*gitlab-review:fingerprint-(?:primary|secondary):([a-f0-9]+)\s*-->/gi;
+const STRIP_FINGERPRINT_MARKER_RE =
+  /<!--\s*gitlab-review:fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->/gi;
 
 export function sha256(input: string): string {
   return createHash('sha256').update(input).digest('hex');
 }
 
 export function normalizeBody(body: string): string {
-  return body
-    .replace(STRIP_FINGERPRINT_MARKER_RE, '')
-    .replace(/^(?:🔴|🟡|🔵)\s*/gmu, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return body.replace(STRIP_FINGERPRINT_MARKER_RE, '').replace(/\s+/g, ' ').trim();
 }
 
 interface FileState {
