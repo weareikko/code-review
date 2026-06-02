@@ -12,6 +12,9 @@ const GITHUB_STYLE_HEADER_RE =
   /^\s*(?:\*\*)?`?(?<file>.+):(?<line>\d+)`?(?:\*\*)?\s*(?:[·-]|\()\s*(?<side>LEFT|RIGHT)\)?\s*$/u;
 const FINGERPRINT_MARKER_RE = new RegExp(FINGERPRINT_MARKER_PATTERN, 'gi');
 const JSON_COMMENT_MARKER_RE = /<!--\s*gitlab-review-comment\s*([\s\S]*?)-->/gi;
+const JSON_FENCE_RE = /^```json[^\S\r\n]*(?:\r?\n)([\s\S]*?)^```[^\S\r\n]*$/gim;
+const INLINE_SECTION_HEADER_RE = /^==\s*Inline Comments\s*==\s*$/im;
+const SECTION_BREAK_RE = /^==\s*[^=].*==\s*$/;
 
 function normalizeSide(value: unknown): Side {
   return String(value ?? '').toUpperCase() === 'LEFT' ? 'LEFT' : 'RIGHT';
@@ -105,8 +108,7 @@ function extractFirstJsonObject(markdown: string): Record<string, unknown> | nul
 function parseJsonComments(markdown: string, out: ReviewComment[]): string | null {
   let summary: string | null = null;
   let parsedFencedJson = false;
-  const fence = /^```json[^\S\r\n]*(?:\r?\n)([\s\S]*?)^```[^\S\r\n]*$/gim;
-  for (const match of markdown.matchAll(fence)) {
+  for (const match of markdown.matchAll(JSON_FENCE_RE)) {
     try {
       const parsed = JSON.parse(match[1] ?? '');
       if (parsed && typeof parsed === 'object') parsedFencedJson = true;
@@ -160,7 +162,7 @@ function matchHeader(line: string): { file: string; line: number; side: Side } |
 }
 
 function parseInlineSection(markdown: string, out: ReviewComment[], warnings: string[]): void {
-  const marker = markdown.search(/^==\s*Inline Comments\s*==\s*$/im);
+  const marker = markdown.search(INLINE_SECTION_HEADER_RE);
   if (marker === -1) return;
 
   const section = markdown.slice(marker).split(/\r?\n/).slice(1);
@@ -191,7 +193,7 @@ function parseInlineSection(markdown: string, out: ReviewComment[], warnings: st
   };
 
   for (const rawLine of section) {
-    if (/^==\s*[^=].*==\s*$/.test(rawLine)) break;
+    if (SECTION_BREAK_RE.test(rawLine)) break;
     const header = matchHeader(rawLine);
     if (header) {
       flush();
