@@ -402,6 +402,43 @@ describe('loadNamedSkill', () => {
 });
 
 // ---------------------------------------------------------------------------
+// loadSkillFromDir — YAML frontmatter parsing
+// ---------------------------------------------------------------------------
+
+describe('loadSkillFromDir frontmatter parsing', () => {
+  it('parses quoted YAML values, stripping the surrounding quotes', async () => {
+    const dir = await makeTmp();
+    await writeFile(
+      join(dir, 'SKILL.md'),
+      '---\nname: "code-review"\ndescription: "Quoted: with a colon"\n---\nbody',
+      'utf8',
+    );
+    const skill = await loadSkillFromDir(dir, 'file');
+    expect(skill).toMatchObject({ name: 'code-review', description: 'Quoted: with a colon' });
+  });
+
+  it('returns null when the frontmatter is not valid YAML', async () => {
+    const dir = await makeTmp();
+    await writeFile(
+      join(dir, 'SKILL.md'),
+      '---\nname: x\ndescription: bad: unquoted: colons\n---\nbody',
+      'utf8',
+    );
+    expect(await loadSkillFromDir(dir, 'file')).toBeNull();
+  });
+
+  it('returns null when description is not a string scalar', async () => {
+    const dir = await makeTmp();
+    await writeFile(
+      join(dir, 'SKILL.md'),
+      '---\nname: x\ndescription:\n  nested: value\n---\nbody',
+      'utf8',
+    );
+    expect(await loadSkillFromDir(dir, 'file')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // loadSkillFromDir — source field propagation
 // ---------------------------------------------------------------------------
 

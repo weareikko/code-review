@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 import { ConfigError } from './errors.js';
 
 export interface Skill {
@@ -32,13 +33,24 @@ const SKILL_DIRS = ['.agents/skills', '.claude/skills'] as const;
 const RESOURCE_DIRS = ['references'] as const;
 
 function parseFrontmatter(content: string): { name: string; description: string } | null {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?[\s\S]*$/);
+  // Locate the leading `---` … `---` fence, then hand the inner block to a real
+  // YAML parser rather than matching keys with regex. Invalid YAML (e.g. an
+  // unquoted value containing `: `) yields null and the skill is skipped.
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) return null;
-  const [, frontmatter] = match;
-  const name = frontmatter.match(/^name:\s*(.+)$/m)?.[1]?.trim() ?? '';
-  const description = frontmatter.match(/^description:\s*(.+)$/m)?.[1]?.trim() ?? '';
-  if (!name || !description) return null;
-  return { name, description };
+  let data: unknown;
+  try {
+    data = parseYaml(match[1]);
+  } catch {
+    return null;
+  }
+  if (!data || typeof data !== 'object') return null;
+  const { name, description } = data as Record<string, unknown>;
+  if (typeof name !== 'string' || typeof description !== 'string') return null;
+  const trimmedName = name.trim();
+  const trimmedDescription = description.trim();
+  if (!trimmedName || !trimmedDescription) return null;
+  return { name: trimmedName, description: trimmedDescription };
 }
 
 export async function loadSkillFromDir(
