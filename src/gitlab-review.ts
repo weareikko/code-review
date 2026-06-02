@@ -369,7 +369,7 @@ export function buildJSONSystemPrompt(
     '</comment_format>',
     '',
     '<summary_skeleton>',
-    'The summary is rendered under a fixed "## Code Review" heading so every review looks the same and is easy to scan. Write the summary content in this EXACT order. The risk line and the overview are ALWAYS present; the issues block and the notes block appear only when they have content.',
+    'The summary is rendered under a fixed "### Code Review" heading so every review looks the same and is easy to scan. Write the summary content in this EXACT order. The risk line and the overview are ALWAYS present; the issues block and the notes block appear only when they have content.',
     '',
     '  **Risk: <Low | Medium | High>** — <one sentence: the impact of merging this MR and how it should be handled. Low = no blocking issues, safe to merge aside from nits. Medium = wrong behaviour or missed cases that should be fixed before merge. High = data loss, security, broken auth, or a critical-path crash — do not merge until resolved. Anchor the level to the most severe finding.>',
     '',
