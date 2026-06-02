@@ -91,29 +91,22 @@ export class GitLabClient {
     };
   }
 
-  async request<T>(
+  private async fetchWithTimeout(
+    url: string,
+    init: RequestInit,
+    method: string,
     path: string,
-    init: RequestInit = {},
-    query: Record<string, string | number | boolean | undefined> = {},
-  ): Promise<T> {
+  ): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.requestTimeout);
-    let response: Response;
     try {
-      response = await this.fetchImpl(this.url(path, query), {
-        ...init,
-        signal: controller.signal,
-        headers: this.headers({
-          ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-          ...(init.headers as Record<string, string> | undefined),
-        }),
-      });
+      return await this.fetchImpl(url, { ...init, signal: controller.signal });
     } catch (error) {
       if (isAbortError(error)) {
         throw new GitLabApiError(
-          `GitLab API ${init.method ?? 'GET'} ${path} timed out after ${this.requestTimeout}ms`,
+          `GitLab API ${method} ${path} timed out after ${this.requestTimeout}ms`,
           {
-            method: init.method ?? 'GET',
+            method,
             path,
             hint: 'Check GitLab API availability or increase requestTimeout.',
           },
@@ -123,6 +116,25 @@ export class GitLabClient {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  async request<T>(
+    path: string,
+    init: RequestInit = {},
+    query: Record<string, string | number | boolean | undefined> = {},
+  ): Promise<T> {
+    const response = await this.fetchWithTimeout(
+      this.url(path, query),
+      {
+        ...init,
+        headers: this.headers({
+          ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+          ...(init.headers as Record<string, string> | undefined),
+        }),
+      },
+      init.method ?? 'GET',
+      path,
+    );
 
     if (!response.ok) {
       const responseBody = await response.text();
@@ -152,29 +164,12 @@ export class GitLabClient {
     let page = 1;
 
     while (true) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), this.requestTimeout);
-      let response: Response;
-      try {
-        response = await this.fetchImpl(this.url(path, { ...query, per_page: 100, page }), {
-          headers: this.headers(),
-          signal: controller.signal,
-        });
-      } catch (error) {
-        if (isAbortError(error)) {
-          throw new GitLabApiError(
-            `GitLab API GET ${path} timed out after ${this.requestTimeout}ms`,
-            {
-              method: 'GET',
-              path,
-              hint: 'Check GitLab API availability or increase requestTimeout.',
-            },
-          );
-        }
-        throw error;
-      } finally {
-        clearTimeout(timer);
-      }
+      const response = await this.fetchWithTimeout(
+        this.url(path, { ...query, per_page: 100, page }),
+        { headers: this.headers() },
+        'GET',
+        path,
+      );
 
       if (!response.ok) {
         const responseBody = await response.text();
