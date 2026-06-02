@@ -150,11 +150,19 @@ function resolveOllamaBaseUrl(model: string, env: NodeJS.ProcessEnv): string | u
 }
 
 /**
- * Resolve an API key for the given provider using `@earendil-works/pi-ai`'s
- * env helper. Ollama does not require a key so a placeholder is returned.
+ * Resolve the API key for the given model's provider, delegating entirely to
+ * `@earendil-works/pi-ai`'s `getEnvApiKey`. That helper reads the provider's
+ * standard environment variable (e.g. `ANTHROPIC_API_KEY` / `ANTHROPIC_OAUTH_TOKEN`,
+ * `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, …) and resolves
+ * ambient credentials (Amazon Bedrock, Google Vertex ADC). The key is therefore
+ * always provider-specific — a key for provider X is never used for provider Y.
  *
- * NOTE: this function reads `process.env` directly via the pi-ai helper and
- * is intentionally not testable via a passed-in env object.
+ * Ollama is a local OpenAI-compatible endpoint that needs no key, so a
+ * placeholder is returned. The `--api-key` flag takes precedence in
+ * `resolveConfig`.
+ *
+ * NOTE: `getEnvApiKey` reads `process.env` directly (not a passed-in env), so
+ * tests stub `process.env` or pass `--api-key` to control the resolved key.
  */
 function resolveProviderApiKey(model: string): string {
   const provider = parseModelProvider(model);
@@ -202,24 +210,16 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
   ).replace(/\/$/, '');
   const token = resolveGitLabToken(args, env);
 
-  const model = String(args.model ?? env.GITLAB_REVIEW_MODEL ?? 'anthropic/claude-sonnet-4-5');
+  // Model and API key are both required — there is no implicit default model.
+  // The model is `provider/modelId`; supply it via --model or GITLAB_REVIEW_MODEL.
+  const model = String(args.model ?? env.GITLAB_REVIEW_MODEL ?? '');
 
-  // API key resolution priority:
-  //   1. --api-key flag (universal override)
-  //   2. GITLAB_REVIEW_API_KEY (universal env override)
-  //   3. ANTHROPIC_API_KEY / CLAUDE_API_KEY (legacy Anthropic fallbacks)
-  //   4. Provider-specific env key via pi-ai (e.g. OPENROUTER_API_KEY, GEMINI_API_KEY)
-  //      → for Ollama, a placeholder is used (no real key required)
-  const apiKey = String(
-    args.apiKey ??
-      first(
-        env.GITLAB_REVIEW_API_KEY,
-        env.ANTHROPIC_API_KEY,
-        env.CLAUDE_API_KEY,
-        resolveProviderApiKey(model),
-      ) ??
-      '',
-  );
+  // API key resolution:
+  //   1. --api-key flag (explicit override)
+  //   2. The model provider's standard env var / ambient credentials, via
+  //      pi-ai's getEnvApiKey — resolved provider-specifically so a key for one
+  //      provider is never sent to another. Ollama uses a placeholder.
+  const apiKey = String(args.apiKey ?? resolveProviderApiKey(model) ?? '');
 
   // Base URL resolution priority:
   //   1. --base-url flag
@@ -276,6 +276,7 @@ export function validateConfig(config: Config): void {
     ['mr', config.mr],
     ['gitlab-url', config.gitlabUrl],
     ['gitlab-token', config.gitlabToken],
+    ['model', config.model],
     ...(requiresApiKey ? [['api-key', config.apiKey]] : []),
   ]
     .filter(([, value]) => !value)
@@ -284,10 +285,27 @@ export function validateConfig(config: Config): void {
   if (missing.length > 0) {
     const ambientProviders = ['amazon-bedrock', 'google-vertex'];
     const isAmbientProvider = ambientProviders.includes(provider);
-    const hint = isAmbientProvider
-      ? `Provider "${provider}" requires ambient credentials. For Amazon Bedrock set AWS_ACCESS_KEY_ID / AWS_PROFILE; for Google Vertex run \`gcloud auth application-default login\` and set GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION.`
-      : 'Provide CLI flags or the corresponding GitLab CI environment variables.';
-    throw new ConfigError(`Missing required configuration: ${missing.join(', ')}.`, { hint });
+    const hints: string[] = [];
+    if (missing.includes('--model')) {
+      hints.push(
+        'Set --model (or GITLAB_REVIEW_MODEL) to a "provider/modelId" value, e.g. anthropic/claude-sonnet-4-5.',
+      );
+    }
+    if (isAmbientProvider) {
+      hints.push(
+        `Provider "${provider}" requires ambient credentials. For Amazon Bedrock set AWS_ACCESS_KEY_ID / AWS_PROFILE; for Google Vertex run \`gcloud auth application-default login\` and set GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION.`,
+      );
+    } else if (missing.includes('--api-key')) {
+      hints.push(
+        "Set the provider's standard API key env var (e.g. ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY) or pass --api-key.",
+      );
+    }
+    if (hints.length === 0) {
+      hints.push('Provide CLI flags or the corresponding GitLab CI environment variables.');
+    }
+    throw new ConfigError(`Missing required configuration: ${missing.join(', ')}.`, {
+      hint: hints.join(' '),
+    });
   }
 
   if (!['info', 'warn', 'critical'].includes(config.minSeverity)) {

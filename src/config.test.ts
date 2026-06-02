@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   parseArgs,
   parseModelProvider,
@@ -16,7 +16,7 @@ describe('config env defaults', () => {
       CI_MERGE_REQUEST_IID: '45',
       CI_SERVER_HOST: 'gitlab.example.com',
       GITLAB_TOKEN: 'private-token',
-      GITLAB_REVIEW_API_KEY: 'api-key',
+      GITLAB_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
     });
 
     expect(cfg).toMatchObject({
@@ -59,7 +59,6 @@ describe('config env defaults', () => {
         CI_MERGE_REQUEST_IID: '8',
         CI_SERVER_URL: 'https://env.example.com',
         GITLAB_TOKEN: 'env-token',
-        GITLAB_REVIEW_API_KEY: 'env-key',
       },
     );
 
@@ -80,7 +79,6 @@ describe('config env defaults', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gitlab.example.com',
       CI_JOB_TOKEN: 'job-token',
-      GITLAB_REVIEW_API_KEY: 'key',
     });
 
     expect(cfg).toMatchObject({
@@ -119,6 +117,22 @@ describe('validateConfig', () => {
     expect(() => validateConfig({ ...minimalConfig, project: '', mr: '' })).toThrow(
       '--project, --mr',
     );
+  });
+
+  it('throws when the model is missing', () => {
+    let caught: unknown;
+    try {
+      validateConfig({ ...minimalConfig, model: '' });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ConfigError);
+    expect((caught as ConfigError).message).toContain('--model');
+    expect((caught as ConfigError).hint).toContain('provider/modelId');
+  });
+
+  it('throws when the api-key is missing for a non-ollama model', () => {
+    expect(() => validateConfig({ ...minimalConfig, apiKey: '' })).toThrow('--api-key');
   });
 
   it('throws on invalid min-severity', () => {
@@ -176,7 +190,6 @@ describe('thinking level resolution', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      GITLAB_REVIEW_API_KEY: 'k',
     });
     expect(cfg.thinkingLevel).toBe('off');
   });
@@ -187,7 +200,6 @@ describe('thinking level resolution', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      GITLAB_REVIEW_API_KEY: 'k',
       GITLAB_REVIEW_THINKING_LEVEL: 'medium',
     });
     expect(cfg.thinkingLevel).toBe('medium');
@@ -199,7 +211,6 @@ describe('thinking level resolution', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      GITLAB_REVIEW_API_KEY: 'k',
       GITLAB_REVIEW_THINKING_LEVEL: '  HIGH  ',
     });
     expect(cfg.thinkingLevel).toBe('high');
@@ -211,20 +222,21 @@ describe('thinking level resolution', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      GITLAB_REVIEW_API_KEY: 'k',
       GITLAB_REVIEW_THINKING_LEVEL: 'low',
     });
     expect(cfg.thinkingLevel).toBe('xhigh');
   });
 
   it('rejects invalid values via validateConfig', () => {
-    const cfg = resolveConfig(['--thinking', 'sometimes'], {
-      CI_PROJECT_ID: '1',
-      CI_MERGE_REQUEST_IID: '2',
-      CI_SERVER_URL: 'https://gl.example.com',
-      GITLAB_TOKEN: 't',
-      GITLAB_REVIEW_API_KEY: 'k',
-    });
+    const cfg = resolveConfig(
+      ['--thinking', 'sometimes', '--model', 'anthropic/claude-sonnet-4-5', '--api-key', 'k'],
+      {
+        CI_PROJECT_ID: '1',
+        CI_MERGE_REQUEST_IID: '2',
+        CI_SERVER_URL: 'https://gl.example.com',
+        GITLAB_TOKEN: 't',
+      },
+    );
     expect(() => validateConfig(cfg)).toThrow('--thinking must be one of');
   });
 });
@@ -236,7 +248,6 @@ describe('posting mode resolution', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      GITLAB_REVIEW_API_KEY: 'k',
     });
     expect(cfg.postingMode).toBe('direct');
   });
@@ -247,7 +258,6 @@ describe('posting mode resolution', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      GITLAB_REVIEW_API_KEY: 'k',
       GITLAB_REVIEW_POSTING_MODE: '  DRAFT  ',
     });
     expect(cfg.postingMode).toBe('draft');
@@ -259,20 +269,21 @@ describe('posting mode resolution', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      GITLAB_REVIEW_API_KEY: 'k',
       GITLAB_REVIEW_POSTING_MODE: 'draft',
     });
     expect(cfg.postingMode).toBe('direct');
   });
 
   it('validateConfig rejects unknown posting modes', () => {
-    const cfg = resolveConfig(['--posting-mode', 'bogus'], {
-      CI_PROJECT_ID: '1',
-      CI_MERGE_REQUEST_IID: '2',
-      CI_SERVER_URL: 'https://gl.example.com',
-      GITLAB_TOKEN: 't',
-      GITLAB_REVIEW_API_KEY: 'k',
-    });
+    const cfg = resolveConfig(
+      ['--posting-mode', 'bogus', '--model', 'anthropic/claude-sonnet-4-5', '--api-key', 'k'],
+      {
+        CI_PROJECT_ID: '1',
+        CI_MERGE_REQUEST_IID: '2',
+        CI_SERVER_URL: 'https://gl.example.com',
+        GITLAB_TOKEN: 't',
+      },
+    );
     expect(() => validateConfig(cfg)).toThrow('--posting-mode must be one of');
   });
 });
@@ -343,7 +354,6 @@ describe('summary posting configuration', () => {
     CI_MERGE_REQUEST_IID: '2',
     CI_SERVER_URL: 'https://gl.example.com',
     GITLAB_TOKEN: 't',
-    GITLAB_REVIEW_API_KEY: 'k',
   };
 
   it('defaults postSummary to true', () => {
@@ -430,11 +440,11 @@ describe('Ollama provider support', () => {
     expect(cfg.baseUrl).toBe('http://localhost:11434/v1');
   });
 
-  it('GITLAB_REVIEW_API_KEY overrides the ollama placeholder', () => {
-    const cfg = resolveConfig(['--model', 'ollama/llama3:8b'], {
-      ...baseEnv,
-      GITLAB_REVIEW_API_KEY: 'my-actual-key',
-    });
+  it('--api-key overrides the ollama placeholder', () => {
+    const cfg = resolveConfig(
+      ['--model', 'ollama/llama3:8b', '--api-key', 'my-actual-key'],
+      baseEnv,
+    );
     expect(cfg.apiKey).toBe('my-actual-key');
   });
 
@@ -451,7 +461,6 @@ describe('base URL and max tokens overrides', () => {
     CI_MERGE_REQUEST_IID: '2',
     CI_SERVER_URL: 'https://gl.example.com',
     GITLAB_TOKEN: 't',
-    GITLAB_REVIEW_API_KEY: 'k',
   };
 
   it('reads baseUrl from GITLAB_REVIEW_BASE_URL', () => {
@@ -506,7 +515,6 @@ describe('multi-slash model IDs', () => {
     CI_MERGE_REQUEST_IID: '2',
     CI_SERVER_URL: 'https://gl.example.com',
     GITLAB_TOKEN: 't',
-    GITLAB_REVIEW_API_KEY: 'k',
   };
 
   it('preserves multi-slash model IDs like openrouter/anthropic/claude-3-opus', () => {
@@ -520,5 +528,103 @@ describe('multi-slash model IDs', () => {
       GITLAB_REVIEW_MODEL: 'openrouter/meta-llama/llama-3-8b-instruct',
     });
     expect(cfg.model).toBe('openrouter/meta-llama/llama-3-8b-instruct');
+  });
+});
+
+describe('provider-aware key resolution', () => {
+  const gitlab = {
+    CI_PROJECT_ID: '1',
+    CI_MERGE_REQUEST_IID: '2',
+    CI_SERVER_URL: 'https://gl.example.com',
+    GITLAB_TOKEN: 't',
+  };
+
+  // The API key is resolved from the provider's standard env var via pi-ai's
+  // `getEnvApiKey`, which reads the real `process.env` (not the injected env).
+  // Clear the provider key vars before each test and set the ones under test
+  // with `vi.stubEnv`, so resolution is deterministic regardless of the
+  // runner's environment (e.g. a developer who exported keys from `.env`).
+  const PROVIDER_KEY_ENV_VARS = [
+    'ANTHROPIC_OAUTH_TOKEN',
+    'ANTHROPIC_API_KEY',
+    'OPENAI_API_KEY',
+    'GEMINI_API_KEY',
+    'OPENROUTER_API_KEY',
+    'GOOGLE_CLOUD_API_KEY',
+    'GROQ_API_KEY',
+    'XAI_API_KEY',
+    'MISTRAL_API_KEY',
+    'DEEPSEEK_API_KEY',
+    'GITLAB_REVIEW_API_KEY',
+    'CLAUDE_API_KEY',
+  ];
+
+  beforeEach(() => {
+    for (const key of PROVIDER_KEY_ENV_VARS) vi.stubEnv(key, '');
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('lets --api-key win over the provider env key', () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'env-anthropic');
+    const cfg = resolveConfig(
+      ['--model', 'anthropic/claude-sonnet-4-5', '--api-key', 'cli'],
+      gitlab,
+    );
+    expect(cfg.apiKey).toBe('cli');
+  });
+
+  it("resolves the key from the provider's standard env var via pi-ai", () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'anthropic-key');
+    const cfg = resolveConfig(['--model', 'anthropic/claude-sonnet-4-5'], gitlab);
+    expect(cfg.apiKey).toBe('anthropic-key');
+  });
+
+  it('resolves OPENAI_API_KEY for an openai model', () => {
+    vi.stubEnv('OPENAI_API_KEY', 'openai-key');
+    const cfg = resolveConfig(['--model', 'openai/gpt-5.4'], gitlab);
+    expect(cfg.apiKey).toBe('openai-key');
+  });
+
+  it('prefers ANTHROPIC_OAUTH_TOKEN over ANTHROPIC_API_KEY', () => {
+    vi.stubEnv('ANTHROPIC_OAUTH_TOKEN', 'oauth-token');
+    vi.stubEnv('ANTHROPIC_API_KEY', 'anthropic-key');
+    const cfg = resolveConfig(['--model', 'anthropic/claude-sonnet-4-5'], gitlab);
+    expect(cfg.apiKey).toBe('oauth-token');
+  });
+
+  it('never sends a key across providers: an openai model with only an anthropic key fails fast', () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'anthropic-key');
+    const cfg = resolveConfig(['--model', 'openai/gpt-5.4'], gitlab);
+    expect(cfg.apiKey).toBe('');
+    expect(() => validateConfig(cfg)).toThrow('--api-key');
+  });
+
+  it('requires an explicit model: an unset model fails fast', () => {
+    const cfg = resolveConfig([], gitlab);
+    expect(cfg.model).toBe('');
+    expect(() => validateConfig(cfg)).toThrow('--model');
+  });
+
+  it('does not treat GITLAB_REVIEW_API_KEY as a provider key', () => {
+    vi.stubEnv('GITLAB_REVIEW_API_KEY', 'legacy-key');
+    const cfg = resolveConfig(['--model', 'anthropic/claude-sonnet-4-5'], gitlab);
+    expect(cfg.apiKey).toBe('');
+    expect(() => validateConfig(cfg)).toThrow('--api-key');
+  });
+
+  it('does not treat CLAUDE_API_KEY as a provider key', () => {
+    vi.stubEnv('CLAUDE_API_KEY', 'legacy-claude-key');
+    const cfg = resolveConfig(['--model', 'anthropic/claude-sonnet-4-5'], gitlab);
+    expect(cfg.apiKey).toBe('');
+    expect(() => validateConfig(cfg)).toThrow('--api-key');
+  });
+
+  it('uses the ollama placeholder without a key and does not require api-key', () => {
+    const cfg = resolveConfig(['--model', 'ollama/llama3:8b'], gitlab);
+    expect(cfg.apiKey).toBe('ollama');
+    expect(() => validateConfig(cfg)).not.toThrow();
   });
 });

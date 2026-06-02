@@ -49,7 +49,8 @@ gitlab-review \
   --mr 42 \
   --gitlab-url https://gitlab.example.com \
   --gitlab-token "$GITLAB_TOKEN" \
-  --api-key "$GITLAB_REVIEW_API_KEY" \
+  --model anthropic/claude-sonnet-4-5 \
+  --api-key "$ANTHROPIC_API_KEY" \
   --dry-run
 ```
 
@@ -63,6 +64,9 @@ review:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   variables:
     GIT_DEPTH: '0'
+    # A model is required (no default). Provide its provider's key as a masked
+    # CI/CD variable, e.g. ANTHROPIC_API_KEY.
+    GITLAB_REVIEW_MODEL: anthropic/claude-sonnet-4-5
   script:
     - npx @ikko-dev/gitlab-review
   artifacts:
@@ -78,7 +82,7 @@ review:
 `gitlab-review` uses [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi-ai) for model
 access. Any registered provider can be selected with `--model provider/modelId`.
 
-### Anthropic (default)
+### Anthropic
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-... npx @ikko-dev/gitlab-review --model anthropic/claude-sonnet-4-5
@@ -117,7 +121,7 @@ to override the maximum output tokens when Ollama returns fewer tokens than expe
 Use `GITLAB_REVIEW_BASE_URL` to point the provider at any OpenAI-compatible API:
 
 ```bash
-GITLAB_REVIEW_API_KEY=my-key \
+OPENAI_API_KEY=my-key \
 GITLAB_REVIEW_BASE_URL=https://my-gateway.example.com/v1 \
 npx @ikko-dev/gitlab-review --model openai/gpt-4o
 ```
@@ -126,57 +130,57 @@ npx @ikko-dev/gitlab-review --model openai/gpt-4o
 
 The CLI auto-resolves values from CI variables and common token/key names.
 
-| Variable                       | Purpose                                                                                                                                                                   |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CI_PROJECT_ID`                | Default for `--project`                                                                                                                                                   |
-| `CI_MERGE_REQUEST_IID`         | Default for `--mr`                                                                                                                                                        |
-| `CI_SERVER_URL`                | Default for `--gitlab-url`                                                                                                                                                |
-| `CI_SERVER_HOST`               | Fallback for `--gitlab-url` as `https://$CI_SERVER_HOST`                                                                                                                  |
-| `GITLAB_TOKEN`                 | Preferred GitLab API token (`PRIVATE-TOKEN`)                                                                                                                              |
-| `GLAB_CLI_TOKEN`               | Fallback GitLab API token (`PRIVATE-TOKEN`)                                                                                                                               |
-| `CI_JOB_TOKEN`                 | Fallback token (`JOB-TOKEN`)                                                                                                                                              |
-| `GITLAB_PRIVATE_TOKEN`         | Fallback token (`PRIVATE-TOKEN`)                                                                                                                                          |
-| `GITLAB_REVIEW_API_KEY`        | Preferred AI API key (universal override for all providers)                                                                                                               |
-| `ANTHROPIC_API_KEY`            | Fallback AI API key (Anthropic / Claude)                                                                                                                                  |
-| `CLAUDE_API_KEY`               | Legacy fallback AI API key (Anthropic / Claude)                                                                                                                           |
-| `<PROVIDER>_API_KEY`           | Provider-specific key auto-resolved by pi-ai (e.g. `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, …). Picked up automatically when `--model` uses that provider. |
-| `GITLAB_REVIEW_MODEL`          | Default for `--model`                                                                                                                                                     |
-| `GITLAB_REVIEW_BASE_URL`       | Override the provider API base URL (e.g. a custom OpenAI-compatible endpoint). For Ollama, set `OLLAMA_HOST` instead.                                                     |
-| `OLLAMA_HOST`                  | Base URL for a local Ollama server (default: `http://localhost:11434`). Used automatically when `--model ollama/<model>` is set.                                          |
-| `GITLAB_REVIEW_MAX_TOKENS`     | Override maximum output tokens for the model. `0` = model default.                                                                                                        |
-| `GITLAB_REVIEW_MIN_SEVERITY`   | Default for `--min-severity`                                                                                                                                              |
-| `GITLAB_REVIEW_THINKING_LEVEL` | Default for `--thinking`                                                                                                                                                  |
-| `GITLAB_REVIEW_POSTING_MODE`   | Default for `--posting-mode`                                                                                                                                              |
-| `GITLAB_REVIEW_POST_SUMMARY`   | Set to `false`/`0` to skip the MR-level summary note                                                                                                                      |
-| `GITLAB_REVIEW_FORCE_REVIEW`   | Set to `true`/`1` to review even if the commit was already reviewed                                                                                                       |
-| `GITLAB_REVIEW_SKILLS`         | Comma-separated list of built-in skill names to enable (e.g. `code-review`)                                                                                               |
-| `GITLAB_REVIEW_OTEL`           | Set to `1` to enable the OpenTelemetry bridge (generic OTLP spans + metrics)                                                                                              |
+| Variable                                      | Purpose                                                                                                                                                                                                            |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `CI_PROJECT_ID`                               | Default for `--project`                                                                                                                                                                                            |
+| `CI_MERGE_REQUEST_IID`                        | Default for `--mr`                                                                                                                                                                                                 |
+| `CI_SERVER_URL`                               | Default for `--gitlab-url`                                                                                                                                                                                         |
+| `CI_SERVER_HOST`                              | Fallback for `--gitlab-url` as `https://$CI_SERVER_HOST`                                                                                                                                                           |
+| `GITLAB_TOKEN`                                | Preferred GitLab API token (`PRIVATE-TOKEN`)                                                                                                                                                                       |
+| `GLAB_CLI_TOKEN`                              | Fallback GitLab API token (`PRIVATE-TOKEN`)                                                                                                                                                                        |
+| `CI_JOB_TOKEN`                                | Fallback token (`JOB-TOKEN`)                                                                                                                                                                                       |
+| `GITLAB_PRIVATE_TOKEN`                        | Fallback token (`PRIVATE-TOKEN`)                                                                                                                                                                                   |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_OAUTH_TOKEN` | AI API key for Anthropic / Claude models (oauth token takes precedence)                                                                                                                                            |
+| `OPENAI_API_KEY`                              | AI API key for OpenAI models                                                                                                                                                                                       |
+| `GEMINI_API_KEY`                              | AI API key for Google Gemini models                                                                                                                                                                                |
+| `<PROVIDER>_API_KEY`                          | Provider-specific key for the selected model's provider (e.g. `OPENROUTER_API_KEY`, `GROQ_API_KEY`, …). The key is resolved against the model's provider only, so a key for one provider is never sent to another. |
+| `GITLAB_REVIEW_MODEL`                         | Default for `--model`. A model is required — there is no implicit default; set this or pass `--model`.                                                                                                             |
+| `GITLAB_REVIEW_BASE_URL`                      | Override the provider API base URL (e.g. a custom OpenAI-compatible endpoint). For Ollama, set `OLLAMA_HOST` instead.                                                                                              |
+| `OLLAMA_HOST`                                 | Base URL for a local Ollama server (default: `http://localhost:11434`). Used automatically when `--model ollama/<model>` is set.                                                                                   |
+| `GITLAB_REVIEW_MAX_TOKENS`                    | Override maximum output tokens for the model. `0` = model default.                                                                                                                                                 |
+| `GITLAB_REVIEW_MIN_SEVERITY`                  | Default for `--min-severity`                                                                                                                                                                                       |
+| `GITLAB_REVIEW_THINKING_LEVEL`                | Default for `--thinking`                                                                                                                                                                                           |
+| `GITLAB_REVIEW_POSTING_MODE`                  | Default for `--posting-mode`                                                                                                                                                                                       |
+| `GITLAB_REVIEW_POST_SUMMARY`                  | Set to `false`/`0` to skip the MR-level summary note                                                                                                                                                               |
+| `GITLAB_REVIEW_FORCE_REVIEW`                  | Set to `true`/`1` to review even if the commit was already reviewed                                                                                                                                                |
+| `GITLAB_REVIEW_SKILLS`                        | Comma-separated list of built-in skill names to enable (e.g. `code-review`)                                                                                                                                        |
+| `GITLAB_REVIEW_OTEL`                          | Set to `1` to enable the OpenTelemetry bridge (generic OTLP spans + metrics)                                                                                                                                       |
 
 ## Flags
 
-| Flag                     | Description                                                                                                                                                         | Default                                                                                      |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `--project <id>`         | GitLab project ID/path                                                                                                                                              | `CI_PROJECT_ID`                                                                              |
-| `--mr <iid>`             | Merge request IID                                                                                                                                                   | `CI_MERGE_REQUEST_IID`                                                                       |
-| `--gitlab-url <url>`     | GitLab URL                                                                                                                                                          | `CI_SERVER_URL` or `https://${CI_SERVER_HOST}`                                               |
-| `--gitlab-token <token>` | GitLab token                                                                                                                                                        | `GITLAB_TOKEN`, `GLAB_CLI_TOKEN`, `CI_JOB_TOKEN`, `GITLAB_PRIVATE_TOKEN`                     |
-| `--api-key <key>`        | AI API key. Optional for providers with ambient credentials or local endpoints (e.g. Ollama).                                                                       | `GITLAB_REVIEW_API_KEY`, `ANTHROPIC_API_KEY`, `CLAUDE_API_KEY`, or provider-specific env var |
-| `--model <provider/id>`  | Model to use in `provider/modelId` format. Multi-slash IDs (e.g. `openrouter/anthropic/claude-3-opus`) are supported. Use `ollama/<model>` for local Ollama models. | `GITLAB_REVIEW_MODEL` or `anthropic/claude-sonnet-4-5`                                       |
-| `--base-url <url>`       | Override provider API base URL                                                                                                                                      | `GITLAB_REVIEW_BASE_URL` or `OLLAMA_HOST` (for Ollama models)                                |
-| `--max-tokens <n>`       | Max output tokens (0 = model default)                                                                                                                               | `GITLAB_REVIEW_MAX_TOKENS` or `0`                                                            |
-| `--min-severity <level>` | `info`, `warn`, `critical`                                                                                                                                          | `GITLAB_REVIEW_MIN_SEVERITY` or `info`                                                       |
-| `--thinking <level>`     | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`                                                                                                                  | `GITLAB_REVIEW_THINKING_LEVEL` or `off`                                                      |
-| `--posting-mode <mode>`  | `direct` or `draft` (atomic bulk publish)                                                                                                                           | `GITLAB_REVIEW_POSTING_MODE` or `direct`                                                     |
-| `--no-summary`           | Skip posting/updating the MR-level summary note                                                                                                                     | summary posting is on by default                                                             |
-| `--force-review`         | Review even if the current commit was already reviewed                                                                                                              | `GITLAB_REVIEW_FORCE_REVIEW` or `false`                                                      |
-| `--review-file <path>`   | Raw `gitlab-review` output file                                                                                                                                     | `gitlab-review.md`                                                                           |
-| `--output <path>`        | Generated payload artifact file                                                                                                                                     | `review-comments.json`                                                                       |
-| `--cwd <path>`           | Working directory                                                                                                                                                   | `process.cwd()`                                                                              |
-| `--skill <name>`         | Enable a built-in skill by name (repeatable)                                                                                                                        | `GITLAB_REVIEW_SKILLS` or none                                                               |
-| `--dry-run`              | Generate artifacts and skip posting                                                                                                                                 | `false`                                                                                      |
-| `--no-post`              | Same behavior as `--dry-run`                                                                                                                                        | `false`                                                                                      |
-| `--help`, `-h`           | Show help                                                                                                                                                           | -                                                                                            |
-| `--version`, `-v`        | Show version                                                                                                                                                        | -                                                                                            |
+| Flag                     | Description                                                                                                                                                                                         | Default                                                                                                                    |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `--project <id>`         | GitLab project ID/path                                                                                                                                                                              | `CI_PROJECT_ID`                                                                                                            |
+| `--mr <iid>`             | Merge request IID                                                                                                                                                                                   | `CI_MERGE_REQUEST_IID`                                                                                                     |
+| `--gitlab-url <url>`     | GitLab URL                                                                                                                                                                                          | `CI_SERVER_URL` or `https://${CI_SERVER_HOST}`                                                                             |
+| `--gitlab-token <token>` | GitLab token                                                                                                                                                                                        | `GITLAB_TOKEN`, `GLAB_CLI_TOKEN`, `CI_JOB_TOKEN`, `GITLAB_PRIVATE_TOKEN`                                                   |
+| `--api-key <key>`        | AI API key. Required, except for providers with ambient credentials or local endpoints (e.g. Ollama).                                                                                               | The model provider's standard env var (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`) |
+| `--model <provider/id>`  | Model to use in `provider/modelId` format. Required — there is no default. Multi-slash IDs (e.g. `openrouter/anthropic/claude-3-opus`) are supported. Use `ollama/<model>` for local Ollama models. | `GITLAB_REVIEW_MODEL`                                                                                                      |
+| `--base-url <url>`       | Override provider API base URL                                                                                                                                                                      | `GITLAB_REVIEW_BASE_URL` or `OLLAMA_HOST` (for Ollama models)                                                              |
+| `--max-tokens <n>`       | Max output tokens (0 = model default)                                                                                                                                                               | `GITLAB_REVIEW_MAX_TOKENS` or `0`                                                                                          |
+| `--min-severity <level>` | `info`, `warn`, `critical`                                                                                                                                                                          | `GITLAB_REVIEW_MIN_SEVERITY` or `info`                                                                                     |
+| `--thinking <level>`     | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`                                                                                                                                                  | `GITLAB_REVIEW_THINKING_LEVEL` or `off`                                                                                    |
+| `--posting-mode <mode>`  | `direct` or `draft` (atomic bulk publish)                                                                                                                                                           | `GITLAB_REVIEW_POSTING_MODE` or `direct`                                                                                   |
+| `--no-summary`           | Skip posting/updating the MR-level summary note                                                                                                                                                     | summary posting is on by default                                                                                           |
+| `--force-review`         | Review even if the current commit was already reviewed                                                                                                                                              | `GITLAB_REVIEW_FORCE_REVIEW` or `false`                                                                                    |
+| `--review-file <path>`   | Raw `gitlab-review` output file                                                                                                                                                                     | `gitlab-review.md`                                                                                                         |
+| `--output <path>`        | Generated payload artifact file                                                                                                                                                                     | `review-comments.json`                                                                                                     |
+| `--cwd <path>`           | Working directory                                                                                                                                                                                   | `process.cwd()`                                                                                                            |
+| `--skill <name>`         | Enable a built-in skill by name (repeatable)                                                                                                                                                        | `GITLAB_REVIEW_SKILLS` or none                                                                                             |
+| `--dry-run`              | Generate artifacts and skip posting                                                                                                                                                                 | `false`                                                                                                                    |
+| `--no-post`              | Same behavior as `--dry-run`                                                                                                                                                                        | `false`                                                                                                                    |
+| `--help`, `-h`           | Show help                                                                                                                                                                                           | -                                                                                                                          |
+| `--version`, `-v`        | Show version                                                                                                                                                                                        | -                                                                                                                          |
 
 `--thinking` controls extended thinking on the underlying agent. Thinking tokens are billed at the model's output token rate, so higher levels cost more — the `Review usage:` line and `review-usage.json` reflect that cost.
 
