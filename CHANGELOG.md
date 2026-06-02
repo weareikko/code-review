@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Clean reviews now emit a short `### Overview` instead of the bare sentinel**. When a review produces zero inline comments, the MR summary now opens with a `### Overview` carrying the MR description and an explicit positive verdict (e.g. "No blocking issues found.") rather than the fixed `"No issues found in the reviewed diff."` string, so the summary always reflects what the reviewer engaged with.
+- **BREAKING:** AI API key resolution now delegates entirely to [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi-ai)'s `getEnvApiKey`. The key is read from the selected model's provider standard env var (`ANTHROPIC_API_KEY` / `ANTHROPIC_OAUTH_TOKEN`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, …) or ambient Amazon Bedrock / Google Vertex credentials, with `--api-key` taking precedence. The key is always provider-specific, so a key for one provider is never sent to another, and a model/provider mismatch fails fast with a missing-`--api-key` error instead of a misleading upstream `401`.
+
+### Removed
+
+- **BREAKING:** the implicit default model is removed — `--model` (or `GITLAB_REVIEW_MODEL`) is now required. Previously the model defaulted to `anthropic/claude-sonnet-4-5`; a run without a model now fails fast asking for `--model`, so the model and its provider are always explicit (and pi-ai picks no model on the project's behalf).
+- **BREAKING:** `GITLAB_REVIEW_API_KEY` is no longer read for the tool's AI key. Use the model provider's standard env var (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`) or pass `--api-key`. (The eval harness still reads `GITLAB_REVIEW_API_KEY` for its judge; that is unrelated to the CLI.)
+- **BREAKING:** the `CLAUDE_API_KEY` fallback is removed. Use `ANTHROPIC_API_KEY` (or `ANTHROPIC_OAUTH_TOKEN`) for Anthropic models.
 
 ### Fixed
 

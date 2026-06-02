@@ -56,14 +56,14 @@ Options:
   --mr <iid>              Merge request IID (default: CI_MERGE_REQUEST_IID)
   --gitlab-url <url>      GitLab URL (default: CI_SERVER_URL or CI_SERVER_HOST)
   --gitlab-token <token>  GitLab token (default: GITLAB_TOKEN, GLAB_CLI_TOKEN, CI_JOB_TOKEN, GITLAB_PRIVATE_TOKEN)
-  --api-key <key>         AI API key. Optional when the provider has ambient credentials
-                          or runs locally (e.g. Ollama). Resolved from GITLAB_REVIEW_API_KEY,
-                          ANTHROPIC_API_KEY, CLAUDE_API_KEY, or the provider-specific env var
-                          (e.g. OPENROUTER_API_KEY, GEMINI_API_KEY).
+  --api-key <key>         AI API key. Required, except for providers with ambient
+                          credentials or local endpoints (e.g. Ollama). Resolved from the
+                          provider's standard env var (e.g. ANTHROPIC_API_KEY, OPENAI_API_KEY,
+                          GEMINI_API_KEY, OPENROUTER_API_KEY) or this flag.
   --model <provider/id>   Model to use. Format: provider/modelId. Multi-slash IDs such as
                           openrouter/anthropic/claude-3-opus are supported by splitting on the
                           first slash. Use ollama/<model> for local Ollama models.
-                          (default: anthropic/claude-sonnet-4-5, env: GITLAB_REVIEW_MODEL)
+                          (required; env: GITLAB_REVIEW_MODEL)
   --base-url <url>        Override the provider base URL (e.g. a custom OpenAI-compatible
                           endpoint). For Ollama, set OLLAMA_HOST instead.
                           (env: GITLAB_REVIEW_BASE_URL)
