@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-02
+
 ### Changed
 
 - **The MR summary now uses a standardized, scannable layout.** Under the `### Code Review` heading the reviewer always emits a `**Risk: Low | Medium | High**` line (the impact of merging and how to handle it) followed by a short overview, then a `**N issues found:**` bullet list when there are inline comments and an optional `**Notes:**` block for suppressed findings and unreviewed files. This replaces the previous `### Overview` / `### Findings` / `### Notes` heading structure so every review reads the same way.
