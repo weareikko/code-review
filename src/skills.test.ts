@@ -406,13 +406,6 @@ describe('loadNamedSkill', () => {
 // ---------------------------------------------------------------------------
 
 describe('loadSkillFromDir source field', () => {
-  it('keeps body populated for backwards compatibility', async () => {
-    const dir = await makeTmp();
-    await writeSkillMd(dir, 'test-skill', 'Test', 'Review carefully.');
-    const skill = await loadSkillFromDir(dir, 'file');
-    expect(skill).toMatchObject({ body: 'Review carefully.' });
-  });
-
   it('assigns source = "npm" when requested', async () => {
     const dir = await makeTmp();
     await writeSkillMd(dir, 'test-skill', 'Test');

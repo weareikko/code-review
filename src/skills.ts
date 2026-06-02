@@ -7,8 +7,6 @@ import { ConfigError } from './errors.js';
 export interface Skill {
   name: string;
   description: string;
-  /** @deprecated Prompts now reference `filePath` so agents can read skill content lazily. */
-  body?: string;
   /** Absolute path to the SKILL.md file. Used to reference skill content in prompts. */
   filePath: string;
   rootDir: string;
@@ -33,16 +31,14 @@ export type SkillSpec =
 const SKILL_DIRS = ['.agents/skills', '.claude/skills'] as const;
 const RESOURCE_DIRS = ['references'] as const;
 
-function parseFrontmatter(
-  content: string,
-): { name: string; description: string; body: string } | null {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+function parseFrontmatter(content: string): { name: string; description: string } | null {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?[\s\S]*$/);
   if (!match) return null;
-  const [, frontmatter, body] = match;
+  const [, frontmatter] = match;
   const name = frontmatter.match(/^name:\s*(.+)$/m)?.[1]?.trim() ?? '';
   const description = frontmatter.match(/^description:\s*(.+)$/m)?.[1]?.trim() ?? '';
   if (!name || !description) return null;
-  return { name, description, body: body.trim() };
+  return { name, description };
 }
 
 export async function loadSkillFromDir(
@@ -62,7 +58,6 @@ export async function loadSkillFromDir(
   return {
     name: parsed.name,
     description: parsed.description,
-    body: parsed.body,
     filePath: skillMdPath,
     rootDir: dirPath,
     resourceDirs,
