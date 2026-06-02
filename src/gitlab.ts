@@ -18,20 +18,12 @@ function isAbortError(error: unknown): boolean {
 export interface MergeRequest {
   source_branch: string;
   target_branch: string;
-  source_project_id?: number;
-  target_project_id?: number;
 }
 
 export interface Version {
-  id?: number;
   base_commit_sha: string;
   start_commit_sha: string;
   head_commit_sha: string;
-}
-
-export interface DiscussionNoteAuthor {
-  id: number;
-  username?: string;
 }
 
 export interface DiscussionNotePosition {
@@ -44,7 +36,6 @@ export interface DiscussionNotePosition {
 export interface DiscussionNote {
   id?: number;
   body?: string | null;
-  author?: DiscussionNoteAuthor;
   system?: boolean;
   resolved?: boolean;
   position?: DiscussionNotePosition;
