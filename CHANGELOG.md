@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-02
+
 ### Changed
 
 - **Clean reviews now emit a short `### Overview` instead of the bare sentinel**. When a review produces zero inline comments, the MR summary now opens with a `### Overview` carrying the MR description and an explicit positive verdict (e.g. "No blocking issues found.") rather than the fixed `"No issues found in the reviewed diff."` string, so the summary always reflects what the reviewer engaged with.
