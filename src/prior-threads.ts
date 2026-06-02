@@ -1,8 +1,7 @@
-import { normalizeBody } from './fingerprints.js';
+import { FINGERPRINT_MARKER_PATTERN, normalizeBody } from './fingerprints.js';
 import type { Discussion, DiscussionNote } from './gitlab.js';
 
-const FINGERPRINT_MARKER_RE =
-  /<!--\s*gitlab-review:fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->/i;
+const FINGERPRINT_MARKER_RE = new RegExp(FINGERPRINT_MARKER_PATTERN, 'i');
 
 export interface PriorThread {
   file: string;

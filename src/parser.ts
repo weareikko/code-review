@@ -1,3 +1,4 @@
+import { FINGERPRINT_MARKER_PATTERN } from './fingerprints.js';
 import { normalizeConfidence, normalizeSeverity, type ReviewComment, type Side } from './types.js';
 
 export interface ParseResult {
@@ -9,8 +10,7 @@ export interface ParseResult {
 const HEADER_RE = /^\s*(?<file>.+):(?<line>\d+)\s+\((?<side>LEFT|RIGHT)\)\s*$/u;
 const GITHUB_STYLE_HEADER_RE =
   /^\s*(?:\*\*)?`?(?<file>.+):(?<line>\d+)`?(?:\*\*)?\s*(?:[·-]|\()\s*(?<side>LEFT|RIGHT)\)?\s*$/u;
-const FINGERPRINT_MARKER_RE =
-  /<!--\s*gitlab-review:fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->/gi;
+const FINGERPRINT_MARKER_RE = new RegExp(FINGERPRINT_MARKER_PATTERN, 'gi');
 const JSON_COMMENT_MARKER_RE = /<!--\s*gitlab-review-comment\s*([\s\S]*?)-->/gi;
 
 function normalizeSide(value: unknown): Side {
