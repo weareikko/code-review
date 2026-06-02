@@ -25,11 +25,11 @@ describe('summary note upsert', () => {
     expect(body).toContain('Looks good. **Nice work.**');
   });
 
-  it('always includes a level-2 Code Review title for easy identification', () => {
+  it('always includes a level-3 Code Review title for easy identification', () => {
     const body = buildSummaryBody('Looks good.');
-    expect(body).toContain('## Code Review');
+    expect(body).toContain('### Code Review');
     const markerIndex = body.indexOf(SUMMARY_MARKER);
-    const titleIndex = body.indexOf('## Code Review');
+    const titleIndex = body.indexOf('### Code Review');
     expect(titleIndex).toBeGreaterThan(markerIndex);
   });
 
