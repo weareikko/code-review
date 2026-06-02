@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Parser now accepts unfenced JSON reviewer output**. When a model returns the `{ "summary": …, "comments": […] }` object as a bare top-level object or appended after prose — rather than inside a fenced ```json block — the parser now locates and parses it instead of silently resolving to zero comments and a `null` summary. Fenced output, legacy comment markers, and stray prose braces are unaffected.
+
 ## [0.4.2] - 2026-06-01
 
 ### Added

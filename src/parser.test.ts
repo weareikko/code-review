@@ -164,4 +164,121 @@ describe('gitlab-review parsing', () => {
     );
     expect(parseReviewMarkdownWithWarnings(markdown).summary).toBeNull();
   });
+
+  it('parses a bare unfenced JSON object with comments and summary', () => {
+    const markdown = JSON.stringify({
+      summary: 'Looks reasonable overall.',
+      comments: [{ file: 'src/a.ts', line: 3, side: 'RIGHT', body: 'Fix this' }],
+    });
+
+    const result = parseReviewMarkdownWithWarnings(markdown);
+    expect(result.summary).toBe('Looks reasonable overall.');
+    expect(result.comments).toEqual([
+      {
+        file: 'src/a.ts',
+        line: 3,
+        side: 'RIGHT',
+        severity: 'info',
+        confidence: 'high',
+        body: 'Fix this',
+      },
+    ]);
+  });
+
+  it('parses an unfenced JSON object appended after prose', () => {
+    const markdown = [
+      'Here is my review of the merge request. Overall it is fine but I left a note.',
+      '',
+      JSON.stringify({
+        summary: 'A note about a.ts.',
+        comments: [{ file: 'src/a.ts', line: 7, side: 'RIGHT', body: 'Consider renaming' }],
+      }),
+    ].join('\n');
+
+    const result = parseReviewMarkdownWithWarnings(markdown);
+    expect(result.summary).toBe('A note about a.ts.');
+    expect(result.comments).toEqual([
+      {
+        file: 'src/a.ts',
+        line: 7,
+        side: 'RIGHT',
+        severity: 'info',
+        confidence: 'high',
+        body: 'Consider renaming',
+      },
+    ]);
+  });
+
+  it('parses an unfenced JSON object followed by trailing prose', () => {
+    const markdown = [
+      JSON.stringify({
+        summary: 'Trailing prose follows.',
+        comments: [{ file: 'src/b.ts', line: 4, side: 'RIGHT', body: 'Tidy up' }],
+      }),
+      '',
+      'Thanks for reading, let me know if you have any questions.',
+    ].join('\n');
+
+    const result = parseReviewMarkdownWithWarnings(markdown);
+    expect(result.summary).toBe('Trailing prose follows.');
+    expect(result.comments).toEqual([
+      {
+        file: 'src/b.ts',
+        line: 4,
+        side: 'RIGHT',
+        severity: 'info',
+        confidence: 'high',
+        body: 'Tidy up',
+      },
+    ]);
+  });
+
+  it('matches the full unfenced object when string values contain braces', () => {
+    const markdown = JSON.stringify({
+      summary: 'Use a literal like { key: value } in the docs.',
+      comments: [
+        { file: 'src/c.ts', line: 2, side: 'RIGHT', body: 'Replace with `{ a: 1 }` here }' },
+      ],
+    });
+
+    const result = parseReviewMarkdownWithWarnings(markdown);
+    expect(result.summary).toBe('Use a literal like { key: value } in the docs.');
+    expect(result.comments).toEqual([
+      {
+        file: 'src/c.ts',
+        line: 2,
+        side: 'RIGHT',
+        severity: 'info',
+        confidence: 'high',
+        body: 'Replace with `{ a: 1 }` here }',
+      },
+    ]);
+  });
+
+  it('resolves gracefully for malformed, non-JSON prose without throwing', () => {
+    const result = parseReviewMarkdownWithWarnings('this is just prose { not json');
+    expect(result).toEqual({ comments: [], summary: null, warnings: [] });
+  });
+
+  it('does not run the unfenced fallback when a JSON fence parsed successfully', () => {
+    const markdown = [
+      '```json',
+      '{"comments":[{"file":"src/a.ts","line":3,"side":"RIGHT","body":"Fix this"}]}',
+      '```',
+      '',
+      'Some trailing prose with a stray brace { and another } object {"comments":[{"file":"src/x.ts","line":1,"side":"RIGHT","body":"should not be counted"}]}',
+    ].join('\n');
+
+    const result = parseReviewMarkdownWithWarnings(markdown);
+    expect(result.comments).toEqual([
+      {
+        file: 'src/a.ts',
+        line: 3,
+        side: 'RIGHT',
+        severity: 'info',
+        confidence: 'high',
+        body: 'Fix this',
+      },
+    ]);
+  });
 });

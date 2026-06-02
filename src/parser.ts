@@ -76,12 +76,65 @@ function normalizeSummary(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function isReviewerShaped(parsed: unknown): parsed is Record<string, unknown> {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  const value = parsed as Record<string, unknown>;
+  return 'summary' in value || 'comments' in value;
+}
+
+/**
+ * Locate the first top-level, reviewer-shaped JSON object embedded anywhere in
+ * `markdown` (bare, or surrounded by prose). Walks the string with a
+ * brace-matching scanner that skips over string literals so braces inside JSON
+ * string values do not break the balance count. Never throws on bad input.
+ */
+function extractFirstJsonObject(markdown: string): Record<string, unknown> | null {
+  for (let start = markdown.indexOf('{'); start !== -1; start = markdown.indexOf('{', start + 1)) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < markdown.length; i += 1) {
+      const char = markdown[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === '\\') {
+          escaped = true;
+        } else if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (char === '"') {
+        inString = true;
+      } else if (char === '{') {
+        depth += 1;
+      } else if (char === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          const candidate = markdown.slice(start, i + 1);
+          try {
+            const parsed: unknown = JSON.parse(candidate);
+            if (isReviewerShaped(parsed)) return parsed;
+          } catch {
+            // Not valid JSON or not reviewer-shaped; keep scanning from the next '{'.
+          }
+          break;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function parseJsonComments(markdown: string, out: ReviewComment[]): string | null {
   let summary: string | null = null;
+  let parsedFencedJson = false;
   const fence = /^```json[^\S\r\n]*(?:\r?\n)([\s\S]*?)^```[^\S\r\n]*$/gim;
   for (const match of markdown.matchAll(fence)) {
     try {
       const parsed = JSON.parse(match[1] ?? '');
+      if (parsed && typeof parsed === 'object') parsedFencedJson = true;
       const list = Array.isArray(parsed)
         ? parsed
         : Array.isArray(parsed?.comments)
@@ -93,6 +146,18 @@ function parseJsonComments(markdown: string, out: ReviewComment[]): string | nul
       }
     } catch {
       // Ignore unrelated JSON fences; terminal parsing below will still run.
+    }
+  }
+
+  // Fallback: only when no fenced JSON parsed, accept an unfenced top-level
+  // reviewer object (bare, or appended after prose) so unfenced model output
+  // is not silently dropped.
+  if (!parsedFencedJson) {
+    const parsed = extractFirstJsonObject(markdown);
+    if (parsed) {
+      const list = Array.isArray(parsed.comments) ? parsed.comments : [];
+      for (const item of list) addJsonComment(out, item);
+      if (summary === null) summary = normalizeSummary(parsed.summary);
     }
   }
 
