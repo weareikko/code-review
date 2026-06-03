@@ -27,42 +27,50 @@ export interface DiagnosticError {
   timeout?: boolean;
 }
 
-/**
- * Best-effort redaction of credentials from a free-form error message before it
- * is stored on a DiagnosticError (and later shipped to logs/spans). Targets the
- * specific secret shapes this tool handles — GitLab tokens, Anthropic/OpenAI
- * API keys, HTTP `Authorization` schemes, and URL userinfo — rather than a
- * generic entropy heuristic, which over-redacts ordinary error text. The key
- * name is preserved and only the value is masked, so messages stay diagnostic.
- */
-const SECRET_REDACTIONS: ReadonlyArray<readonly [RegExp, string]> = [
-  // scheme://user:pass@host → scheme://[REDACTED]@host
-  [/([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi, '$1[REDACTED]@'],
-  // Authorization: <scheme> <token>
-  [/\b(Bearer|Basic|Token)\s+[A-Za-z0-9._~+/-]+=*/g, '$1 [REDACTED]'],
-  // GitLab token families (glpat-, glrt-, gloas-, …) — curated prefixes, 20+ chars.
-  [
-    /\b(?:glpat|gldt|glrt|glptt|gloas|glsoat|glimt|glagent|glffct|glcbt)-[A-Za-z0-9_-]{20,}\b/gi,
-    '[REDACTED]',
-  ],
-  // Anthropic / OpenAI style keys (sk-…, sk-ant-…).
-  [/\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b/gi, '[REDACTED]'],
-  // key=value / key: value / "key":"value" for sensitive key names. The HTTP
-  // `Authorization` header is intentionally omitted here — its `<scheme> <token>`
-  // value is handled by the Bearer/Basic/Token rule above (a bare key match would
-  // only mask the scheme word and leave the token).
-  [
-    /\b(private[_-]?token|access[_-]?token|api[_-]?key|x-api-key|auth[_-]?token|password|secret)(["']?\s*[=:]\s*["']?)[^"'\s,&}]+/gi,
-    '$1$2[REDACTED]',
-  ],
-];
+const CENSOR = '[REDACTED]';
+/** Values shorter than this are not treated as secrets (avoids masking noise). */
+const MIN_SECRET_SIZE = 6;
 
-export function redactSecrets(message: string): string {
-  let redacted = message;
-  for (const [pattern, replacement] of SECRET_REDACTIONS) {
-    redacted = redacted.replace(pattern, replacement);
+/**
+ * The encodings a secret value might appear under in a free-form error message,
+ * mirroring the transforms in `@zapier/secret-scrubber` so a token is caught
+ * whether it was logged raw, URL-encoded, form-encoded, JSON-escaped, or base64.
+ */
+function secretVariants(value: string): string[] {
+  return [
+    value,
+    encodeURIComponent(value),
+    encodeURIComponent(value).replace(/%20/g, '+'),
+    JSON.stringify(value).slice(1, -1), // JSON escaping, without the wrapping quotes
+    Buffer.from(value, 'utf8').toString('base64'),
+  ];
+}
+
+/**
+ * Value-based secret redaction: removes the *known* secret values this run holds
+ * (the GitLab token and the provider API key) from a string, in every encoding
+ * they might appear under. Unlike pattern matching it cannot over-redact ordinary
+ * text, cannot miss a token because of its format, and uses literal replacement
+ * (no regex), so there is no catastrophic-backtracking risk on large messages.
+ */
+export function scrubSecrets(input: string, secretValues: readonly string[]): string {
+  const variants = new Set<string>();
+  for (const value of secretValues) {
+    if (value.length < MIN_SECRET_SIZE) continue;
+    for (const variant of secretVariants(value)) {
+      if (variant.length >= MIN_SECRET_SIZE) variants.add(variant);
+    }
   }
-  return redacted;
+  // Replace longer variants first so a shorter one cannot pre-empt a longer match.
+  const ordered = [...variants].toSorted((a, b) => b.length - a.length || (a < b ? 1 : -1));
+  let result = input;
+  for (const variant of ordered) result = result.split(variant).join(CENSOR);
+  return result;
+}
+
+/** Collects the run's secret values (non-empty) for {@link scrubSecrets}. */
+export function collectSecrets(config: Config): string[] {
+  return [config.gitlabToken, config.apiKey].filter((value) => value.length > 0);
 }
 
 export interface DiagnosticUsageBreakdown {
@@ -194,6 +202,7 @@ export async function traceDiagnostic<T>(
   channel: TracingChannel<DiagnosticContext>,
   context: DiagnosticContext,
   operation: (context: DiagnosticContext) => Promise<T>,
+  secretValues: readonly string[] = [],
 ): Promise<T> {
   const started = performance.now();
 
@@ -201,7 +210,7 @@ export async function traceDiagnostic<T>(
     try {
       return await operation(context);
     } catch (error) {
-      context.errorInfo = toDiagnosticError(error);
+      context.errorInfo = toDiagnosticError(error, secretValues);
       throw error;
     } finally {
       context.completedAt = new Date().toISOString();
@@ -227,15 +236,16 @@ export function traceDiagnosticPhase<T>(
     tracingChannel<DiagnosticContext>(`${DIAGNOSTIC_CHANNEL_PREFIX}:${phase}`),
     context,
     operation,
+    collectSecrets(config),
   );
 }
 
-function toDiagnosticError(error: unknown): DiagnosticError {
+function toDiagnosticError(error: unknown, secretValues: readonly string[] = []): DiagnosticError {
   if (error instanceof Error) {
     const code = 'code' in error && typeof error.code === 'string' ? error.code : undefined;
     const timeout =
       'timeout' in error && (error as { timeout?: unknown }).timeout === true ? true : undefined;
-    return { name: error.name, message: redactSecrets(error.message), code, timeout };
+    return { name: error.name, message: scrubSecrets(error.message, secretValues), code, timeout };
   }
-  return { message: redactSecrets(String(error)) };
+  return { message: scrubSecrets(String(error), secretValues) };
 }

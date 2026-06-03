@@ -974,8 +974,8 @@ function emitReviewCompletedLog(
   const commentStr = ctx.generated !== undefined ? ` → ${ctx.generated} comments` : '';
   // Failed runs get their own searchable event (gitlab_review.failed) with the
   // error type/message, so an ERROR-level query surfaces every failure.
-  // errorInfo.message has best-effort secret redaction applied by
-  // toDiagnosticError (known token/credential formats are masked).
+  // errorInfo.message has the run's own secret values (GitLab token, API key)
+  // scrubbed by toDiagnosticError before it ever reaches the context.
   const errorType = errorTypeOf(ctx);
   const body = isError
     ? `review failed: ${ctx.project} MR#${ctx.mr}${ctx.errorInfo ? ` — ${ctx.errorInfo.message}` : ''}`

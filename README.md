@@ -381,7 +381,7 @@ Every record carries an `event.name` from a fixed taxonomy so logs can be filter
 | `gitlab_review.failed`    | ERROR    | run throws            | `error.type`, `error.message`, `gitlab_review.run_id`                                   |
 | `gitlab_review.comment`   | INFO     | per generated comment | `gitlab_review.comment.file`, `…line`, `…severity`, `…is_duplicate`, body               |
 
-The `gitlab_review.started` record is emitted before any work, so review duration can be computed from logs alone and stuck/hung runs are detectable even when no completion ever arrives. A failed run emits `gitlab_review.failed` at ERROR severity (never a success record), making every failure a single `severity=ERROR` query away. `error.message` carries the error text with best-effort secret redaction applied — known credential formats (GitLab tokens, Anthropic/OpenAI keys, HTTP `Authorization` headers, URL userinfo) are masked before the record is emitted.
+The `gitlab_review.started` record is emitted before any work, so review duration can be computed from logs alone and stuck/hung runs are detectable even when no completion ever arrives. A failed run emits `gitlab_review.failed` at ERROR severity (never a success record), making every failure a single `severity=ERROR` query away. `error.message` has the run's own secret values — the GitLab token and the provider API key — scrubbed out before the record is emitted, in every encoding they might appear under (raw, URL/form-encoded, JSON-escaped, base64).
 
 Log records land in Loki (or whichever OTLP log backend you target) and are correlated back to traces via the root span context (`trace_id`/`span_id`) and to metrics via `gitlab_review.run_id` / `gitlab.project_path`.
 
