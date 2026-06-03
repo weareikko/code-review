@@ -1125,6 +1125,19 @@ const NUMERIC_RESULT_ATTRIBUTES = [
   ['diffFilesChanged', 'diff.files_changed'],
   ['diffLinesAdded', 'diff.lines_added'],
   ['diffLinesRemoved', 'diff.lines_removed'],
+  // GitLab API spans — numeric HTTP semantic-convention attributes.
+  ['httpStatusCode', 'http.response.status_code'],
+  ['httpResponseBodySize', 'http.response.body.size'],
+] as const satisfies ReadonlyArray<readonly [keyof DiagnosticContext, string]>;
+
+// String DiagnosticContext fields mapped to their result span attribute. Each
+// is set only when present as a string. HTTP keys follow the stable OTel HTTP
+// semantic conventions (http.request.method, url.full, server.address).
+const STRING_RESULT_ATTRIBUTES = [
+  ['summaryAction', 'gitlab_review.summary.action'],
+  ['httpRequestMethod', 'http.request.method'],
+  ['httpUrl', 'url.full'],
+  ['serverAddress', 'server.address'],
 ] as const satisfies ReadonlyArray<readonly [keyof DiagnosticContext, string]>;
 
 function applyResultAttributes(span: Span, ctx: DiagnosticContext): void {
@@ -1132,8 +1145,9 @@ function applyResultAttributes(span: Span, ctx: DiagnosticContext): void {
     const value = ctx[field];
     if (typeof value === 'number') span.setAttribute(attr, value);
   }
-  if (typeof ctx.summaryAction === 'string') {
-    span.setAttribute('gitlab_review.summary.action', ctx.summaryAction);
+  for (const [field, attr] of STRING_RESULT_ATTRIBUTES) {
+    const value = ctx[field];
+    if (typeof value === 'string') span.setAttribute(attr, value);
   }
 }
 

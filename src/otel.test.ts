@@ -443,6 +443,42 @@ describe('OpenTelemetry bridge', () => {
     });
   });
 
+  it('stamps HTTP semantic-convention attributes on GitLab API spans', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig();
+    const runId = 'run-http-attrs';
+    const runContext = createDiagnosticContext('run', config, runId);
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      const mrCtx = createDiagnosticContext('gitlab.get_merge_request', config, runId);
+      await traceDiagnostic(diagnosticChannels.getMergeRequest, mrCtx, async (ctx) => {
+        ctx.httpRequestMethod = 'GET';
+        ctx.httpUrl =
+          'https://gitlab.example.com/api/v4/projects/mygroup%2Fmyrepo/merge_requests/7';
+        ctx.httpStatusCode = 200;
+        ctx.httpResponseBodySize = 1234;
+        ctx.serverAddress = 'gitlab.example.com';
+      });
+    });
+    await bridge!.shutdown();
+
+    const span = fake.spans.find((s) => s.name === 'gitlab-review.gitlab.get_merge_request');
+    expect(span).toBeDefined();
+    const attrs = Object.fromEntries(span!.attributes.map((a) => [a.key, a.value]));
+    expect(attrs).toMatchObject({
+      'http.request.method': 'GET',
+      'http.response.status_code': 200,
+      'http.response.body.size': 1234,
+      'url.full': 'https://gitlab.example.com/api/v4/projects/mygroup%2Fmyrepo/merge_requests/7',
+      'server.address': 'gitlab.example.com',
+    });
+  });
+
   it('stamps diff size attributes on the git.get_merge_diff span', async () => {
     const { startOtelBridge } = await import('./otel.js');
     const fake = createFakeRuntime();

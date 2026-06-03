@@ -7,13 +7,14 @@ import {
   createDiagnosticRunId,
   traceDiagnosticPhase,
   type DiagnosticContext,
+  type DiagnosticPhase,
 } from './diagnostics.js';
 import { formatError, RuntimeError } from './errors.js';
 import { extractExistingFingerprints } from './fingerprints.js';
 import { getMergeCommitLog, getMergeDiff, prepareGitHistory, summarizeDiff } from './git.js';
 import type { ReviewUsage } from './gitlab-review.js';
 import { runReview } from './gitlab-review.js';
-import { GitLabClient } from './gitlab.js';
+import { GitLabClient, type GitLabResponseInfo } from './gitlab.js';
 import { createLogger } from './logger.js';
 import type { OtelBridge } from './otel.js';
 import { startOtelBridge } from './otel.js';
@@ -135,24 +136,38 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
   const logger = createLogger(config.verbose ? 'debug' : 'info');
   const runId = createDiagnosticRunId();
   return traceDiagnosticPhase('run', config, runId, async (runContext) => {
+    // Captures the most recent GitLab HTTP response so each traced read phase
+    // can stamp HTTP semconv attributes onto its span. Calls in run() are
+    // sequential, so the holder always reflects the phase's own last request.
+    let lastHttp: GitLabResponseInfo | undefined;
     const gitlab = new GitLabClient({
       gitlabUrl: config.gitlabUrl,
       token: config.gitlabToken,
       authHeader: config.gitlabAuthHeader,
+      onResponse: (info) => {
+        lastHttp = info;
+      },
     });
+    // Wraps a single-request (or paginated) GitLab read so the phase span gets
+    // HTTP attributes on both success and error paths.
+    const tracedRead = <T>(phase: DiagnosticPhase, fn: () => Promise<T>): Promise<T> =>
+      traceDiagnosticPhase(phase, config, runId, async (context) => {
+        try {
+          return await fn();
+        } finally {
+          applyHttpContext(context, lastHttp);
+        }
+      });
 
     logger.info('Fetching MR info...');
-    const mr = await traceDiagnosticPhase('gitlab.get_merge_request', config, runId, () =>
+    const mr = await tracedRead('gitlab.get_merge_request', () =>
       gitlab.getMergeRequest(config.project, config.mr),
     );
-    const version = await traceDiagnosticPhase('gitlab.get_latest_version', config, runId, () =>
+    const version = await tracedRead('gitlab.get_latest_version', () =>
       gitlab.getLatestVersion(config.project, config.mr),
     );
-    const initialDiscussions = await traceDiagnosticPhase(
-      'gitlab.get_discussions',
-      config,
-      runId,
-      () => gitlab.getDiscussions(config.project, config.mr),
+    const initialDiscussions = await tracedRead('gitlab.get_discussions', () =>
+      gitlab.getDiscussions(config.project, config.mr),
     );
 
     const reviewedCommitSha = findExistingReviewedCommitSha(initialDiscussions);
@@ -255,7 +270,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
     );
     for (const warning of parsed.warnings) console.warn(`[gitlab-review] ${warning}`);
 
-    const discussions = await traceDiagnosticPhase('gitlab.get_discussions', config, runId, () =>
+    const discussions = await tracedRead('gitlab.get_discussions', () =>
       gitlab.getDiscussions(config.project, config.mr),
     );
     const existing = extractExistingFingerprints(discussions);
@@ -410,6 +425,26 @@ function recordCommentCounts(context: DiagnosticContext, generated: GeneratedCom
  * so the breakdown reflects posted intent and may slightly exceed the published
  * count in that rare case.
  */
+/**
+ * Stamp HTTP semantic-convention fields from a captured GitLab response onto a
+ * diagnostic phase context. The OTel bridge maps these to http.* / url.full /
+ * server.address span attributes. No-op when no response was captured.
+ */
+function applyHttpContext(context: DiagnosticContext, info: GitLabResponseInfo | undefined): void {
+  if (!info) return;
+  context.httpRequestMethod = info.method;
+  context.httpUrl = info.url;
+  context.httpStatusCode = info.status;
+  if (info.responseContentLength !== undefined) {
+    context.httpResponseBodySize = info.responseContentLength;
+  }
+  try {
+    context.serverAddress = new URL(info.url).hostname;
+  } catch {
+    // Malformed URL — leave server.address unset rather than throwing in telemetry.
+  }
+}
+
 export function countPostedBySeverity(
   generated: GeneratedComment[],
 ): Partial<Record<Severity, number>> {

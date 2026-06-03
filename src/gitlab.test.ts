@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GitLabApiError } from './errors.js';
-import { GitLabClient } from './gitlab.js';
+import { GitLabClient, type GitLabResponseInfo } from './gitlab.js';
 
 describe('GitLab client URL construction', () => {
   it('builds API v4 URLs and query strings from trimmed base URL', () => {
@@ -112,6 +112,88 @@ describe('GitLab pagination with mocked fetch', () => {
     });
 
     await expect(client.paginate('/items')).rejects.toThrow('invalid x-next-page header: 1');
+  });
+});
+
+describe('GitLab client onResponse instrumentation hook', () => {
+  it('reports each response with method, path, url, status, and content length', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ source_branch: 'f', target_branch: 'main' }), {
+        status: 200,
+        headers: { 'content-length': '42' },
+      }),
+    );
+    const seen: GitLabResponseInfo[] = [];
+    const client = new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+      onResponse: (info) => seen.push(info),
+    });
+
+    await client.getMergeRequest('group/repo', '7');
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      method: 'GET',
+      path: '/projects/group%2Frepo/merge_requests/7',
+      url: 'https://gitlab.example.com/api/v4/projects/group%2Frepo/merge_requests/7',
+      status: 200,
+      responseContentLength: 42,
+    });
+  });
+
+  it('reports the failing response before throwing', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response('denied', { status: 403, statusText: 'Forbidden' }));
+    const seen: GitLabResponseInfo[] = [];
+    const client = new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+      onResponse: (info) => seen.push(info),
+    });
+
+    await expect(client.request('/items')).rejects.toThrow(GitLabApiError);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ method: 'GET', status: 403 });
+  });
+
+  it('reports one response per page when paginating', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ id: 1 }]), { headers: { 'x-next-page': '2' } }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ id: 2 }]), { headers: { 'x-next-page': '' } }),
+      );
+    const seen: GitLabResponseInfo[] = [];
+    const client = new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+      onResponse: (info) => seen.push(info),
+    });
+
+    await client.paginate('/items');
+    expect(seen).toHaveLength(2);
+    expect(seen.every((info) => info.status === 200)).toBe(true);
+  });
+
+  it('omits responseContentLength when the content-length header is absent', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 1 })));
+    const seen: GitLabResponseInfo[] = [];
+    const client = new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+      onResponse: (info) => seen.push(info),
+    });
+
+    await client.request('/user');
+    expect(seen[0].responseContentLength).toBeUndefined();
   });
 });
 

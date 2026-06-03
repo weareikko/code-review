@@ -73,6 +73,16 @@ export interface DiagnosticContext {
   diffLinesAdded?: number;
   /** Removed content lines in the merge diff. */
   diffLinesRemoved?: number;
+  /** HTTP method of the GitLab API call traced by this phase. */
+  httpRequestMethod?: string;
+  /** Full URL of the (last) GitLab API request in this phase; carries no secrets. */
+  httpUrl?: string;
+  /** HTTP status code of the (last) GitLab API response in this phase. */
+  httpStatusCode?: number;
+  /** Response Content-Length in bytes, when present. */
+  httpResponseBodySize?: number;
+  /** Host of the GitLab server the request targeted. */
+  serverAddress?: string;
   draftsAbandoned?: number;
   draftsCreated?: number;
   draftsDeletedPrePublish?: number;
