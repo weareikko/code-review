@@ -81,5 +81,25 @@ describe('git', () => {
     it('returns zeros for an empty diff', () => {
       expect(summarizeDiff('')).toEqual({ filesChanged: 0, linesAdded: 0, linesRemoved: 0 });
     });
+
+    it('counts in-hunk content lines whose text begins with ++ or --', () => {
+      // An added line with content `++x` renders as `+++x`; a removed line with
+      // content `--x` renders as `---x`. These are content, not file headers.
+      const tricky = [
+        'diff --git a/x.md b/x.md',
+        'index 1111111..2222222 100644',
+        '--- a/x.md',
+        '+++ b/x.md',
+        '@@ -1,2 +1,2 @@',
+        '---removed dashes',
+        '+++added pluses',
+        '',
+      ].join('\n');
+      expect(summarizeDiff(tricky)).toEqual({
+        filesChanged: 1,
+        linesAdded: 1,
+        linesRemoved: 1,
+      });
+    });
   });
 });
