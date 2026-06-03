@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Internal refactors with no behaviour change.** The GitLab client's `request()` and `paginate()` now share a single private `fetchWithTimeout()` helper instead of each duplicating the `AbortController`/timeout/abort-error handling; `diagnosticChannels` is derived from `DIAGNOSTIC_CHANNEL_NAMES` via `Object.fromEntries` instead of a hand-maintained parallel table; and the parser's JSON-fence and inline-section regexes are hoisted to module scope. Public behaviour, reviewer output, and all marker formats are unchanged.
+- **Internal OTel bridge cleanup with no telemetry change.** The duplicated `gen_ai.usage.*` token-attribute and `gen_ai.system`/`gen_ai.request.model` metric-label blocks are now built by shared `setTokenUsageSpanAttributes()` / `genAiModelAttrs()` helpers; the per-turn subscriber derives the configured-model provider and metric base once instead of per turn; `applyResultAttributes()` maps its numeric fields via a table; and the review-level metrics share one base label set. The exact spans, metrics, and attributes emitted are unchanged.
 
 ## [0.6.0] - 2026-06-02
 

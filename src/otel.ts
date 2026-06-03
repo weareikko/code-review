@@ -335,13 +335,17 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     if (ctx.phase === ROOT_PHASE) {
       const meta = runMeta.get(ctx.runId);
       const pipelineSource = ciAttrs['gitlab.pipeline_source'] ?? '';
+      // Shared label set for every review-level metric data point.
+      const runMetricBase = {
+        ...REVIEW_SERVICE_ATTRS,
+        'gitlab.project_path': projectPath,
+        'gitlab_review.dry_run': ctx.dryRun,
+      };
 
       if (typeof ctx.durationMs === 'number') {
         reviewRunDuration.record(ctx.durationMs / 1000, {
-          ...REVIEW_SERVICE_ATTRS,
-          'gitlab.project_path': projectPath,
+          ...runMetricBase,
           'gitlab.pipeline_source': pipelineSource,
-          'gitlab_review.dry_run': ctx.dryRun,
           'gitlab_review.status': status,
         });
       }
@@ -349,27 +353,17 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
       const totalCostUsd = meta?.usage?.cost.total ?? ctx.usage?.cost.total;
       if (totalCostUsd !== undefined) {
         reviewTotalCost.record(totalCostUsd, {
-          ...REVIEW_SERVICE_ATTRS,
-          'gitlab.project_path': projectPath,
-          'gitlab_review.dry_run': ctx.dryRun,
+          ...runMetricBase,
           'gitlab_review.status': status,
         });
       }
 
       const posted = ctx.posted ?? 0;
       if (posted > 0) {
-        reviewCommentsTotal.add(posted, {
-          ...REVIEW_SERVICE_ATTRS,
-          'gitlab.project_path': projectPath,
-          'gitlab_review.dry_run': ctx.dryRun,
-        });
+        reviewCommentsTotal.add(posted, runMetricBase);
       }
 
-      reviewDraftsPublishedTotal.add(meta?.draftsPublished ?? 0, {
-        ...REVIEW_SERVICE_ATTRS,
-        'gitlab.project_path': projectPath,
-        'gitlab_review.dry_run': ctx.dryRun,
-      });
+      reviewDraftsPublishedTotal.add(meta?.draftsPublished ?? 0, runMetricBase);
 
       emitReviewCompletedLog(logger, ctx, meta, isError);
       runMeta.delete(ctx.runId);
@@ -477,6 +471,41 @@ interface AgentSubscriberOptions {
   captureContent?: boolean;
 }
 
+/**
+ * Builds the dynamic `gen_ai.system` / `gen_ai.request.model` metric labels
+ * shared by the per-turn and per-phase GenAI metric emitters. Owning these in
+ * one place keeps the two emission sites from drifting into separate Prometheus
+ * series (the double-count `recordGenAiMetrics` documents).
+ */
+function genAiModelAttrs(provider?: string, modelId?: string): Attributes {
+  return {
+    ...(provider ? { 'gen_ai.system': provider } : {}),
+    ...(modelId ? { 'gen_ai.request.model': modelId } : {}),
+  };
+}
+
+/**
+ * Sets the shared `gen_ai.usage.*` token-count attributes on a span.
+ *
+ * gen_ai.usage.input_tokens follows Sentry AI monitoring's convention: the
+ * value is the TOTAL tokens consumed as input (non-cached + cached).
+ * gen_ai.usage.input_tokens.cached is the cached SUBSET so backends can compute
+ * uncached cost without negative values (Sentry warns about this).
+ * gen_ai.usage.cache_read.input_tokens is kept for Grafana backward compat.
+ */
+function setTokenUsageSpanAttributes(
+  span: Span,
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number },
+): void {
+  span.setAttribute('gen_ai.usage.input_tokens', tokens.input + tokens.cacheRead);
+  if (tokens.cacheRead) span.setAttribute('gen_ai.usage.input_tokens.cached', tokens.cacheRead);
+  span.setAttribute('gen_ai.usage.output_tokens', tokens.output);
+  if (tokens.cacheRead) span.setAttribute('gen_ai.usage.cache_read.input_tokens', tokens.cacheRead);
+  if (tokens.cacheWrite) {
+    span.setAttribute('gen_ai.usage.cache_creation.input_tokens', tokens.cacheWrite);
+  }
+}
+
 /** Applies per-turn token counts and costs to the turn span and emits metric observations. */
 function recordTurnUsage(
   span: Span,
@@ -496,16 +525,7 @@ function recordTurnUsage(
   if (u.cacheWrite) {
     tokenUsage.record(u.cacheWrite, { ...metricAttrs, 'gen_ai.token.type': 'cache_creation' });
   }
-  // gen_ai.usage.input_tokens follows Sentry AI monitoring's convention:
-  // the value is the TOTAL tokens consumed as input (non-cached + cached).
-  // gen_ai.usage.input_tokens.cached is the cached SUBSET so backends can
-  // compute uncached cost without negative values (Sentry warns about this).
-  // gen_ai.usage.cache_read.input_tokens is kept for Grafana backward compat.
-  span.setAttribute('gen_ai.usage.input_tokens', u.input + u.cacheRead);
-  if (u.cacheRead) span.setAttribute('gen_ai.usage.input_tokens.cached', u.cacheRead);
-  span.setAttribute('gen_ai.usage.output_tokens', u.output);
-  if (u.cacheRead) span.setAttribute('gen_ai.usage.cache_read.input_tokens', u.cacheRead);
-  if (u.cacheWrite) span.setAttribute('gen_ai.usage.cache_creation.input_tokens', u.cacheWrite);
+  setTokenUsageSpanAttributes(span, u);
   if (u.cost) {
     // Emit cost broken down by token type (mirrors gen_ai.client.token.usage).
     // Per-turn is the sole emission point to prevent double-count.
@@ -575,6 +595,17 @@ function buildAgentSubscriber(
   options: AgentSubscriberOptions = {},
 ): (agent: AgentLike) => () => void {
   const { ciAttrs = {}, runId, configuredModel, captureContent = false } = options;
+  // configuredModel is fixed for the subscriber's lifetime, so derive its
+  // provider once instead of re-splitting it on every turn (the common
+  // Anthropic-SDK case where msg.model carries a bare ID without a provider).
+  const configuredProvider = configuredModel ? splitModel(configuredModel).provider : undefined;
+  // Static base for every per-turn GenAI metric; the dynamic gen_ai.system /
+  // gen_ai.request.model labels are merged per message_end.
+  const baseMetricAttrs: Attributes = {
+    'gen_ai.operation.name': 'invoke_agent',
+    ...REVIEW_SERVICE_ATTRS,
+    ...ciAttrs,
+  };
   return (agent: AgentLike): (() => void) => {
     let currentTurn: { span: Span; startMs: number; firstTokenMs?: number } | undefined;
     const openTools = new Map<string, Span>();
@@ -610,26 +641,20 @@ function buildAgentSubscriber(
 
         // Extract provider and model ID from msg.model. The Anthropic SDK may
         // emit bare IDs like 'claude-sonnet-4-5' without a provider prefix; in
-        // that case fall back to the configured model string to populate
-        // gen_ai.system so all per-turn metrics share a consistent label set.
+        // that case fall back to the configured model's provider so all per-turn
+        // metrics share a consistent label set.
         const parts = splitModel(String(msg.model ?? ''));
         const modelId = parts.modelId;
-        const provider =
-          parts.provider ?? (configuredModel ? splitModel(configuredModel).provider : undefined);
+        const provider = parts.provider ?? configuredProvider;
 
         const metricAttrs: Attributes = {
-          'gen_ai.operation.name': 'invoke_agent',
-          ...REVIEW_SERVICE_ATTRS,
-          ...ciAttrs,
+          ...baseMetricAttrs,
+          ...genAiModelAttrs(provider, modelId),
         };
-        if (provider) {
-          metricAttrs['gen_ai.system'] = provider;
-          span.setAttribute('gen_ai.system', provider);
-        }
-        if (modelId) {
-          metricAttrs['gen_ai.request.model'] = modelId;
-          span.setAttribute('gen_ai.response.model', modelId);
-        }
+        // Spans carry gen_ai.response.model (the SDK's actual model); metrics
+        // carry gen_ai.request.model (set above via genAiModelAttrs).
+        if (provider) span.setAttribute('gen_ai.system', provider);
+        if (modelId) span.setAttribute('gen_ai.response.model', modelId);
         if (msg.stopReason) span.setAttribute('gen_ai.response.stop_reason', msg.stopReason);
 
         if (firstTokenMs !== undefined) {
@@ -948,42 +973,29 @@ function baseAttributes(ctx: DiagnosticContext): Record<string, string | number 
   };
 }
 
+// Numeric DiagnosticContext fields mapped to their result span attribute. Each
+// is set only when present as a number, so absent fields add no attribute.
+const NUMERIC_RESULT_ATTRIBUTES = [
+  ['durationMs', 'gitlab_review.duration_ms'],
+  ['generated', 'gitlab_review.comments.generated'],
+  ['newComments', 'gitlab_review.comments.new'],
+  ['duplicateComments', 'gitlab_review.comments.duplicate'],
+  ['posted', 'gitlab_review.comments.posted'],
+  ['draftsPublished', 'gitlab_review.drafts.published'],
+  ['draftsCreated', 'gitlab_review.drafts.created'],
+  ['summaryNoteId', 'gitlab_review.summary.note_id'],
+  ['warnings', 'gitlab_review.warnings'],
+  ['draftsAbandoned', 'gitlab_review.drafts.abandoned'],
+  ['draftsDeletedPrePublish', 'gitlab_review.drafts.deleted_pre_publish'],
+] as const satisfies ReadonlyArray<readonly [keyof DiagnosticContext, string]>;
+
 function applyResultAttributes(span: Span, ctx: DiagnosticContext): void {
-  if (typeof ctx.durationMs === 'number') {
-    span.setAttribute('gitlab_review.duration_ms', ctx.durationMs);
-  }
-  if (typeof ctx.generated === 'number') {
-    span.setAttribute('gitlab_review.comments.generated', ctx.generated);
-  }
-  if (typeof ctx.newComments === 'number') {
-    span.setAttribute('gitlab_review.comments.new', ctx.newComments);
-  }
-  if (typeof ctx.duplicateComments === 'number') {
-    span.setAttribute('gitlab_review.comments.duplicate', ctx.duplicateComments);
-  }
-  if (typeof ctx.posted === 'number') {
-    span.setAttribute('gitlab_review.comments.posted', ctx.posted);
-  }
-  if (typeof ctx.draftsPublished === 'number') {
-    span.setAttribute('gitlab_review.drafts.published', ctx.draftsPublished);
-  }
-  if (typeof ctx.draftsCreated === 'number') {
-    span.setAttribute('gitlab_review.drafts.created', ctx.draftsCreated);
+  for (const [field, attr] of NUMERIC_RESULT_ATTRIBUTES) {
+    const value = ctx[field];
+    if (typeof value === 'number') span.setAttribute(attr, value);
   }
   if (typeof ctx.summaryAction === 'string') {
     span.setAttribute('gitlab_review.summary.action', ctx.summaryAction);
-  }
-  if (typeof ctx.summaryNoteId === 'number') {
-    span.setAttribute('gitlab_review.summary.note_id', ctx.summaryNoteId);
-  }
-  if (typeof ctx.warnings === 'number') {
-    span.setAttribute('gitlab_review.warnings', ctx.warnings);
-  }
-  if (typeof ctx.draftsAbandoned === 'number') {
-    span.setAttribute('gitlab_review.drafts.abandoned', ctx.draftsAbandoned);
-  }
-  if (typeof ctx.draftsDeletedPrePublish === 'number') {
-    span.setAttribute('gitlab_review.drafts.deleted_pre_publish', ctx.draftsDeletedPrePublish);
   }
 }
 
@@ -1002,20 +1014,7 @@ function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
 
   const usage = ctx.usage;
   if (!usage) return;
-  // Total input tokens (non-cached + cached) — Sentry AI monitoring model.
-  // gen_ai.usage.input_tokens.cached is the cached subset for Sentry cost math.
-  // gen_ai.usage.cache_read.input_tokens is kept for Grafana backward compat.
-  span.setAttribute('gen_ai.usage.input_tokens', usage.tokens.input + usage.tokens.cacheRead);
-  if (usage.tokens.cacheRead) {
-    span.setAttribute('gen_ai.usage.input_tokens.cached', usage.tokens.cacheRead);
-  }
-  span.setAttribute('gen_ai.usage.output_tokens', usage.tokens.output);
-  if (usage.tokens.cacheRead) {
-    span.setAttribute('gen_ai.usage.cache_read.input_tokens', usage.tokens.cacheRead);
-  }
-  if (usage.tokens.cacheWrite) {
-    span.setAttribute('gen_ai.usage.cache_creation.input_tokens', usage.tokens.cacheWrite);
-  }
+  setTokenUsageSpanAttributes(span, usage.tokens);
   // Cost is not standardized by OTel GenAI semconv — emit under a clearly
   // namespaced custom attribute. Revisit when the spec stabilizes a cost field.
   span.setAttribute('gen_ai.usage.cost.input_usd', usage.cost.input);
@@ -1042,14 +1041,13 @@ function recordGenAiMetrics(
   ciAttrs: Record<string, string> = {},
 ): void {
   const { provider, modelId } = splitModel(ctx.model ?? '');
+  // gen_ai.request.model only (gen_ai.response.model belongs on spans, not metrics).
   const attrs: Attributes = {
     'gen_ai.operation.name': 'invoke_agent',
     ...REVIEW_SERVICE_ATTRS,
     ...ciAttrs,
+    ...genAiModelAttrs(provider, modelId),
   };
-  if (provider) attrs['gen_ai.system'] = provider;
-  // gen_ai.request.model only (gen_ai.response.model belongs on spans, not metrics).
-  if (modelId) attrs['gen_ai.request.model'] = modelId;
   if (isError) {
     attrs['error.type'] = ctx.errorInfo?.code ?? ctx.errorInfo?.name ?? '_OTHER';
   }
