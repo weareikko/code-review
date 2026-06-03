@@ -479,6 +479,40 @@ describe('OpenTelemetry bridge', () => {
     });
   });
 
+  it('opens a fresh span for a phase that runs twice per run (gitlab.get_discussions)', async () => {
+    // get_discussions is fetched before and after the review; the second
+    // occurrence must get its own span (and its own HTTP attributes), not be
+    // dropped because the first (now-closed) entry still sits in the phase map.
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig();
+    const runId = 'run-discussions-twice';
+    const runContext = createDiagnosticContext('run', config, runId);
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      const first = createDiagnosticContext('gitlab.get_discussions', config, runId);
+      await traceDiagnostic(diagnosticChannels.getDiscussions, first, async (ctx) => {
+        ctx.httpStatusCode = 200;
+      });
+      const second = createDiagnosticContext('gitlab.get_discussions', config, runId);
+      await traceDiagnostic(diagnosticChannels.getDiscussions, second, async (ctx) => {
+        ctx.httpStatusCode = 404;
+      });
+    });
+    await bridge!.shutdown();
+
+    const spans = fake.spans.filter((s) => s.name === 'gitlab-review.gitlab.get_discussions');
+    expect(spans).toHaveLength(2);
+    const statuses = spans
+      .map((s) => Object.fromEntries(s.attributes.map((a) => [a.key, a.value])))
+      .map((attrs) => attrs['http.response.status_code']);
+    expect(statuses).toEqual([200, 404]);
+  });
+
   it('stamps diff size attributes on the git.get_merge_diff span', async () => {
     const { startOtelBridge } = await import('./otel.js');
     const fake = createFakeRuntime();

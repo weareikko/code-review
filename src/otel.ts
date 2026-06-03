@@ -265,7 +265,12 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
       phases = new Map();
       openByRun.set(ctx.runId, phases);
     }
-    if (phases.has(ctx.phase)) return;
+    // A still-open span for this phase means a duplicate start — ignore it. A
+    // *closed* entry means the phase legitimately runs more than once per run
+    // (e.g. gitlab.get_discussions, fetched before and after the review); let it
+    // re-open so the second occurrence gets its own span and HTTP attributes.
+    const existing = phases.get(ctx.phase);
+    if (existing && !existing.closed) return;
     const span = tracer.startSpan(
       spanNameFor(ctx.phase),
       {
