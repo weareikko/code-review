@@ -376,7 +376,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         reviewErrorsTotal.add(1, {
           ...runMetricBase,
           'gitlab_review.status': status,
-          'error.type': ctx.errorInfo?.code ?? ctx.errorInfo?.name ?? '_OTHER',
+          'error.type': errorTypeOf(ctx),
         });
       }
 
@@ -975,7 +975,7 @@ function emitReviewCompletedLog(
   // Failed runs get their own searchable event (gitlab_review.failed) with the
   // sanitized error type/message, so an ERROR-level query surfaces every
   // failure. errorInfo is already stripped of secrets by toDiagnosticError.
-  const errorType = ctx.errorInfo?.code ?? ctx.errorInfo?.name;
+  const errorType = errorTypeOf(ctx);
   const body = isError
     ? `review failed: ${ctx.project} MR#${ctx.mr}${ctx.errorInfo ? ` — ${ctx.errorInfo.message}` : ''}`
     : `review completed: ${ctx.project} MR#${ctx.mr}${commentStr}${costStr}`;
@@ -993,7 +993,7 @@ function emitReviewCompletedLog(
       ...meta?.ciAttrs,
       ...meta?.ciSpanAttrs,
       ...(isError && {
-        'error.type': errorType ?? '_OTHER',
+        'error.type': errorType,
         ...(ctx.errorInfo && { 'error.message': ctx.errorInfo.message }),
       }),
       'gitlab_review.run_id': ctx.runId,
@@ -1092,6 +1092,15 @@ function createReviewInstruments(meter: Meter): ReviewInstruments {
       advice: { explicitBucketBoundaries: REVIEW_PHASE_DURATION_BUCKETS_S },
     }),
   };
+}
+
+/**
+ * Stable `error.type` label for a failed run: the typed-error code, else the
+ * error class name, else `_OTHER`. Shared by the run/error counters, the failed
+ * log record, and the gen_ai duration metric so they never drift.
+ */
+function errorTypeOf(ctx: DiagnosticContext): string {
+  return ctx.errorInfo?.code ?? ctx.errorInfo?.name ?? '_OTHER';
 }
 
 /**
@@ -1250,7 +1259,7 @@ function recordGenAiMetrics(
     ...genAiModelAttrs(provider, modelId),
   };
   if (isError) {
-    attrs['error.type'] = ctx.errorInfo?.code ?? ctx.errorInfo?.name ?? '_OTHER';
+    attrs['error.type'] = errorTypeOf(ctx);
   }
   if (typeof ctx.durationMs === 'number') {
     durationHist.record(ctx.durationMs / 1000, attrs);
