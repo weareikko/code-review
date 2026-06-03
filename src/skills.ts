@@ -1,9 +1,12 @@
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rename, rm } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import { ConfigError } from './errors.js';
+import { git } from './git.js';
 
 export interface Skill {
   name: string;
@@ -12,7 +15,7 @@ export interface Skill {
   filePath: string;
   rootDir: string;
   resourceDirs: string[];
-  source: 'builtin' | 'project' | 'npm' | 'file';
+  source: 'builtin' | 'project' | 'npm' | 'file' | 'git';
 }
 
 /**
@@ -21,7 +24,7 @@ export interface Skill {
  * - `builtin`  — bare name resolved from the package's bundled `skills/` dir
  * - `npm`      — package in `node_modules`, optionally with a sub-directory
  * - `file`     — explicit filesystem path (relative or absolute)
- * - `git`      — reserved for Phase 2; not yet supported
+ * - `git`      — shallow git clone at a pinned ref, optionally with a sub-directory
  */
 export type SkillSpec =
   | { protocol: 'builtin'; name: string }
@@ -142,7 +145,9 @@ export async function loadAutoDiscoveredSkills(
  * | `npm:bundle/security`              | `{ protocol: 'npm', packageName: 'bundle', subpath: 'security' }`|
  * | `file:./path/to/skill`             | `{ protocol: 'file', path: './path/to/skill' }`   |
  * | `file:/absolute/path`              | `{ protocol: 'file', path: '/absolute/path' }`    |
- * | `git:https://github.com/org/s.git` | `{ protocol: 'git', ... }` (Phase 2, unsupported) |
+ * | `git:https://host/org/s.git`       | `{ protocol: 'git', url: 'https://host/org/s.git', ref: '', subpath: '' }` |
+ * | `git:https://host/org/b.git#v1/sec`| `{ protocol: 'git', url: 'https://host/org/b.git', ref: 'v1', subpath: 'sec' }` |
+ * | `git+ssh://git@host/org/s.git`     | `{ protocol: 'git', url: 'ssh://git@host/org/s.git', ref: '', subpath: '' }` |
  */
 export function parseSkillSpec(spec: string): SkillSpec {
   if (spec.startsWith('file:')) {
@@ -197,12 +202,22 @@ export function parseSkillSpec(spec: string): SkillSpec {
  */
 function parseGitSpec(spec: string): Extract<SkillSpec, { protocol: 'git' }> {
   const raw = spec.startsWith('git+') ? spec.slice('git+'.length) : spec.slice('git:'.length);
-  const hashIdx = raw.indexOf('#');
-  if (hashIdx === -1) {
+
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    // Not a standard URL (e.g. scp-style `git@host:org/repo.git`, which is
+    // intentionally unsupported to avoid `:`/`#` ambiguity). Hand the raw value
+    // to git unchanged with no ref/subpath rather than rejecting outright.
     return { protocol: 'git', url: raw, ref: '', subpath: '' };
   }
-  const url = raw.slice(0, hashIdx);
-  const fragment = raw.slice(hashIdx + 1);
+
+  // The `#<ref>[/<subpath>]` fragment is our own convention layered on top of
+  // the URL: the ref ends at the first `/`, the rest points at a skill dir.
+  const fragment = parsed.hash ? parsed.hash.slice(1) : '';
+  parsed.hash = '';
+  const url = parsed.toString();
   const slashIdx = fragment.indexOf('/');
   if (slashIdx === -1) {
     return { protocol: 'git', url, ref: fragment, subpath: '' };
@@ -238,18 +253,104 @@ export async function resolveNpmSkillDir(
   return null;
 }
 
+/** Base directory for cached git-skill clones (honours `XDG_CACHE_HOME`). */
+export function resolveSkillCacheDir(): string {
+  const base = process.env.XDG_CACHE_HOME?.trim() || join(homedir(), '.cache');
+  return join(base, 'gitlab-review', 'skills');
+}
+
 /**
- * Load a skill by its spec string (`code-review`, `npm:@scope/pkg`, `file:./path`, …).
+ * Stable cache-directory name for a git skill. Keyed on the clone URL plus the
+ * pinned ref so that two refs of the same repo never share a cache entry.
+ */
+export function gitSkillCacheKey(url: string, ref: string): string {
+  return createHash('sha256').update(`${url}#${ref}`).digest('hex').slice(0, 16);
+}
+
+/**
+ * Shallow-clone `url` at `ref` into `dir`. Using init + a single-ref fetch +
+ * `checkout FETCH_HEAD` (rather than `clone --branch`) means a branch, tag, or
+ * commit SHA all resolve through the same path; an empty `ref` fetches the
+ * remote's default branch via `HEAD`.
+ */
+async function gitShallowClone(url: string, ref: string, dir: string): Promise<void> {
+  await git(['init', '--quiet', dir]);
+  await git(['remote', 'add', 'origin', url], { cwd: dir });
+  await git(['fetch', '--depth', '1', '--quiet', 'origin', ref || 'HEAD'], { cwd: dir });
+  await git(['checkout', '--quiet', 'FETCH_HEAD'], { cwd: dir });
+}
+
+/**
+ * Resolve a git skill spec to a local clone directory, reusing the on-disk
+ * cache when possible. The clone lands in a temp sibling first and is renamed
+ * into place atomically, so a crashed or concurrent clone never leaves a
+ * half-written cache entry. With `refresh`, any cached copy is discarded first.
+ */
+async function cloneGitSkill(
+  url: string,
+  ref: string,
+  options: { cacheDir: string; refresh: boolean },
+): Promise<string> {
+  const repoDir = join(options.cacheDir, gitSkillCacheKey(url, ref));
+
+  if (options.refresh) {
+    await rm(repoDir, { recursive: true, force: true });
+  } else if (existsSync(join(repoDir, '.git'))) {
+    return repoDir;
+  } else if (existsSync(repoDir)) {
+    // A leftover dir without `.git` is a partial/corrupt prior clone — drop it.
+    await rm(repoDir, { recursive: true, force: true });
+  }
+
+  await mkdir(options.cacheDir, { recursive: true });
+  const tmpDir = `${repoDir}.tmp-${process.pid}`;
+  await rm(tmpDir, { recursive: true, force: true });
+  try {
+    await gitShallowClone(url, ref, tmpDir);
+    try {
+      await rename(tmpDir, repoDir);
+    } catch (error) {
+      // A concurrent clone won the race and populated `repoDir` first — reuse it.
+      if (existsSync(join(repoDir, '.git'))) {
+        await rm(tmpDir, { recursive: true, force: true });
+        return repoDir;
+      }
+      throw error;
+    }
+  } catch (error) {
+    await rm(tmpDir, { recursive: true, force: true });
+    throw error;
+  }
+  return repoDir;
+}
+
+/** Options controlling how external skills are resolved. */
+export interface LoadNamedSkillOptions {
+  /** Override the git-skill clone cache directory (defaults to the XDG cache). */
+  cacheDir?: string;
+  /** Re-clone git skills even when a cached copy exists. */
+  refresh?: boolean;
+}
+
+/**
+ * Load a skill by its spec string (`code-review`, `npm:@scope/pkg`, `file:./path`,
+ * `git:https://…`, …).
  *
  * Resolution order:
  * 1. `builtin` — package-bundled `skills/<name>/`
  * 2. `npm:`    — `node_modules/<packageName>[/subpath]` walked up from `cwd`
  * 3. `file:`   — direct filesystem path (relative paths resolved from `cwd`)
+ * 4. `git:` / `git+ssh:` — shallow clone at the pinned ref, cached on disk,
+ *    loading `SKILL.md` from the repo root or the `#<ref>/<subpath>` directory
  *
  * Throws a `ConfigError` if the spec cannot be resolved or the resolved
  * directory does not contain a valid `SKILL.md`.
  */
-export async function loadNamedSkill(spec: string, cwd: string): Promise<Skill> {
+export async function loadNamedSkill(
+  spec: string,
+  cwd: string,
+  options: LoadNamedSkillOptions = {},
+): Promise<Skill> {
   const parsed = parseSkillSpec(spec);
 
   if (parsed.protocol === 'builtin') {
@@ -292,8 +393,29 @@ export async function loadNamedSkill(spec: string, cwd: string): Promise<Skill> 
     return skill;
   }
 
-  // git: / git+ssh: — Phase 2 not yet implemented
-  throw new ConfigError(`Cannot load skill: "${spec}"`, {
-    hint: 'The "git:" and "git+ssh:" protocols are not yet supported. Install the skill as an npm package and reference it with npm: instead.',
-  });
+  // git: / git+ssh: — shallow clone at a pinned ref, then load from the cache.
+  let repoDir: string;
+  try {
+    repoDir = await cloneGitSkill(parsed.url, parsed.ref, {
+      cacheDir: options.cacheDir ?? resolveSkillCacheDir(),
+      refresh: options.refresh ?? false,
+    });
+  } catch (error) {
+    const atRef = parsed.ref ? ` at ref "${parsed.ref}"` : '';
+    throw new ConfigError(`Cannot load skill: "${spec}"`, {
+      cause: error,
+      hint: `Failed to clone "${parsed.url}"${atRef}. Check the URL, the ref, and your git credentials. For GitLab, prefer the SSH form: git+ssh://git@host/group/project.git`,
+    });
+  }
+
+  const skillDir = parsed.subpath ? join(repoDir, parsed.subpath) : repoDir;
+  const skill = await loadSkillFromDir(skillDir, 'git');
+  if (!skill) {
+    throw new ConfigError(`Cannot load skill: "${spec}"`, {
+      hint: parsed.subpath
+        ? `The cloned repository has no valid SKILL.md at subpath "${parsed.subpath}".`
+        : 'The cloned repository has no valid SKILL.md at its root. If the skill lives in a subdirectory, point at it with "#<ref>/<subpath>".',
+    });
+  }
+  return skill;
 }

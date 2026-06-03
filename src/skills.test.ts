@@ -1,6 +1,9 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { ConfigError } from './errors.js';
 import {
@@ -10,6 +13,8 @@ import {
   parseSkillSpec,
   resolveNpmSkillDir,
 } from './skills.js';
+
+const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -34,6 +39,29 @@ async function writeSkillMd(
     `---\nname: ${name}\ndescription: ${description}\n---\n${body}`,
     'utf8',
   );
+}
+
+async function runGit(cwd: string, args: string[]): Promise<void> {
+  await execFileAsync('git', args, { cwd });
+}
+
+/** Initialise a throwaway git repo with deterministic identity/signing config. */
+async function initRepo(dir: string): Promise<void> {
+  await mkdir(dir, { recursive: true });
+  await runGit(dir, ['init', '--quiet']);
+  await runGit(dir, ['config', 'user.email', 'test@example.com']);
+  await runGit(dir, ['config', 'user.name', 'Skills Test']);
+  await runGit(dir, ['config', 'commit.gpgsign', 'false']);
+}
+
+async function commitAll(dir: string, message: string): Promise<void> {
+  await runGit(dir, ['add', '-A']);
+  await runGit(dir, ['commit', '--quiet', '--no-gpg-sign', '-m', message]);
+}
+
+/** A `file://` URL for `dir`, clonable by git without touching the network. */
+function fileUrl(dir: string): string {
+  return `file://${dir}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -431,25 +459,136 @@ describe('loadNamedSkill', () => {
     });
   });
 
-  describe('git: protocol (Phase 2 — unsupported)', () => {
-    it('throws ConfigError for git: specs', async () => {
+  describe('git: protocol', () => {
+    it('clones and loads a skill from a git: file:// repo', async () => {
       const cwd = await makeTmp();
+      const cacheDir = await makeTmp('git-cache-');
+      const repo = await makeTmp('git-repo-');
+      await initRepo(repo);
+      await writeSkillMd(repo, 'cloned-skill', 'A skill from a git remote', 'Review remotely.');
+      await commitAll(repo, 'add skill');
+
+      const skill = await loadNamedSkill(`git:${fileUrl(repo)}`, cwd, { cacheDir });
+      expect(skill.source).toBe('git');
+      expect(skill.name).toBe('cloned-skill');
+      expect(skill.description).toBe('A skill from a git remote');
+    });
+
+    it('loads a skill from a subpath inside the cloned repo', async () => {
+      const cwd = await makeTmp();
+      const cacheDir = await makeTmp('git-cache-');
+      const repo = await makeTmp('git-repo-');
+      await initRepo(repo);
+      await writeSkillMd(join(repo, 'security'), 'bundle-sec', 'Security sub-skill');
+      await commitAll(repo, 'add bundled skill');
+      await runGit(repo, ['tag', 'v1']);
+
+      const skill = await loadNamedSkill(`git:${fileUrl(repo)}#v1/security`, cwd, { cacheDir });
+      expect(skill.source).toBe('git');
+      expect(skill.name).toBe('bundle-sec');
+    });
+
+    it('pins to the requested ref rather than the latest commit', async () => {
+      const cwd = await makeTmp();
+      const cacheDir = await makeTmp('git-cache-');
+      const repo = await makeTmp('git-repo-');
+      await initRepo(repo);
+      await writeSkillMd(repo, 'pinned', 'Tagged version');
+      await commitAll(repo, 'tagged');
+      await runGit(repo, ['tag', 'v1.0.0']);
+      // Move the default branch forward so HEAD differs from the tag.
+      await writeSkillMd(repo, 'pinned', 'Newer version');
+      await commitAll(repo, 'newer');
+
+      const skill = await loadNamedSkill(`git:${fileUrl(repo)}#v1.0.0`, cwd, { cacheDir });
+      expect(skill.description).toBe('Tagged version');
+    });
+
+    it('reuses the cached clone on a second load', async () => {
+      const cwd = await makeTmp();
+      const cacheDir = await makeTmp('git-cache-');
+      const repo = await makeTmp('git-repo-');
+      await initRepo(repo);
+      await writeSkillMd(repo, 'cached', 'Cached skill');
+      await commitAll(repo, 'add skill');
+
+      const spec = `git:${fileUrl(repo)}`;
+      const first = await loadNamedSkill(spec, cwd, { cacheDir });
+      // Drop a sentinel into the cached clone; a reuse leaves it intact.
+      const sentinel = join(first.rootDir, '.reused-sentinel');
+      await writeFile(sentinel, 'keep', 'utf8');
+
+      const second = await loadNamedSkill(spec, cwd, { cacheDir });
+      expect(second.rootDir).toBe(first.rootDir);
+      expect(existsSync(sentinel)).toBe(true);
+    });
+
+    it('re-clones when refresh is set, discarding the cached copy', async () => {
+      const cwd = await makeTmp();
+      const cacheDir = await makeTmp('git-cache-');
+      const repo = await makeTmp('git-repo-');
+      await initRepo(repo);
+      await writeSkillMd(repo, 'refreshable', 'Refreshable skill');
+      await commitAll(repo, 'add skill');
+
+      const spec = `git:${fileUrl(repo)}`;
+      const first = await loadNamedSkill(spec, cwd, { cacheDir });
+      const sentinel = join(first.rootDir, '.reused-sentinel');
+      await writeFile(sentinel, 'keep', 'utf8');
+
+      await loadNamedSkill(spec, cwd, { cacheDir, refresh: true });
+      expect(existsSync(sentinel)).toBe(false);
+    });
+
+    it('throws ConfigError when the cloned repo has no SKILL.md', async () => {
+      const cwd = await makeTmp();
+      const cacheDir = await makeTmp('git-cache-');
+      const repo = await makeTmp('git-repo-');
+      await initRepo(repo);
+      await writeFile(join(repo, 'README.md'), '# not a skill', 'utf8');
+      await commitAll(repo, 'no skill');
+
       await expect(
-        loadNamedSkill('git:https://github.com/org/skill.git', cwd),
+        loadNamedSkill(`git:${fileUrl(repo)}`, cwd, { cacheDir }),
       ).rejects.toBeInstanceOf(ConfigError);
     });
 
-    it('throws ConfigError for git+ssh: specs', async () => {
+    it('throws ConfigError when the subpath has no SKILL.md', async () => {
       const cwd = await makeTmp();
+      const cacheDir = await makeTmp('git-cache-');
+      const repo = await makeTmp('git-repo-');
+      await initRepo(repo);
+      await writeSkillMd(repo, 'root-skill', 'Root skill');
+      await commitAll(repo, 'add skill');
+      await runGit(repo, ['tag', 'v1']);
+
       await expect(
-        loadNamedSkill('git+ssh://git@gitlab.com/org/skill.git', cwd),
+        loadNamedSkill(`git:${fileUrl(repo)}#v1/missing`, cwd, { cacheDir }),
       ).rejects.toBeInstanceOf(ConfigError);
     });
 
-    it('error hint mentions npm: as an alternative', async () => {
+    it('throws ConfigError with a hint when the clone fails', async () => {
       const cwd = await makeTmp();
-      const err = await loadNamedSkill('git:https://github.com/org/skill.git', cwd).catch((e) => e);
-      expect(err.hint).toMatch(/npm:/);
+      const cacheDir = await makeTmp('git-cache-');
+      const missingRepo = join(await makeTmp('git-repo-'), 'does-not-exist');
+
+      const err = await loadNamedSkill(`git:${fileUrl(missingRepo)}`, cwd, { cacheDir }).catch(
+        (e) => e,
+      );
+      expect(err).toBeInstanceOf(ConfigError);
+      expect(err.message).toContain(fileUrl(missingRepo));
+      expect(err.hint).toBeTruthy();
+    });
+
+    it('does not leave a clone entry behind when the clone fails', async () => {
+      const cwd = await makeTmp();
+      const cacheDir = await makeTmp('git-cache-');
+      const missingRepo = join(await makeTmp('git-repo-'), 'does-not-exist');
+
+      await loadNamedSkill(`git:${fileUrl(missingRepo)}`, cwd, { cacheDir }).catch(() => undefined);
+      // The temp clone dir is cleaned up on failure, so no entry is committed.
+      const entries = existsSync(cacheDir) ? await readdir(cacheDir) : [];
+      expect(entries).toEqual([]);
     });
   });
 });
