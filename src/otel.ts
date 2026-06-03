@@ -344,6 +344,11 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         'gitlab.project_path': projectPath,
         'gitlab_review.dry_run': ctx.dryRun,
       };
+      const usage = meta?.usage ?? ctx.usage;
+      // gen_ai.request.model lets cost/duration/token series be compared across
+      // model versions. It is low-cardinality (changes only when the configured
+      // model changes), unlike run_id which we keep off metrics entirely.
+      const runModelAttrs = genAiModelAttrs(undefined, splitModel(usage?.model ?? '').modelId);
 
       // One increment per run regardless of duration availability. This is the
       // canonical "how many reviews ran" series; counting histogram `_count`
@@ -369,18 +374,17 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
       if (typeof ctx.durationMs === 'number') {
         reviewRunDuration.record(ctx.durationMs / 1000, {
           ...runMetricBase,
+          ...runModelAttrs,
           'gitlab.pipeline_source': pipelineSource,
           'gitlab_review.status': status,
         });
       }
 
-      const usage = meta?.usage ?? ctx.usage;
-      const runModelAttrs = genAiModelAttrs(undefined, splitModel(usage?.model ?? '').modelId);
-
       const totalCostUsd = usage?.cost.total;
       if (totalCostUsd !== undefined) {
         reviewTotalCost.record(totalCostUsd, {
           ...runMetricBase,
+          ...runModelAttrs,
           'gitlab_review.status': status,
         });
       }

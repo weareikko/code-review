@@ -1698,6 +1698,33 @@ describe('OpenTelemetry bridge', () => {
     expect(metricsRecorded.find((m) => m.name === 'gitlab_review_errors_total')).toBeUndefined();
   });
 
+  it('labels run duration and total cost histograms with gen_ai.request.model', async () => {
+    const { metricsRecorded } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-sonnet-4-5',
+        tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+        cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+      };
+    });
+
+    const runDuration = metricsRecorded.find(
+      (m) => m.name === 'gitlab_review_run_duration_seconds',
+    );
+    expect(runDuration!.attributes['gen_ai.request.model']).toBe('claude-sonnet-4-5');
+
+    const totalCost = metricsRecorded.find((m) => m.name === 'gitlab_review_total_cost_usd');
+    expect(totalCost!.attributes['gen_ai.request.model']).toBe('claude-sonnet-4-5');
+  });
+
+  it('omits gen_ai.request.model from run histograms when usage/model is unknown', async () => {
+    const { metricsRecorded } = await runWithBridge(async () => {});
+    const runDuration = metricsRecorded.find(
+      (m) => m.name === 'gitlab_review_run_duration_seconds',
+    );
+    expect(runDuration).toBeDefined();
+    expect(runDuration!.attributes['gen_ai.request.model']).toBeUndefined();
+  });
+
   // ---------------------------------------------------------------------------
   // LLM token total counters — token consumption as Prometheus counters
   // ---------------------------------------------------------------------------
