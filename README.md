@@ -153,7 +153,8 @@ The CLI auto-resolves values from CI variables and common token/key names.
 | `GITLAB_REVIEW_POSTING_MODE`                  | Default for `--posting-mode`                                                                                                                                                                                       |
 | `GITLAB_REVIEW_POST_SUMMARY`                  | Set to `false`/`0` to skip the MR-level summary note                                                                                                                                                               |
 | `GITLAB_REVIEW_FORCE_REVIEW`                  | Set to `true`/`1` to review even if the commit was already reviewed                                                                                                                                                |
-| `GITLAB_REVIEW_SKILLS`                        | Comma-separated list of built-in skill names to enable (e.g. `code-review`)                                                                                                                                        |
+| `GITLAB_REVIEW_SKILLS`                        | Comma-separated list of skill specs to enable. Bare names are built-in skills (e.g. `code-review`); `npm:`, `file:`, and `git:` / `git+ssh:` specs load external skills (see [Skills](#skills)).                   |
+| `GITLAB_REVIEW_REFRESH_SKILLS`                | Set to `true`/`1` to re-clone `git:` / `git+ssh:` skills instead of reusing the on-disk cache                                                                                                                      |
 | `GITLAB_REVIEW_OTEL`                          | Set to `1` to enable the OpenTelemetry bridge (generic OTLP spans + metrics)                                                                                                                                       |
 
 ## Flags
@@ -176,7 +177,7 @@ The CLI auto-resolves values from CI variables and common token/key names.
 | `--review-file <path>`   | Raw `gitlab-review` output file                                                                                                                                                                     | `gitlab-review.md`                                                                                                         |
 | `--output <path>`        | Generated payload artifact file                                                                                                                                                                     | `review-comments.json`                                                                                                     |
 | `--cwd <path>`           | Working directory                                                                                                                                                                                   | `process.cwd()`                                                                                                            |
-| `--skill <name>`         | Enable a built-in skill by name (repeatable)                                                                                                                                                        | `GITLAB_REVIEW_SKILLS` or none                                                                                             |
+| `--skill <spec>`         | Enable a skill by name or external spec (`npm:`, `file:`, `git:` / `git+ssh:`); repeatable                                                                                                          | `GITLAB_REVIEW_SKILLS` or none                                                                                             |
 | `--dry-run`              | Generate artifacts and skip posting                                                                                                                                                                 | `false`                                                                                                                    |
 | `--no-post`              | Same behavior as `--dry-run`                                                                                                                                                                        | `false`                                                                                                                    |
 | `--help`, `-h`           | Show help                                                                                                                                                                                           | -                                                                                                                          |
@@ -214,6 +215,39 @@ Multiple skills can be specified by repeating `--skill` or comma-separating valu
 ```bash
 gitlab-review --skill code-review --skill my-custom-skill
 ```
+
+### External skills
+
+A `--skill` value can carry a protocol prefix to load a skill from outside the package. The resolved directory must contain a `SKILL.md` in the same [agentskills.io](https://agentskills.io) format as project skills.
+
+| Spec                                           | Resolves to                                                                      |
+| ---------------------------------------------- | -------------------------------------------------------------------------------- |
+| `code-review`                                  | A built-in skill bundled with the package                                        |
+| `npm:@scope/pkg`                               | `node_modules/@scope/pkg` (walked up from the working dir; monorepo-hoist aware) |
+| `npm:@scope/bundle/security`                   | A `security/` sub-directory inside an installed npm bundle                       |
+| `file:./path/to/skill`                         | A local path (relative paths resolve from the working dir)                       |
+| `git:https://host/group/project.git`           | A shallow clone of the repo's default branch                                     |
+| `git:https://host/group/bundle.git#v1.2.0/sec` | A clone pinned to ref `v1.2.0`, loading the `sec/` sub-directory                 |
+| `git+ssh://git@host/group/project.git`         | A clone over SSH (recommended for private GitLab repos)                          |
+
+#### `git:` / `git+ssh:` skills
+
+The repo is shallow-cloned at a **pinned ref** (a tag, branch, or commit). Append the ref — and an optional in-repo sub-directory — as a `#<ref>[/<subpath>]` fragment:
+
+```bash
+# repo root, default branch
+gitlab-review --skill git:https://gitlab.example.com/tools/review-skill.git
+
+# pin a tag, load a sub-directory from a multi-skill bundle
+gitlab-review --skill 'git:https://gitlab.example.com/tools/skills.git#v1.2.0/security'
+
+# private GitLab repo over SSH (preferred), pinned to a branch
+gitlab-review --skill 'git+ssh://git@gitlab.example.com/tools/skills.git#main'
+```
+
+Following the project's SSH-over-HTTPS convention, prefer `git+ssh://git@<host>/<group>/<project>.git` for private GitLab remotes — authentication then uses the SSH key already available to the runner. The scp-style shorthand (`git@host:group/project.git`) is intentionally not accepted, since its `:` collides with the `#ref` fragment; use the full `git+ssh://` URI instead.
+
+Clones are cached on disk under `${XDG_CACHE_HOME:-~/.cache}/gitlab-review/skills/`, keyed by URL and ref. A tag or commit ref is immutable, so the cache is reused indefinitely; a **branch** ref is also cached, so set `GITLAB_REVIEW_REFRESH_SKILLS=1` to re-clone when the branch has moved (or delete the cache directory).
 
 ### Project skills (auto-discovery)
 

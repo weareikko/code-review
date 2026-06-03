@@ -1,14 +1,16 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ConfigError } from './errors.js';
 import {
+  gitSkillCacheKey,
   loadAutoDiscoveredSkills,
   loadNamedSkill,
   loadSkillFromDir,
   parseSkillSpec,
   resolveNpmSkillDir,
+  resolveSkillCacheDir,
 } from './skills.js';
 
 // ---------------------------------------------------------------------------
@@ -137,15 +139,79 @@ describe('parseSkillSpec', () => {
     });
   });
 
-  describe('git: protocol (Phase 2 placeholder)', () => {
-    it('parses a git: HTTPS URL', () => {
-      const spec = 'git:https://github.com/org/skill.git';
-      expect(parseSkillSpec(spec)).toEqual({ protocol: 'git', url: spec, ref: '', subpath: '' });
+  describe('git: protocol', () => {
+    it('parses a git: HTTPS URL without a fragment', () => {
+      expect(parseSkillSpec('git:https://github.com/org/skill.git')).toEqual({
+        protocol: 'git',
+        url: 'https://github.com/org/skill.git',
+        ref: '',
+        subpath: '',
+      });
     });
 
-    it('parses a git+ssh: URL', () => {
-      const spec = 'git+ssh://git@gitlab.com/org/skill.git';
-      expect(parseSkillSpec(spec)).toEqual({ protocol: 'git', url: spec, ref: '', subpath: '' });
+    it('parses a #ref fragment as the ref', () => {
+      expect(parseSkillSpec('git:https://github.com/org/skill.git#main')).toEqual({
+        protocol: 'git',
+        url: 'https://github.com/org/skill.git',
+        ref: 'main',
+        subpath: '',
+      });
+    });
+
+    it('parses a #ref/subpath fragment into ref and subpath', () => {
+      expect(parseSkillSpec('git:https://github.com/org/bundle.git#main/security')).toEqual({
+        protocol: 'git',
+        url: 'https://github.com/org/bundle.git',
+        ref: 'main',
+        subpath: 'security',
+      });
+    });
+
+    it('keeps a multi-segment subpath after the ref', () => {
+      expect(parseSkillSpec('git:https://github.com/org/bundle.git#v1.2.3/a/b')).toEqual({
+        protocol: 'git',
+        url: 'https://github.com/org/bundle.git',
+        ref: 'v1.2.3',
+        subpath: 'a/b',
+      });
+    });
+
+    it('treats a commit SHA as the ref', () => {
+      expect(parseSkillSpec('git:https://github.com/org/skill.git#0123abc')).toEqual({
+        protocol: 'git',
+        url: 'https://github.com/org/skill.git',
+        ref: '0123abc',
+        subpath: '',
+      });
+    });
+
+    it('rewrites git+ssh:// to an ssh:// URL git understands', () => {
+      expect(parseSkillSpec('git+ssh://git@gitlab.com/org/skill.git')).toEqual({
+        protocol: 'git',
+        url: 'ssh://git@gitlab.com/org/skill.git',
+        ref: '',
+        subpath: '',
+      });
+    });
+
+    it('parses a ref and subpath on a git+ssh:// URL', () => {
+      expect(parseSkillSpec('git+ssh://git@gitlab.com/org/bundle.git#release/sub')).toEqual({
+        protocol: 'git',
+        url: 'ssh://git@gitlab.com/org/bundle.git',
+        ref: 'release',
+        subpath: 'sub',
+      });
+    });
+
+    it('hands a non-URL value (scp-style shorthand) to git unchanged', () => {
+      // `new URL` rejects scp shorthand; rather than erroring, the raw value is
+      // passed through to git with no ref/subpath.
+      expect(parseSkillSpec('git:git@gitlab.com:org/skill.git')).toEqual({
+        protocol: 'git',
+        url: 'git@gitlab.com:org/skill.git',
+        ref: '',
+        subpath: '',
+      });
     });
   });
 });
@@ -225,6 +291,45 @@ describe('resolveNpmSkillDir', () => {
 
     const result = await resolveNpmSkillDir('my-skill', '', nestedCwd);
     expect(result).toBe(closerPkg);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// git-skill cache helpers
+// ---------------------------------------------------------------------------
+
+describe('resolveSkillCacheDir', () => {
+  it('honours XDG_CACHE_HOME', () => {
+    vi.stubEnv('XDG_CACHE_HOME', '/custom/cache');
+    try {
+      expect(resolveSkillCacheDir()).toBe(join('/custom/cache', 'gitlab-review', 'skills'));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('falls back to ~/.cache when XDG_CACHE_HOME is unset', () => {
+    vi.stubEnv('XDG_CACHE_HOME', '');
+    try {
+      expect(resolveSkillCacheDir()).toBe(join(homedir(), '.cache', 'gitlab-review', 'skills'));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
+describe('gitSkillCacheKey', () => {
+  it('is stable for the same url and ref', () => {
+    const a = gitSkillCacheKey('https://host/repo.git', 'v1');
+    const b = gitSkillCacheKey('https://host/repo.git', 'v1');
+    expect(a).toBe(b);
+    expect(a).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('differs when the ref differs', () => {
+    expect(gitSkillCacheKey('https://host/repo.git', 'v1')).not.toBe(
+      gitSkillCacheKey('https://host/repo.git', 'v2'),
+    );
   });
 });
 
@@ -375,28 +480,6 @@ describe('loadNamedSkill', () => {
       const err = await loadNamedSkill('npm:@org/missing', cwd).catch((e) => e);
       expect(err.message).toContain('npm:@org/missing');
       expect(err.hint).toBeTruthy();
-    });
-  });
-
-  describe('git: protocol (Phase 2 — unsupported)', () => {
-    it('throws ConfigError for git: specs', async () => {
-      const cwd = await makeTmp();
-      await expect(
-        loadNamedSkill('git:https://github.com/org/skill.git', cwd),
-      ).rejects.toBeInstanceOf(ConfigError);
-    });
-
-    it('throws ConfigError for git+ssh: specs', async () => {
-      const cwd = await makeTmp();
-      await expect(
-        loadNamedSkill('git+ssh://git@gitlab.com/org/skill.git', cwd),
-      ).rejects.toBeInstanceOf(ConfigError);
-    });
-
-    it('error hint mentions npm: as an alternative', async () => {
-      const cwd = await makeTmp();
-      const err = await loadNamedSkill('git:https://github.com/org/skill.git', cwd).catch((e) => e);
-      expect(err.hint).toMatch(/npm:/);
     });
   });
 });

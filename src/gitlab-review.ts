@@ -190,10 +190,16 @@ async function walkUpContextFiles(
   return result;
 }
 
+export interface LoadReviewContextOptions {
+  /** Re-clone `git:` / `git+ssh:` skills, bypassing the on-disk clone cache. */
+  refreshGitSkills?: boolean;
+}
+
 export async function loadReviewContext(
   cwd: string,
   skillNames: string[] = [],
   warn?: (msg: string) => void,
+  options: LoadReviewContextOptions = {},
 ): Promise<ReviewContext> {
   const gitRoot = await findGitRoot(cwd);
   const [conventions, reviewRules, discovered] = await Promise.all([
@@ -205,7 +211,9 @@ export async function loadReviewContext(
   const skills = [...discovered];
   const discoveredNames = new Set(discovered.map((s) => s.name));
   const named = await Promise.all(
-    skillNames.filter((n) => !discoveredNames.has(n)).map((n) => loadNamedSkill(n, cwd)),
+    skillNames
+      .filter((n) => !discoveredNames.has(n))
+      .map((n) => loadNamedSkill(n, cwd, { refresh: options.refreshGitSkills })),
   );
   skills.push(...named);
 
@@ -601,7 +609,9 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     });
   }
 
-  const context = await loadReviewContext(cwd, config.skills, (msg) => logger.warn(msg));
+  const context = await loadReviewContext(cwd, config.skills, (msg) => logger.warn(msg), {
+    refreshGitSkills: config.refreshGitSkills,
+  });
   const systemPrompt = buildJSONSystemPrompt(context, minSeverity);
   const userPrompt = buildUserPrompt(diff, skippedFiles, options.commitLog, options.priorThreads);
 
