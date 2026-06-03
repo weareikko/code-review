@@ -977,6 +977,92 @@ describe('OpenTelemetry bridge', () => {
     expect(bash?.ended).toBe(true);
   });
 
+  it('stamps process.exit_code on failed tool spans without content capture', async () => {
+    const fakeMsg = {
+      role: 'assistant',
+      model: 'anthropic/claude-haiku-4-5',
+      stopReason: 'end_turn',
+      usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0 },
+    };
+    const { spans } = await runWithAgentTelemetry(async (agent) => {
+      await agent.emit({ type: 'turn_start', turnIndex: 1 });
+      await agent.emit({
+        type: 'tool_execution_start',
+        toolName: 'Bash',
+        toolCallId: 'tc-exit',
+        args: { command: 'grep -r foo .' },
+      });
+      await agent.emit({
+        type: 'tool_execution_end',
+        toolCallId: 'tc-exit',
+        isError: true,
+        result: { code: 2, stderr: 'grep: invalid pattern' },
+      });
+      await agent.emit({ type: 'message_end', message: fakeMsg });
+    });
+
+    const bash = spans.find((s) => s.name === 'execute_tool Bash');
+    const attrs = Object.fromEntries(bash!.attributes.map((a) => [a.key, a.value]));
+    // exit code is a safe numeric value — attached even without content capture.
+    expect(attrs['process.exit_code']).toBe(2);
+    // stderr and command are content — withheld unless capture is enabled.
+    expect(attrs['tool.stderr']).toBeUndefined();
+    expect(attrs['tool.command']).toBeUndefined();
+  });
+
+  it('attaches tool.stderr and tool.command to failed tool spans when captureContent=true', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+      captureContent: true,
+    });
+
+    const config = makeConfig({ model: 'anthropic/claude-haiku-4-5' });
+    const runId = 'run-tool-error-content';
+    const runContext = createDiagnosticContext('run', config, runId);
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      const reviewerContext = createDiagnosticContext('reviewer.run', config, runId);
+      await traceDiagnostic(diagnosticChannels.runReviewer, reviewerContext, async () => {
+        const attach = bridge!.createAgentTelemetry(runId);
+        const agent = makeAgent();
+        const detach = attach!(agent);
+        await agent.emit({ type: 'turn_start', turnIndex: 1 });
+        await agent.emit({
+          type: 'tool_execution_start',
+          toolName: 'Bash',
+          toolCallId: 'tc-err-content',
+          args: { command: 'grep -r foo .' },
+        });
+        await agent.emit({
+          type: 'tool_execution_end',
+          toolCallId: 'tc-err-content',
+          isError: true,
+          result: { code: 2, stderr: 'grep: invalid pattern' },
+        });
+        await agent.emit({
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            model: 'anthropic/claude-haiku-4-5',
+            stopReason: 'end_turn',
+            content: [],
+            usage: { input: 50, output: 10, cacheRead: 0, cacheWrite: 0 },
+          },
+        });
+        detach();
+      });
+    });
+    await bridge!.shutdown();
+
+    const bash = fake.spans.find((s) => s.name === 'execute_tool Bash');
+    const attrs = Object.fromEntries(bash!.attributes.map((a) => [a.key, a.value]));
+    expect(attrs['process.exit_code']).toBe(2);
+    expect(attrs['tool.stderr']).toBe('grep: invalid pattern');
+    expect(attrs['tool.command']).toBe('grep -r foo .');
+  });
+
   it('flushes open turn and tool spans on agent_end', async () => {
     const { spans } = await runWithAgentTelemetry(async (agent) => {
       await agent.emit({ type: 'turn_start', turnIndex: 1 });

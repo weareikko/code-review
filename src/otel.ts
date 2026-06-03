@@ -634,6 +634,34 @@ function safeSerialize(value: unknown, maxLen = 2000): string | undefined {
 }
 
 /**
+ * Best-effort extraction of the command string from a tool call's start `args`.
+ * Tool args are tool-defined; Bash-style tools expose `command`. Returns
+ * `undefined` for tools without one (Read/Grep/Find/Ls), in which case
+ * `tool.command` is simply not set.
+ */
+function extractToolCommand(args: unknown): string | undefined {
+  if (typeof args !== 'object' || args === null) return undefined;
+  const command = (args as { command?: unknown }).command;
+  return typeof command === 'string' ? command : undefined;
+}
+
+/**
+ * Best-effort extraction of an exit code and stderr from a tool's error result.
+ * The result is tool-defined (`any`); shell-backed tools follow the
+ * `{ code, stderr }` ExecResult shape (also accepts `exitCode`). Missing fields
+ * are left `undefined` so no misleading attribute is set.
+ */
+function extractToolErrorDetail(result: unknown): { exitCode?: number; stderr?: string } {
+  if (typeof result !== 'object' || result === null) return {};
+  const r = result as { exitCode?: unknown; code?: unknown; stderr?: unknown };
+  const exitRaw = typeof r.exitCode === 'number' ? r.exitCode : r.code;
+  return {
+    exitCode: typeof exitRaw === 'number' ? exitRaw : undefined,
+    stderr: typeof r.stderr === 'string' ? r.stderr : undefined,
+  };
+}
+
+/**
  * Extracts printable text content from an assistant message's content array.
  * Returns a JSON-serialized array in Sentry's `{role, parts: [{type, text}]}` format,
  * or `undefined` when no text blocks are found.
@@ -677,7 +705,9 @@ function buildAgentSubscriber(
   };
   return (agent: AgentLike): (() => void) => {
     let currentTurn: { span: Span; startMs: number; firstTokenMs?: number } | undefined;
-    const openTools = new Map<string, Span>();
+    // Track the originating command alongside the span so tool.command can be
+    // attached on error (it lives on the start event's args, not the result).
+    const openTools = new Map<string, { span: Span; command?: string }>();
 
     return agent.subscribe(async (event) => {
       const type = (event as { type?: string }).type;
@@ -767,7 +797,7 @@ function buildAgentSubscriber(
           const argsStr = safeSerialize(args);
           if (argsStr) toolSpan.setAttribute('gen_ai.tool.call.arguments', argsStr);
         }
-        openTools.set(toolCallId, toolSpan);
+        openTools.set(toolCallId, { span: toolSpan, command: extractToolCommand(args) });
       }
 
       if (type === 'tool_execution_end') {
@@ -777,9 +807,23 @@ function buildAgentSubscriber(
           result?: unknown;
         };
         if (!toolCallId) return;
-        const span = openTools.get(toolCallId);
-        if (!span) return;
-        if (isError) span.setStatus({ code: SpanStatusCode.ERROR });
+        const entry = openTools.get(toolCallId);
+        if (!entry) return;
+        const { span, command } = entry;
+        if (isError) {
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          // Enrich the failure so a span isn't just "Unknown error". exit_code is
+          // a safe scalar; stderr/command can contain code, so gate them behind
+          // the same content-capture opt-in as tool arguments/results.
+          const { exitCode, stderr } = extractToolErrorDetail(result);
+          if (exitCode !== undefined) span.setAttribute('process.exit_code', exitCode);
+          if (captureContent) {
+            const stderrStr = stderr !== undefined ? safeSerialize(stderr) : undefined;
+            if (stderrStr) span.setAttribute('tool.stderr', stderrStr);
+            const commandStr = command !== undefined ? safeSerialize(command) : undefined;
+            if (commandStr) span.setAttribute('tool.command', commandStr);
+          }
+        }
         if (captureContent && result !== undefined) {
           const resultStr = safeSerialize(result);
           if (resultStr) span.setAttribute('gen_ai.tool.call.result', resultStr);
@@ -793,7 +837,7 @@ function buildAgentSubscriber(
           currentTurn.span.end();
           currentTurn = undefined;
         }
-        for (const span of openTools.values()) span.end();
+        for (const { span } of openTools.values()) span.end();
         openTools.clear();
       }
     });
