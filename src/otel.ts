@@ -923,19 +923,30 @@ function emitReviewCompletedLog(
   const cost = usage?.cost.total;
   const costStr = cost !== undefined ? ` $${cost.toFixed(4)}` : '';
   const commentStr = ctx.generated !== undefined ? ` → ${ctx.generated} comments` : '';
+  // Failed runs get their own searchable event (gitlab_review.failed) with the
+  // sanitized error type/message, so an ERROR-level query surfaces every
+  // failure. errorInfo is already stripped of secrets by toDiagnosticError.
+  const errorType = ctx.errorInfo?.code ?? ctx.errorInfo?.name;
+  const body = isError
+    ? `review failed: ${ctx.project} MR#${ctx.mr}${ctx.errorInfo ? ` — ${ctx.errorInfo.message}` : ''}`
+    : `review completed: ${ctx.project} MR#${ctx.mr}${commentStr}${costStr}`;
   logger.emit({
     severityNumber: isError ? SeverityNumber.ERROR : SeverityNumber.INFO,
     severityText: isError ? 'ERROR' : 'INFO',
-    body: `review completed: ${ctx.project} MR#${ctx.mr}${commentStr}${costStr}`,
+    body,
     context: meta?.rootSpanCtx,
     attributes: {
       'service.name': SERVICE_NAME,
-      'event.name': 'gitlab_review.completed',
+      'event.name': isError ? 'gitlab_review.failed' : 'gitlab_review.completed',
       'gitlab.project_id': ctx.project,
       'gitlab.mr_iid': ctx.mr,
       'gitlab.server_url': ctx.gitlabUrl,
       ...meta?.ciAttrs,
       ...meta?.ciSpanAttrs,
+      ...(isError && {
+        'error.type': errorType ?? '_OTHER',
+        ...(ctx.errorInfo && { 'error.message': ctx.errorInfo.message }),
+      }),
       'gitlab_review.run_id': ctx.runId,
       'gitlab_review.duration_ms': ctx.durationMs ?? 0,
       'gitlab_review.dry_run': ctx.dryRun,

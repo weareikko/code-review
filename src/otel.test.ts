@@ -1,5 +1,6 @@
 import type { Context } from '@opentelemetry/api';
 import { trace } from '@opentelemetry/api';
+import { SeverityNumber } from '@opentelemetry/api-logs';
 import { describe, expect, it, vi } from 'vitest';
 import type { Config } from './config.js';
 import { ReviewerError } from './errors.js';
@@ -977,6 +978,43 @@ describe('OpenTelemetry bridge', () => {
       'gitlab_review.dry_run': false,
       'gen_ai.request.model': 'claude-sonnet-4-5',
     });
+  });
+
+  it('emits a review.failed ERROR log with error.type and error.message on failure', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig();
+    const runContext = createDiagnosticContext('run', config, 'run-failed-log');
+    await expect(
+      traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+        throw new ReviewerError('parser blew up');
+      }),
+    ).rejects.toThrow('parser blew up');
+    await bridge!.shutdown();
+
+    const failed = fake.logsEmitted.find(
+      (l) => l.attributes['event.name'] === 'gitlab_review.failed',
+    );
+    expect(failed).toBeDefined();
+    expect(failed!.severityNumber).toBe(SeverityNumber.ERROR);
+    expect(failed!.body).toMatch(/review failed: mygroup\/myrepo MR#7 — parser blew up/);
+    expect(failed!.context).toBeDefined();
+    expect(failed!.attributes).toMatchObject({
+      'service.name': '@ikko-dev/gitlab-review',
+      'event.name': 'gitlab_review.failed',
+      'error.type': 'REVIEWER_ERROR',
+      'error.message': 'parser blew up',
+      'gitlab_review.run_id': 'run-failed-log',
+    });
+    // A failed run must NOT also emit a success completion record.
+    expect(
+      fake.logsEmitted.some((l) => l.attributes['event.name'] === 'gitlab_review.completed'),
+    ).toBe(false);
   });
 
   it('emits a review.started log even when the run fails', async () => {
