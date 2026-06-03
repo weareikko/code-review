@@ -1,6 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { formatUsageLine } from './cli.js';
+import { countPostedBySeverity, formatUsageLine } from './cli.js';
 import type { ReviewUsage } from './gitlab-review.js';
+import type { GeneratedComment, Severity } from './types.js';
+
+function makeComment(severity: Severity, duplicate = false): GeneratedComment {
+  return {
+    comment: { file: 'a.ts', line: 1, side: 'RIGHT', severity, confidence: 'high', body: 'x' },
+    fingerprints: { primary: 'p', secondary: 's' },
+    duplicate,
+    payload: {
+      body: '',
+      position: {
+        position_type: 'text',
+        base_sha: '',
+        start_sha: '',
+        head_sha: '',
+        old_path: '',
+        new_path: '',
+      },
+    },
+  };
+}
 
 function makeUsage(overrides: Partial<ReviewUsage['tokens']> = {}): ReviewUsage {
   return {
@@ -38,5 +58,22 @@ describe('formatUsageLine', () => {
     expect(formatUsageLine(usage)).toBe(
       'Review usage: 600 in / 25 out tokens — $0.0533 (anthropic/claude-sonnet-4-5)',
     );
+  });
+});
+
+describe('countPostedBySeverity', () => {
+  it('counts only non-duplicate comments, grouped by severity', () => {
+    const generated = [
+      makeComment('critical'),
+      makeComment('critical'),
+      makeComment('warn'),
+      makeComment('info'),
+      makeComment('info', true), // duplicate — not posted, excluded
+    ];
+    expect(countPostedBySeverity(generated)).toEqual({ critical: 2, warn: 1, info: 1 });
+  });
+
+  it('returns an empty object when every comment is a duplicate', () => {
+    expect(countPostedBySeverity([makeComment('warn', true)])).toEqual({});
   });
 });

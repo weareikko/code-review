@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { tracingChannel, type TracingChannel } from 'node:diagnostics_channel';
 import { performance } from 'node:perf_hooks';
 import type { Config } from './config.js';
+import type { Severity } from './types.js';
 
 export type DiagnosticPhase =
   | 'run'
@@ -57,6 +58,12 @@ export interface DiagnosticContext {
   newComments?: number;
   duplicateComments?: number;
   posted?: number;
+  /**
+   * Breakdown of posted comments by severity, populated on the `run` context so
+   * the OTel bridge can split `gitlab_review_comments_total` by severity. Counts
+   * the non-duplicate (posted-intent) comments; absent on dry-run/skip paths.
+   */
+  postedBySeverity?: Partial<Record<Severity, number>>;
   warnings?: number;
   reviewFile?: string;
   output?: string;

@@ -26,7 +26,7 @@ import {
   upsertSummaryNote,
 } from './posting.js';
 import { extractChangedFiles, extractPriorThreads } from './prior-threads.js';
-import type { DiffRefs, GeneratedComment } from './types.js';
+import type { DiffRefs, GeneratedComment, Severity } from './types.js';
 
 export type {
   DiagnosticContext,
@@ -355,6 +355,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
       `Posted ${posted} new GitLab MR discussions (${duplicates} duplicates skipped${extra}).`,
     );
     runContext.posted = posted;
+    if (posted > 0) runContext.postedBySeverity = countPostedBySeverity(generated);
 
     return { generated, posted, usage, summary };
   });
@@ -390,6 +391,25 @@ function recordCommentCounts(context: DiagnosticContext, generated: GeneratedCom
   context.generated = generated.length;
   context.newComments = generated.filter((item) => !item.duplicate).length;
   context.duplicateComments = generated.length - context.newComments;
+}
+
+/**
+ * Count the comments posted to the MR, grouped by severity. Duplicates are
+ * excluded since they are never posted. The total equals the new-comment count;
+ * in `draft` mode a concurrent run can race-delete some drafts before publish,
+ * so the breakdown reflects posted intent and may slightly exceed the published
+ * count in that rare case.
+ */
+export function countPostedBySeverity(
+  generated: GeneratedComment[],
+): Partial<Record<Severity, number>> {
+  const counts: Partial<Record<Severity, number>> = {};
+  for (const item of generated) {
+    if (item.duplicate) continue;
+    const severity = item.comment.severity;
+    counts[severity] = (counts[severity] ?? 0) + 1;
+  }
+  return counts;
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {

@@ -410,9 +410,22 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         }
       }
 
-      const posted = ctx.posted ?? 0;
-      if (posted > 0) {
-        reviewCommentsTotal.add(posted, runMetricBase);
+      // Prefer a per-severity breakdown (matching the gitlab_review.comment.severity
+      // log attribute) when the run provided one; fall back to a single
+      // unlabelled increment for callers/contexts that only know the total.
+      const bySeverity = ctx.postedBySeverity;
+      if (bySeverity) {
+        for (const [severity, count] of Object.entries(bySeverity)) {
+          if (count && count > 0) {
+            reviewCommentsTotal.add(count, {
+              ...runMetricBase,
+              'gitlab_review.comment.severity': severity,
+            });
+          }
+        }
+      } else {
+        const posted = ctx.posted ?? 0;
+        if (posted > 0) reviewCommentsTotal.add(posted, runMetricBase);
       }
 
       reviewDraftsPublishedTotal.add(meta?.draftsPublished ?? 0, runMetricBase);

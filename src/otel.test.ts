@@ -1434,6 +1434,35 @@ describe('OpenTelemetry bridge', () => {
     expect(comments).toBeUndefined();
   });
 
+  it('breaks gitlab_review_comments_total down by gitlab_review.comment.severity', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig();
+    const runContext = createDiagnosticContext('run', config, 'run-comment-severity');
+    await traceDiagnostic(diagnosticChannels.run, runContext, async (ctx) => {
+      ctx.posted = 6;
+      ctx.postedBySeverity = { critical: 2, warn: 1, info: 3 };
+    });
+    await bridge!.shutdown();
+
+    const comments = fake.metricsRecorded.filter((m) => m.name === 'gitlab_review_comments_total');
+    expect(comments).toHaveLength(3);
+    const bySeverity = Object.fromEntries(
+      comments.map((m) => [m.attributes['gitlab_review.comment.severity'], m.value]),
+    );
+    expect(bySeverity).toEqual({ critical: 2, warn: 1, info: 3 });
+    // The per-severity data points still carry the shared review label set.
+    expect(comments[0].attributes).toMatchObject({
+      'service.name': '@ikko-dev/gitlab-review',
+      'gitlab_review.dry_run': false,
+    });
+  });
+
   it('emits gitlab_review_phase_duration_seconds for every measured phase', async () => {
     const { metricsRecorded } = await runWithBridge(async (ctx) => {
       ctx.usage = {
