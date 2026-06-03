@@ -23,6 +23,8 @@ export interface DiagnosticError {
   name?: string;
   message: string;
   code?: string;
+  /** True when the failure was a deadline/abort, so the bridge can label it `timeout`. */
+  timeout?: boolean;
 }
 
 export interface DiagnosticUsageBreakdown {
@@ -193,7 +195,9 @@ export function traceDiagnosticPhase<T>(
 function toDiagnosticError(error: unknown): DiagnosticError {
   if (error instanceof Error) {
     const code = 'code' in error && typeof error.code === 'string' ? error.code : undefined;
-    return { name: error.name, message: error.message, code };
+    const timeout =
+      'timeout' in error && (error as { timeout?: unknown }).timeout === true ? true : undefined;
+    return { name: error.name, message: error.message, code, timeout };
   }
   return { message: String(error) };
 }

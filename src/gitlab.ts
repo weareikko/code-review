@@ -149,6 +149,7 @@ export class GitLabClient {
           {
             method,
             path,
+            timeout: true,
             hint: 'Check GitLab API availability or increase requestTimeout.',
           },
         );

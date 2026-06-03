@@ -2013,6 +2013,36 @@ describe('OpenTelemetry bridge', () => {
     });
   });
 
+  it('labels status=timeout for wrapped typed errors that flag timeout=true', async () => {
+    // Production timeouts never reach the run phase as a raw AbortError — a GitLab
+    // timeout is wrapped in GitLabApiError and a reviewer timeout in ReviewerError.
+    // Those carry the timeout flag (via toDiagnosticError), which must still map
+    // to status=timeout, otherwise the bucket is dead in practice.
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig();
+    const runContext = createDiagnosticContext('run', config, 'run-errors-wrapped-timeout');
+    await expect(
+      traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+        throw new ReviewerError('Review timed out after 600s', { timeout: true });
+      }),
+    ).rejects.toThrow('timed out');
+    await bridge!.shutdown();
+
+    const errors = fake.metricsRecorded.find((m) => m.name === 'gitlab_review_errors_total');
+    expect(errors!.attributes).toMatchObject({
+      'gitlab_review.status': 'timeout',
+      'error.type': 'REVIEWER_ERROR',
+    });
+    const runs = fake.metricsRecorded.find((m) => m.name === 'gitlab_review_runs_total');
+    expect(runs!.attributes['gitlab_review.status']).toBe('timeout');
+  });
+
   it('does not emit gitlab_review_errors_total on a successful run', async () => {
     const { metricsRecorded } = await runWithBridge(async () => {});
     expect(metricsRecorded.find((m) => m.name === 'gitlab_review_errors_total')).toBeUndefined();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Config } from './config.js';
-import { ConfigError } from './errors.js';
+import { ConfigError, ReviewerError } from './errors.js';
 import {
   createDiagnosticContext,
   diagnosticChannels,
@@ -90,6 +90,31 @@ describe('diagnostics_channel instrumentation', () => {
       name: 'ConfigError',
       message: 'bad config',
       code: 'CONFIG_ERROR',
+    });
+    // A non-timeout error must not be flagged as a timeout.
+    expect(errors[0].errorInfo?.timeout).toBeUndefined();
+  });
+
+  it('flags timeout errors so the bridge can label the run status=timeout', async () => {
+    const errors: DiagnosticContext[] = [];
+    const onError = (message: DiagnosticContext) => errors.push(message);
+
+    diagnosticChannels.run.error.subscribe(onError);
+    try {
+      const context = createDiagnosticContext('run', diagnosticConfig, 'run-timeout');
+      await expect(
+        traceDiagnostic(diagnosticChannels.run, context, async () => {
+          throw new ReviewerError('Review timed out after 600s', { timeout: true });
+        }),
+      ).rejects.toThrow('timed out');
+    } finally {
+      diagnosticChannels.run.error.unsubscribe(onError);
+    }
+
+    expect(errors[0].errorInfo).toMatchObject({
+      name: 'ReviewerError',
+      code: 'REVIEWER_ERROR',
+      timeout: true,
     });
   });
 });

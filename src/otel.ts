@@ -1115,6 +1115,7 @@ function resolveRunStatus(
   if (!isError) return 'success';
   const { errorInfo } = ctx;
   if (
+    errorInfo?.timeout === true ||
     errorInfo?.name === 'AbortError' ||
     errorInfo?.name === 'TimeoutError' ||
     errorInfo?.code === 'ABORT_ERR' ||
