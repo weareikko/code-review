@@ -278,6 +278,10 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     // Seed run metadata for logComments, completion log, and per-turn agent
     // telemetry (model feeds gen_ai.system derivation in buildAgentSubscriber).
     if (ctx.phase === ROOT_PHASE) {
+      // Store root span context so logger.emit() can correlate log records to
+      // the trace — tracer.startSpan does not activate the span, so we capture
+      // the context explicitly here while the span is live.
+      const rootSpanCtx = trace.setSpan(context.active(), span);
       runMeta.set(ctx.runId, {
         project: ctx.project,
         mr: ctx.mr,
@@ -285,11 +289,11 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         ciAttrs,
         ciSpanAttrs,
         model: ctx.model,
-        // Store root span context so logger.emit() can correlate log records to
-        // the trace — tracer.startSpan does not activate the span, so we capture
-        // the context explicitly here while the span is live.
-        rootSpanCtx: trace.setSpan(context.active(), span),
+        rootSpanCtx,
       });
+      // Emit a run-start log so log-only consumers can compute duration and
+      // detect stuck/hung runs without waiting for (or ever seeing) a completion.
+      emitReviewStartedLog(logger, ctx, ciAttrs, ciSpanAttrs, rootSpanCtx);
     }
   };
 
@@ -878,6 +882,34 @@ interface RunMeta {
   usage?: DiagnosticUsage;
   /** Cached from the `gitlab.post_comments` phase for the drafts-published metric. */
   draftsPublished?: number;
+}
+
+function emitReviewStartedLog(
+  logger: Logger,
+  ctx: DiagnosticContext,
+  ciAttrs: Record<string, string>,
+  ciSpanAttrs: Record<string, string>,
+  rootSpanCtx: Context,
+): void {
+  const modelId = splitModel(ctx.model ?? '').modelId;
+  logger.emit({
+    severityNumber: SeverityNumber.INFO,
+    severityText: 'INFO',
+    body: `review started: ${ctx.project} MR#${ctx.mr}`,
+    context: rootSpanCtx,
+    attributes: {
+      'service.name': SERVICE_NAME,
+      'event.name': 'gitlab_review.started',
+      'gitlab.project_id': ctx.project,
+      'gitlab.mr_iid': ctx.mr,
+      'gitlab.server_url': ctx.gitlabUrl,
+      ...ciAttrs,
+      ...ciSpanAttrs,
+      'gitlab_review.run_id': ctx.runId,
+      'gitlab_review.dry_run': ctx.dryRun,
+      ...(modelId !== undefined && { 'gen_ai.request.model': modelId }),
+    },
+  });
 }
 
 function emitReviewCompletedLog(

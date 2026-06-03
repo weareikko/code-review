@@ -945,6 +945,62 @@ describe('OpenTelemetry bridge', () => {
     });
   });
 
+  it('emits a review.started log when the run phase opens, before completion', async () => {
+    const { logsEmitted } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-sonnet-4-5',
+        tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+        cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+      };
+    });
+
+    const startedIdx = logsEmitted.findIndex(
+      (l) => l.attributes['event.name'] === 'gitlab_review.started',
+    );
+    const completedIdx = logsEmitted.findIndex(
+      (l) => l.attributes['event.name'] === 'gitlab_review.completed',
+    );
+    expect(startedIdx).toBeGreaterThanOrEqual(0);
+    // The start event must precede the completion event so log-only consumers
+    // can compute duration and detect stuck/hung runs.
+    expect(startedIdx).toBeLessThan(completedIdx);
+
+    const started = logsEmitted[startedIdx];
+    expect(started.body).toMatch(/review started: proj MR#1/);
+    expect(started.context).toBeDefined();
+    expect(started.attributes).toMatchObject({
+      'service.name': '@ikko-dev/gitlab-review',
+      'event.name': 'gitlab_review.started',
+      'gitlab.project_id': 'proj',
+      'gitlab.mr_iid': '1',
+      'gitlab_review.run_id': 'run-otel',
+      'gitlab_review.dry_run': false,
+      'gen_ai.request.model': 'claude-sonnet-4-5',
+    });
+  });
+
+  it('emits a review.started log even when the run fails', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig();
+    const runContext = createDiagnosticContext('run', config, 'run-started-fail');
+    await expect(
+      traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+        throw new Error('early failure');
+      }),
+    ).rejects.toThrow('early failure');
+    await bridge!.shutdown();
+
+    expect(
+      fake.logsEmitted.some((l) => l.attributes['event.name'] === 'gitlab_review.started'),
+    ).toBe(true);
+  });
+
   it('emits review completion log and comment logs with root span context for trace correlation', async () => {
     // BUG 2 regression test: logger.emit was previously called without a context
     // so the logger SDK could not stamp traceId/spanId on Loki log records.
