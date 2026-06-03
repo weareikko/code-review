@@ -244,6 +244,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     reviewDraftsPublishedTotal,
     reviewPhaseDuration,
     reviewRunsTotal,
+    reviewErrorsTotal,
   } = createReviewInstruments(meter);
 
   const openByRun = new Map<string, Map<DiagnosticPhase, OpenSpan>>();
@@ -352,6 +353,17 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         'gitlab.pipeline_source': pipelineSource,
         'gitlab_review.status': status,
       });
+
+      // Dedicated error counter so an error rate can be alerted on without
+      // decomposing the runs_total series. error.type mirrors the convention
+      // used for the gen_ai duration metric (typed-error code, else name).
+      if (isError) {
+        reviewErrorsTotal.add(1, {
+          ...runMetricBase,
+          'gitlab_review.status': status,
+          'error.type': ctx.errorInfo?.code ?? ctx.errorInfo?.name ?? '_OTHER',
+        });
+      }
 
       if (typeof ctx.durationMs === 'number') {
         reviewRunDuration.record(ctx.durationMs / 1000, {
@@ -893,6 +905,7 @@ interface ReviewInstruments {
   reviewDraftsPublishedTotal: Counter;
   reviewPhaseDuration: Histogram;
   reviewRunsTotal: Counter;
+  reviewErrorsTotal: Counter;
 }
 
 /** Creates the review-level OTel metric instruments on the given meter. */
@@ -900,6 +913,9 @@ function createReviewInstruments(meter: Meter): ReviewInstruments {
   return {
     reviewRunsTotal: meter.createCounter('gitlab_review_runs_total', {
       description: 'Total number of gitlab-review runs, labelled by terminal status',
+    }),
+    reviewErrorsTotal: meter.createCounter('gitlab_review_errors_total', {
+      description: 'Total number of failed gitlab-review runs, labelled by error type',
     }),
     reviewRunDuration: meter.createHistogram('gitlab_review_run_duration_seconds', {
       description: 'Duration of a complete gitlab-review run',

@@ -1634,6 +1634,71 @@ describe('OpenTelemetry bridge', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // gitlab_review_errors_total — one increment per failed run, by error_type
+  // ---------------------------------------------------------------------------
+
+  it('emits gitlab_review_errors_total with error.type when the run throws', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig();
+    const runContext = createDiagnosticContext('run', config, 'run-errors-total');
+    await expect(
+      traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+        throw new ReviewerError('boom');
+      }),
+    ).rejects.toThrow('boom');
+    await bridge!.shutdown();
+
+    const errors = fake.metricsRecorded.filter((m) => m.name === 'gitlab_review_errors_total');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].value).toBe(1);
+    expect(errors[0].attributes).toMatchObject({
+      'service.name': '@ikko-dev/gitlab-review',
+      'gitlab_review.status': 'error',
+      // error.type prefers the typed-error code over the class name.
+      'error.type': 'REVIEWER_ERROR',
+    });
+  });
+
+  it('labels gitlab_review_errors_total status=timeout for abort errors', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig();
+    const runContext = createDiagnosticContext('run', config, 'run-errors-timeout');
+    const abortError = Object.assign(new Error('aborted'), {
+      name: 'AbortError',
+      code: 'ABORT_ERR',
+    });
+    await expect(
+      traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+        throw abortError;
+      }),
+    ).rejects.toThrow('aborted');
+    await bridge!.shutdown();
+
+    const errors = fake.metricsRecorded.find((m) => m.name === 'gitlab_review_errors_total');
+    expect(errors!.attributes).toMatchObject({
+      'gitlab_review.status': 'timeout',
+      'error.type': 'ABORT_ERR',
+    });
+  });
+
+  it('does not emit gitlab_review_errors_total on a successful run', async () => {
+    const { metricsRecorded } = await runWithBridge(async () => {});
+    expect(metricsRecorded.find((m) => m.name === 'gitlab_review_errors_total')).toBeUndefined();
+  });
+
+  // ---------------------------------------------------------------------------
   // isContentCaptureEnabled
   // ---------------------------------------------------------------------------
 
