@@ -10,7 +10,7 @@ import {
 } from './diagnostics.js';
 import { formatError, RuntimeError } from './errors.js';
 import { extractExistingFingerprints } from './fingerprints.js';
-import { getMergeCommitLog, getMergeDiff, prepareGitHistory } from './git.js';
+import { getMergeCommitLog, getMergeDiff, prepareGitHistory, summarizeDiff } from './git.js';
 import type { ReviewUsage } from './gitlab-review.js';
 import { runReview } from './gitlab-review.js';
 import { GitLabClient } from './gitlab.js';
@@ -199,8 +199,18 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
     await traceDiagnosticPhase('git.prepare_history', config, runId, () =>
       prepareGitHistory(mr.source_branch, mr.target_branch, { cwd: config.cwd }),
     );
-    const diff = await traceDiagnosticPhase('git.get_merge_diff', config, runId, () =>
-      getMergeDiff(mr.target_branch, { cwd: config.cwd }),
+    const diff = await traceDiagnosticPhase(
+      'git.get_merge_diff',
+      config,
+      runId,
+      async (context) => {
+        const merged = await getMergeDiff(mr.target_branch, { cwd: config.cwd });
+        const summary = summarizeDiff(merged);
+        context.diffFilesChanged = summary.filesChanged;
+        context.diffLinesAdded = summary.linesAdded;
+        context.diffLinesRemoved = summary.linesRemoved;
+        return merged;
+      },
     );
     const commitLog = await traceDiagnosticPhase('git.get_commit_log', config, runId, () =>
       getMergeCommitLog(mr.target_branch, { cwd: config.cwd }),

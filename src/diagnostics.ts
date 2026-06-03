@@ -67,6 +67,12 @@ export interface DiagnosticContext {
   warnings?: number;
   reviewFile?: string;
   output?: string;
+  /** Number of files in the merge diff (set on the `git.get_merge_diff` phase). */
+  diffFilesChanged?: number;
+  /** Added content lines in the merge diff. */
+  diffLinesAdded?: number;
+  /** Removed content lines in the merge diff. */
+  diffLinesRemoved?: number;
   draftsAbandoned?: number;
   draftsCreated?: number;
   draftsDeletedPrePublish?: number;

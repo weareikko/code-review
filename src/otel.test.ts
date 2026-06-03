@@ -443,6 +443,37 @@ describe('OpenTelemetry bridge', () => {
     });
   });
 
+  it('stamps diff size attributes on the git.get_merge_diff span', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig();
+    const runId = 'run-diff-size';
+    const runContext = createDiagnosticContext('run', config, runId);
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      const diffCtx = createDiagnosticContext('git.get_merge_diff', config, runId);
+      await traceDiagnostic(diagnosticChannels.getMergeDiff, diffCtx, async (ctx) => {
+        ctx.diffFilesChanged = 3;
+        ctx.diffLinesAdded = 42;
+        ctx.diffLinesRemoved = 7;
+      });
+    });
+    await bridge!.shutdown();
+
+    const span = fake.spans.find((s) => s.name === 'gitlab-review.git.get_merge_diff');
+    expect(span).toBeDefined();
+    const attrs = Object.fromEntries(span!.attributes.map((a) => [a.key, a.value]));
+    expect(attrs).toMatchObject({
+      'diff.files_changed': 3,
+      'diff.lines_added': 42,
+      'diff.lines_removed': 7,
+    });
+  });
+
   // Regression test for the 0.1.7 crash: `loadDefaultRuntime` called
   // `new resources.Resource(...)` which throws under `@opentelemetry/resources`
   // v2. The rest of the suite injects a fake runtime and never touches the

@@ -1122,6 +1122,9 @@ const NUMERIC_RESULT_ATTRIBUTES = [
   ['warnings', 'gitlab_review.warnings'],
   ['draftsAbandoned', 'gitlab_review.drafts.abandoned'],
   ['draftsDeletedPrePublish', 'gitlab_review.drafts.deleted_pre_publish'],
+  ['diffFilesChanged', 'diff.files_changed'],
+  ['diffLinesAdded', 'diff.lines_added'],
+  ['diffLinesRemoved', 'diff.lines_removed'],
 ] as const satisfies ReadonlyArray<readonly [keyof DiagnosticContext, string]>;
 
 function applyResultAttributes(span: Span, ctx: DiagnosticContext): void {
