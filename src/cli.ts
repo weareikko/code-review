@@ -419,13 +419,6 @@ function recordCommentCounts(context: DiagnosticContext, generated: GeneratedCom
 }
 
 /**
- * Count the comments posted to the MR, grouped by severity. Duplicates are
- * excluded since they are never posted. The total equals the new-comment count;
- * in `draft` mode a concurrent run can race-delete some drafts before publish,
- * so the breakdown reflects posted intent and may slightly exceed the published
- * count in that rare case.
- */
-/**
  * Stamp HTTP semantic-convention fields from a captured GitLab response onto a
  * diagnostic phase context. The OTel bridge maps these to http.* / url.full /
  * server.address span attributes. No-op when no response was captured.
@@ -445,6 +438,13 @@ function applyHttpContext(context: DiagnosticContext, info: GitLabResponseInfo |
   }
 }
 
+/**
+ * Count the comments posted to the MR, grouped by severity. Duplicates are
+ * excluded since they are never posted. The total equals the new-comment count;
+ * in `draft` mode a concurrent run can race-delete some drafts before publish,
+ * so the breakdown reflects posted intent and may slightly exceed the published
+ * count in that rare case.
+ */
 export function countPostedBySeverity(
   generated: GeneratedComment[],
 ): Partial<Record<Severity, number>> {
