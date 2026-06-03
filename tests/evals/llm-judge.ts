@@ -1,5 +1,5 @@
 import { createJudge } from 'vitest-evals';
-import type { JudgeContext } from 'vitest-evals';
+import type { Judge, JudgeContext } from 'vitest-evals';
 
 const ANTHROPIC_VERSION = '2023-06-01';
 const DEFAULT_JUDGE_MODEL = 'claude-haiku-4-5-20251001';
@@ -135,40 +135,43 @@ const JUDGE_SYSTEM_PROMPT = [
 export function createLlmJudge<I, O extends ReviewSummary>(
   name: string,
   rubric: string,
-): ReturnType<typeof createJudge<JudgeContext<I, O, Record<string, unknown>>>> {
-  return createJudge(name, async ({ output }: JudgeContext<I, O, Record<string, unknown>>) => {
-    const review = renderReview(output);
-    const userPrompt = [
-      'Evaluate the automated code review below against the rubric.',
-      '',
-      '<rubric>',
-      rubric,
-      '</rubric>',
-      '',
-      '<review>',
-      review,
-      '</review>',
-      '',
-      'Return the JSON verdict now.',
-    ].join('\n');
+): Judge<JudgeContext<I, O, Record<string, unknown>>> {
+  return createJudge({
+    name,
+    assess: async ({ output }: JudgeContext<I, O, Record<string, unknown>>) => {
+      const review = renderReview(output);
+      const userPrompt = [
+        'Evaluate the automated code review below against the rubric.',
+        '',
+        '<rubric>',
+        rubric,
+        '</rubric>',
+        '',
+        '<review>',
+        review,
+        '</review>',
+        '',
+        'Return the JSON verdict now.',
+      ].join('\n');
 
-    try {
-      const verdict = await callJudge(JUDGE_SYSTEM_PROMPT, userPrompt);
-      return {
-        score: verdict.score,
-        metadata: {
-          rationale: verdict.rationale,
-          judgeModel: getModel(),
-        },
-      };
-    } catch (err) {
-      return {
-        score: 0,
-        metadata: {
-          rationale: `LLM judge error: ${(err as Error).message}`,
-          judgeModel: getModel(),
-        },
-      };
-    }
+      try {
+        const verdict = await callJudge(JUDGE_SYSTEM_PROMPT, userPrompt);
+        return {
+          score: verdict.score,
+          metadata: {
+            rationale: verdict.rationale,
+            judgeModel: getModel(),
+          },
+        };
+      } catch (err) {
+        return {
+          score: 0,
+          metadata: {
+            rationale: `LLM judge error: ${(err as Error).message}`,
+            judgeModel: getModel(),
+          },
+        };
+      }
+    },
   });
 }
