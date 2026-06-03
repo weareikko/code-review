@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Config } from './config.js';
-import { ConfigError, ReviewerError } from './errors.js';
+import { redactSecrets } from './diagnostics.js';
+import { ConfigError, GitLabApiError, ReviewerError } from './errors.js';
 import {
   createDiagnosticContext,
   diagnosticChannels,
@@ -116,5 +117,67 @@ describe('diagnostics_channel instrumentation', () => {
       code: 'REVIEWER_ERROR',
       timeout: true,
     });
+  });
+
+  it('redacts secrets from error messages stored on the trace', async () => {
+    const errors: DiagnosticContext[] = [];
+    const onError = (message: DiagnosticContext) => errors.push(message);
+
+    diagnosticChannels.run.error.subscribe(onError);
+    try {
+      const context = createDiagnosticContext('run', diagnosticConfig, 'run-secret');
+      await expect(
+        traceDiagnostic(diagnosticChannels.run, context, async () => {
+          throw new GitLabApiError('auth failed: PRIVATE-TOKEN: glpat-ABCDEFGHIJKLMNOPQRSTUV', {
+            method: 'GET',
+            path: '/user',
+          });
+        }),
+      ).rejects.toThrow();
+    } finally {
+      diagnosticChannels.run.error.unsubscribe(onError);
+    }
+
+    expect(errors[0].errorInfo?.message).not.toContain('glpat-ABCDEFGHIJKLMNOPQRSTUV');
+    expect(errors[0].errorInfo?.message).toContain('[REDACTED]');
+  });
+});
+
+describe('redactSecrets', () => {
+  it('masks HTTP Authorization scheme tokens', () => {
+    expect(
+      redactSecrets('request failed: Authorization: Bearer sk-ant-api03-abc123def456ghi'),
+    ).toBe('request failed: Authorization: Bearer [REDACTED]');
+  });
+
+  it('masks GitLab personal/project access tokens', () => {
+    expect(redactSecrets('token glpat-ABCDEFGHIJKLMNOPQRSTUV rejected')).toBe(
+      'token [REDACTED] rejected',
+    );
+  });
+
+  it('masks Anthropic/OpenAI style keys', () => {
+    expect(redactSecrets('key sk-ant-api03-0123456789abcdefghij invalid')).toBe(
+      'key [REDACTED] invalid',
+    );
+  });
+
+  it('masks credentials embedded in URL userinfo', () => {
+    expect(
+      redactSecrets(
+        "unable to access 'https://oauth2:glpat-secrettokenvalue1234@gitlab.example.com/x.git'",
+      ),
+    ).toBe("unable to access 'https://[REDACTED]@gitlab.example.com/x.git'");
+  });
+
+  it('masks the value of sensitive key=value assignments, keeping the key', () => {
+    expect(redactSecrets('config error: api_key=mysecretvalue123 is invalid')).toBe(
+      'config error: api_key=[REDACTED] is invalid',
+    );
+  });
+
+  it('leaves ordinary error text untouched', () => {
+    const message = 'could not connect to database: connection refused (global-state-manager)';
+    expect(redactSecrets(message)).toBe(message);
   });
 });

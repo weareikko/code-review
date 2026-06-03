@@ -27,6 +27,44 @@ export interface DiagnosticError {
   timeout?: boolean;
 }
 
+/**
+ * Best-effort redaction of credentials from a free-form error message before it
+ * is stored on a DiagnosticError (and later shipped to logs/spans). Targets the
+ * specific secret shapes this tool handles — GitLab tokens, Anthropic/OpenAI
+ * API keys, HTTP `Authorization` schemes, and URL userinfo — rather than a
+ * generic entropy heuristic, which over-redacts ordinary error text. The key
+ * name is preserved and only the value is masked, so messages stay diagnostic.
+ */
+const SECRET_REDACTIONS: ReadonlyArray<readonly [RegExp, string]> = [
+  // scheme://user:pass@host → scheme://[REDACTED]@host
+  [/([a-z][a-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s@]+@/gi, '$1[REDACTED]@'],
+  // Authorization: <scheme> <token>
+  [/\b(Bearer|Basic|Token)\s+[A-Za-z0-9._~+/-]+=*/g, '$1 [REDACTED]'],
+  // GitLab token families (glpat-, glrt-, gloas-, …) — curated prefixes, 20+ chars.
+  [
+    /\b(?:glpat|gldt|glrt|glptt|gloas|glsoat|glimt|glagent|glffct|glcbt)-[A-Za-z0-9_-]{20,}\b/gi,
+    '[REDACTED]',
+  ],
+  // Anthropic / OpenAI style keys (sk-…, sk-ant-…).
+  [/\bsk-(?:ant-)?[A-Za-z0-9_-]{20,}\b/gi, '[REDACTED]'],
+  // key=value / key: value / "key":"value" for sensitive key names. The HTTP
+  // `Authorization` header is intentionally omitted here — its `<scheme> <token>`
+  // value is handled by the Bearer/Basic/Token rule above (a bare key match would
+  // only mask the scheme word and leave the token).
+  [
+    /\b(private[_-]?token|access[_-]?token|api[_-]?key|x-api-key|auth[_-]?token|password|secret)(["']?\s*[=:]\s*["']?)[^"'\s,&}]+/gi,
+    '$1$2[REDACTED]',
+  ],
+];
+
+export function redactSecrets(message: string): string {
+  let redacted = message;
+  for (const [pattern, replacement] of SECRET_REDACTIONS) {
+    redacted = redacted.replace(pattern, replacement);
+  }
+  return redacted;
+}
+
 export interface DiagnosticUsageBreakdown {
   input: number;
   output: number;
@@ -197,7 +235,7 @@ function toDiagnosticError(error: unknown): DiagnosticError {
     const code = 'code' in error && typeof error.code === 'string' ? error.code : undefined;
     const timeout =
       'timeout' in error && (error as { timeout?: unknown }).timeout === true ? true : undefined;
-    return { name: error.name, message: error.message, code, timeout };
+    return { name: error.name, message: redactSecrets(error.message), code, timeout };
   }
-  return { message: String(error) };
+  return { message: redactSecrets(String(error)) };
 }
