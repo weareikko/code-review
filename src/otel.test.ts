@@ -1561,6 +1561,79 @@ describe('OpenTelemetry bridge', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // gitlab_review_runs_total — one increment per run (fixes dashboard counting)
+  // ---------------------------------------------------------------------------
+
+  it('emits gitlab_review_runs_total exactly once per successful run', async () => {
+    const { metricsRecorded } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-sonnet-4-5',
+        tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+        cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+      };
+    });
+
+    const runs = metricsRecorded.filter((m) => m.name === 'gitlab_review_runs_total');
+    expect(runs).toHaveLength(1);
+    expect(runs[0].value).toBe(1);
+    expect(runs[0].attributes).toMatchObject({
+      'service.name': '@ikko-dev/gitlab-review',
+      'gitlab_review.dry_run': false,
+      'gitlab_review.status': 'success',
+    });
+    // run_id is intentionally NOT a metric label — it would explode cardinality.
+    expect(runs[0].attributes['gitlab_review.run_id']).toBeUndefined();
+  });
+
+  it('increments gitlab_review_runs_total with status=error when the run throws', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig();
+    const runContext = createDiagnosticContext('run', config, 'run-runs-error');
+    await expect(
+      traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+        throw new Error('kaboom');
+      }),
+    ).rejects.toThrow('kaboom');
+    await bridge!.shutdown();
+
+    const runs = fake.metricsRecorded.filter((m) => m.name === 'gitlab_review_runs_total');
+    expect(runs).toHaveLength(1);
+    expect(runs[0].value).toBe(1);
+    expect(runs[0].attributes['gitlab_review.status']).toBe('error');
+  });
+
+  it('carries gitlab.project_path and pipeline_source on gitlab_review_runs_total', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: {
+        GITLAB_REVIEW_OTEL: '1',
+        CI_PROJECT_PATH: 'corp/svc',
+        CI_PIPELINE_SOURCE: 'merge_request_event',
+      },
+    });
+
+    const config = makeConfig();
+    const runContext = createDiagnosticContext('run', config, 'run-runs-ci');
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {});
+    await bridge!.shutdown();
+
+    const runs = fake.metricsRecorded.find((m) => m.name === 'gitlab_review_runs_total');
+    expect(runs!.attributes).toMatchObject({
+      'gitlab.project_path': 'corp/svc',
+      'gitlab.pipeline_source': 'merge_request_event',
+      'gitlab_review.status': 'success',
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // isContentCaptureEnabled
   // ---------------------------------------------------------------------------
 

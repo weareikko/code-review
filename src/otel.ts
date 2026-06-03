@@ -243,6 +243,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     reviewCommentsTotal,
     reviewDraftsPublishedTotal,
     reviewPhaseDuration,
+    reviewRunsTotal,
   } = createReviewInstruments(meter);
 
   const openByRun = new Map<string, Map<DiagnosticPhase, OpenSpan>>();
@@ -341,6 +342,16 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         'gitlab.project_path': projectPath,
         'gitlab_review.dry_run': ctx.dryRun,
       };
+
+      // One increment per run regardless of duration availability. This is the
+      // canonical "how many reviews ran" series; counting histogram `_count`
+      // proved unreliable for the dashboard, and run_id is deliberately NOT a
+      // label here — a per-run UUID would explode Prometheus/Mimir cardinality.
+      reviewRunsTotal.add(1, {
+        ...runMetricBase,
+        'gitlab.pipeline_source': pipelineSource,
+        'gitlab_review.status': status,
+      });
 
       if (typeof ctx.durationMs === 'number') {
         reviewRunDuration.record(ctx.durationMs / 1000, {
@@ -881,11 +892,15 @@ interface ReviewInstruments {
   reviewCommentsTotal: Counter;
   reviewDraftsPublishedTotal: Counter;
   reviewPhaseDuration: Histogram;
+  reviewRunsTotal: Counter;
 }
 
-/** Creates the five review-level OTel metric instruments on the given meter. */
+/** Creates the review-level OTel metric instruments on the given meter. */
 function createReviewInstruments(meter: Meter): ReviewInstruments {
   return {
+    reviewRunsTotal: meter.createCounter('gitlab_review_runs_total', {
+      description: 'Total number of gitlab-review runs, labelled by terminal status',
+    }),
     reviewRunDuration: meter.createHistogram('gitlab_review_run_duration_seconds', {
       description: 'Duration of a complete gitlab-review run',
       unit: 's',
