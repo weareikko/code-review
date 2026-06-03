@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-06-03
+
 ### Added
 
 - **Skills can now be loaded from a git remote (`git:` / `git+ssh:`), completing Phase 2 of external skill distribution.** A `--skill` (or `GITLAB_REVIEW_SKILLS`) spec such as `git:https://host/group/skills.git#v1.2.0/security` or `git+ssh://git@host/group/skill.git` shallow-clones the repo at a pinned ref (tag, branch, or commit) and loads its `SKILL.md` through the same validation path as the `npm:` / `file:` protocols. An optional `#<ref>/<subpath>` fragment points at a skill directory inside a multi-skill bundle. Clones are cached under `${XDG_CACHE_HOME:-~/.cache}/gitlab-review/skills/` keyed by URL+ref; set `GITLAB_REVIEW_REFRESH_SKILLS=1` to re-clone a moved branch ref. Following the project's SSH-over-HTTPS convention, the README recommends `git+ssh://` for private GitLab remotes; the scp-style `git@host:group/repo.git` shorthand is intentionally not accepted (its `:` collides with the `#ref` fragment). The README now documents all external skill protocols.
