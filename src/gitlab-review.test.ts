@@ -10,6 +10,7 @@ import {
   buildJSONSystemPrompt,
   buildUserPrompt,
   filterDiff,
+  loadReviewContext,
   runReview,
   type AgentLike,
 } from './gitlab-review.js';
@@ -880,5 +881,19 @@ describe('buildUserPrompt', () => {
     expect(commitsPos).toBeLessThan(diffPos);
     expect(diffPos).toBeLessThan(skippedPos);
     expect(skippedPos).toBeLessThan(priorPos);
+  });
+});
+
+describe('loadReviewContext', () => {
+  it('loads a named skill and threads refreshGitSkills through to the loader', async () => {
+    // Uses the bundled `code-review` skill so no clone/cache is involved — this
+    // exercises the named-skill resolution path (and the refreshGitSkills
+    // option being forwarded) without touching the filesystem cache. Git-skill
+    // cache behaviour is covered hermetically in `skills-git-cache.test.ts`.
+    const cwd = await mkdtemp(join(tmpdir(), 'lrc-'));
+    const ctx = await loadReviewContext(cwd, ['code-review'], undefined, {
+      refreshGitSkills: false,
+    });
+    expect(ctx.skills.map((s) => s.name)).toContain('code-review');
   });
 });
