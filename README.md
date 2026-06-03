@@ -288,6 +288,8 @@ Node emits tracing subchannels as `tracing:<base>:start`, `:end`, `:asyncStart`,
 
 When `--posting-mode draft` is used, the `gitlab.post_comments` payload also exposes `draftsAbandoned`, `draftsCreated`, `draftsDeletedPrePublish`, and `draftsPublished` counters describing the draft lifecycle within the run.
 
+The `git.get_merge_diff` payload exposes `diffFilesChanged`, `diffLinesAdded`, and `diffLinesRemoved`; the GitLab read phases expose `httpRequestMethod`, `httpUrl`, `httpStatusCode`, `httpResponseBodySize`, and `serverAddress` (no secrets — the token is sent in a request header, not the URL); and the top-level `run` payload exposes `postedBySeverity`, a per-severity breakdown of posted comments.
+
 The `reviewer.run` payload exposes a `usage` field (`{ model, tokens, cost }`) once the agent has returned. The same `usage` is forwarded onto the top-level `run` payload so a subscriber on `run:asyncEnd` sees the final token and cost totals for the review.
 
 ```js
@@ -328,8 +330,10 @@ invoke_workflow gitlab-review
 - `invoke_workflow gitlab-review` — root span per run, carrying `gitlab.project_id`, `gitlab.mr_iid`, comment counters, and `gen_ai.*` totals.
 - `invoke_agent gitlab-review` — wraps the full agent call. Tagged with `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.operation.name=invoke_agent`, aggregate token and cost attributes.
 - `gen_ai.agent.turn` — one child span per agent turn with per-turn token counts, cost, model, and stop reason.
-- `execute_tool <name>` — one grandchild span per tool call (`gen_ai.tool.name`, `gen_ai.tool.call.id`). Error status is set on failed calls.
+- `execute_tool <name>` — one grandchild span per tool call (`gen_ai.tool.name`, `gen_ai.tool.call.id`). Error status is set on failed calls; failed calls also carry `process.exit_code`, and (only with content capture) `tool.stderr` and `tool.command`.
 - `gitlab-review.<phase>` — one span per remaining phase (`gitlab.get_merge_request`, `git.get_merge_diff`, `gitlab.post_comments`, …) for latency and error rates.
+
+GitLab API read spans (`gitlab.get_merge_request`, `gitlab.get_latest_version`, `gitlab.get_discussions`) carry stable OTel HTTP semantic-convention attributes — `http.request.method`, `http.response.status_code`, `url.full`, `http.response.body.size`, `server.address` — so API rate limits and 4xx/5xx responses are visible at the span level (the failing request's status is recorded even when the call throws). The `git.get_merge_diff` span carries `diff.files_changed`, `diff.lines_added`, and `diff.lines_removed` so duration and cost can be correlated with change size. The root `invoke_workflow` span carries `gitlab_review.run_id` (and `gen_ai.conversation.id`) so a trace can be joined to its metric series and log stream.
 
 #### Metrics
 
@@ -346,23 +350,55 @@ The bridge emits two sets of metrics.
 
 **Review-level metrics** are emitted once per complete run (success or failure):
 
-| Metric                                 | Type      | Labels                                                                                           |
-| -------------------------------------- | --------- | ------------------------------------------------------------------------------------------------ |
-| `gitlab_review_run_duration_seconds`   | Histogram | `gitlab.project_path`, `gitlab.pipeline_source`, `gitlab_review.dry_run`, `gitlab_review.status` |
-| `gitlab_review_total_cost_usd`         | Histogram | `gitlab.project_path`, `gitlab_review.dry_run`, `gitlab_review.status`                           |
-| `gitlab_review_comments_total`         | Counter   | `gitlab.project_path`, `gitlab_review.dry_run`                                                   |
-| `gitlab_review_drafts_published_total` | Counter   | `gitlab.project_path`, `gitlab_review.dry_run`                                                   |
-| `gitlab_review_phase_duration_seconds` | Histogram | `gitlab.project_path`, `gitlab_review.phase`, `gitlab_review.status`                             |
+| Metric                                          | Type      | Labels                                                                                                                   |
+| ----------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `gitlab_review_runs_total`                      | Counter   | `gitlab.project_path`, `gitlab.pipeline_source`, `gitlab_review.dry_run`, `gitlab_review.status`                         |
+| `gitlab_review_errors_total`                    | Counter   | `gitlab.project_path`, `gitlab_review.dry_run`, `gitlab_review.status`, `error.type`                                     |
+| `gitlab_review_run_duration_seconds`            | Histogram | `gitlab.project_path`, `gitlab.pipeline_source`, `gitlab_review.dry_run`, `gitlab_review.status`, `gen_ai.request.model` |
+| `gitlab_review_total_cost_usd`                  | Histogram | `gitlab.project_path`, `gitlab_review.dry_run`, `gitlab_review.status`, `gen_ai.request.model`                           |
+| `gitlab_review_comments_total`                  | Counter   | `gitlab.project_path`, `gitlab_review.dry_run`, `gitlab_review.comment.severity`                                         |
+| `gitlab_review_drafts_published_total`          | Counter   | `gitlab.project_path`, `gitlab_review.dry_run`                                                                           |
+| `gitlab_review_phase_duration_seconds`          | Histogram | `gitlab.project_path`, `gitlab_review.phase`, `gitlab_review.status`                                                     |
+| `gitlab_review_llm_input_tokens_total`          | Counter   | `gitlab.project_path`, `gen_ai.request.model`                                                                            |
+| `gitlab_review_llm_output_tokens_total`         | Counter   | `gitlab.project_path`, `gen_ai.request.model`                                                                            |
+| `gitlab_review_llm_cache_read_tokens_total`     | Counter   | `gitlab.project_path`, `gen_ai.request.model`                                                                            |
+| `gitlab_review_llm_cache_creation_tokens_total` | Counter   | `gitlab.project_path`, `gen_ai.request.model`                                                                            |
 
 `gitlab_review.status` is `success`, `error`, or `timeout` (AbortError / ETIMEDOUT). `gitlab.project_path` is populated from `CI_PROJECT_PATH` when running inside a GitLab CI pipeline.
+
+`gitlab_review_runs_total` increments exactly once per run, so review volume is `sum(increase(gitlab_review_runs_total[…]))` and the error rate is `gitlab_review_errors_total / gitlab_review_runs_total`. The unique per-run `run_id` is deliberately **not** a metric label — it would create one Prometheus/Mimir series per run (unbounded cardinality). `run_id` lives on spans and log records instead, which is where per-run correlation belongs.
 
 Grafana Application Observability auto-discovers the service from its `gen_ai.*` metrics without any dashboard import. The `gitlab_review_*` metrics enable project-level Mimir queries such as `sum by (gitlab_project_path) (increase(gitlab_review_total_cost_usd_sum[7d]))` to track spend per repository.
 
 #### Structured log records
 
-After each review the bridge emits one **OTel log record per generated comment** (`event.name: gitlab_review.comment`) and a **review completion record** (`event.name: gitlab_review.completed`). Each comment record carries path, line, severity, duplicate flag, and the comment body. The completion record carries total cost, token counts, model, project/MR IDs, and comment/duplicate counts.
+Every record carries an `event.name` from a fixed taxonomy so logs can be filtered by event type:
 
-Log records land in Loki (or whichever OTLP log backend you target) and can be correlated back to traces via `run.id`.
+| `event.name`              | Severity | When                  | Notable attributes                                                                      |
+| ------------------------- | -------- | --------------------- | --------------------------------------------------------------------------------------- |
+| `gitlab_review.started`   | INFO     | run phase opens       | `gitlab_review.run_id`, project/MR IDs, `gitlab_review.dry_run`, `gen_ai.request.model` |
+| `gitlab_review.completed` | INFO     | run succeeds          | total cost, token counts, model, comment/duplicate counts, `gitlab_review.duration_ms`  |
+| `gitlab_review.failed`    | ERROR    | run throws            | `error.type`, `error.message`, `gitlab_review.run_id`                                   |
+| `gitlab_review.comment`   | INFO     | per generated comment | `gitlab_review.comment.file`, `…line`, `…severity`, `…is_duplicate`, body               |
+
+The `gitlab_review.started` record is emitted before any work, so review duration can be computed from logs alone and stuck/hung runs are detectable even when no completion ever arrives. A failed run emits `gitlab_review.failed` at ERROR severity (never a success record), making every failure a single `severity=ERROR` query away. `error.message` is the sanitized error text — tokens and API keys are never included.
+
+Log records land in Loki (or whichever OTLP log backend you target) and are correlated back to traces via the root span context (`trace_id`/`span_id`) and to metrics via `gitlab_review.run_id` / `gitlab.project_path`.
+
+#### Loki stream labels
+
+By default these records reach Loki with only `service_name` promoted to a stream label; everything else (`gitlab_project_path`, `gitlab_review_run_id`, …) is structured metadata, which requires a full scan to filter. To scope queries efficiently, promote the high-value fields to stream labels in your collector. In the OpenTelemetry Collector, the `loki` exporter reads hints from resource/log attributes:
+
+```yaml
+processors:
+  attributes/loki:
+    actions:
+      - key: loki.attribute.labels
+        value: gitlab_project_path, gitlab_review_run_id
+        action: insert
+```
+
+The equivalent in Grafana Alloy's `otelcol.exporter.loki` / `loki.process` pipeline is a `stage.structured_metadata` or `stage.labels` block listing the same two fields. Keep the promoted set small — `gitlab_project_path` is low-cardinality and safe; `gitlab_review_run_id` is high-cardinality, so promote it only if your retention and stream limits allow, otherwise query it from structured metadata.
 
 #### Grafana Cloud token scopes
 
