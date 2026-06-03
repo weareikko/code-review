@@ -137,8 +137,9 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
   const runId = createDiagnosticRunId();
   return traceDiagnosticPhase('run', config, runId, async (runContext) => {
     // Captures the most recent GitLab HTTP response so each traced read phase
-    // can stamp HTTP semconv attributes onto its span. Calls in run() are
-    // sequential, so the holder always reflects the phase's own last request.
+    // can stamp HTTP semconv attributes onto its span. Each request reports a
+    // fresh object, so a phase compares the holder against its pre-call value
+    // and only stamps when its own request actually produced a response.
     let lastHttp: GitLabResponseInfo | undefined;
     const gitlab = new GitLabClient({
       gitlabUrl: config.gitlabUrl,
@@ -152,10 +153,14 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
     // HTTP attributes on both success and error paths.
     const tracedRead = <T>(phase: DiagnosticPhase, fn: () => Promise<T>): Promise<T> =>
       traceDiagnosticPhase(phase, config, runId, async (context) => {
+        const before = lastHttp;
         try {
           return await fn();
         } finally {
-          applyHttpContext(context, lastHttp);
+          // Only stamp when this phase's own request produced a response; a
+          // phase that threw before any HTTP response must not inherit the
+          // previous phase's URL/status (which would mislabel its error span).
+          if (lastHttp !== before) applyHttpContext(context, lastHttp);
         }
       });
 
