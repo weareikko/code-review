@@ -159,3 +159,37 @@ export async function getMergeCommitLog(
 ): Promise<string> {
   return git(['log', ...getMergeCommitLogArguments(targetBranch, options)], options);
 }
+
+export interface DiffSummary {
+  filesChanged: number;
+  linesAdded: number;
+  linesRemoved: number;
+}
+
+/**
+ * Summarize a unified diff into file/line counts for telemetry. Counts one file
+ * per `diff --git` header and counts `+`/`-` lines only inside a hunk (after a
+ * `@@` header), so the `--- a/file` / `+++ b/file` header lines are excluded and
+ * a genuine content line whose text starts with `++`/`--` is still counted. Pure
+ * and allocation-light so it can run on the full merge diff without an extra git
+ * invocation.
+ */
+export function summarizeDiff(diff: string): DiffSummary {
+  let filesChanged = 0;
+  let linesAdded = 0;
+  let linesRemoved = 0;
+  let inHunk = false;
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('diff --git ')) {
+      filesChanged += 1;
+      inHunk = false;
+    } else if (line.startsWith('@@ ')) {
+      inHunk = true;
+    } else if (inHunk && line.startsWith('+')) {
+      linesAdded += 1;
+    } else if (inHunk && line.startsWith('-')) {
+      linesRemoved += 1;
+    }
+  }
+  return { filesChanged, linesAdded, linesRemoved };
+}

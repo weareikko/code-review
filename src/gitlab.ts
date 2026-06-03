@@ -1,12 +1,34 @@
 import type { GitLabAuthHeader } from './config.js';
 import { GitLabApiError } from './errors.js';
 
+/**
+ * Metadata about a single completed HTTP request, reported to `onResponse`.
+ * Deliberately telemetry-agnostic: the OTel bridge maps these onto HTTP
+ * semantic-convention span attributes, but the client itself has no OTel
+ * dependency. Carries no secrets — the token lives in a request header, not
+ * the URL.
+ */
+export interface GitLabResponseInfo {
+  method: string;
+  path: string;
+  url: string;
+  status: number;
+  /** Parsed Content-Length header in bytes, when the response provided one. */
+  responseContentLength?: number;
+}
+
 export interface GitLabClientOptions {
   gitlabUrl: string;
   token: string;
   authHeader?: GitLabAuthHeader;
   fetchImpl?: typeof fetch;
   requestTimeout?: number;
+  /**
+   * Optional instrumentation callback invoked once per completed HTTP response
+   * (success or error status), before any error is thrown. Used to surface HTTP
+   * metadata to diagnostics/OTel without coupling the client to those layers.
+   */
+  onResponse?: (info: GitLabResponseInfo) => void;
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
@@ -66,6 +88,7 @@ export class GitLabClient {
   private readonly authHeader: GitLabAuthHeader;
   private readonly fetchImpl: typeof fetch;
   private readonly requestTimeout: number;
+  private readonly onResponse?: (info: GitLabResponseInfo) => void;
 
   constructor(options: GitLabClientOptions) {
     this.base = options.gitlabUrl.replace(/\/$/, '');
@@ -73,6 +96,22 @@ export class GitLabClient {
     this.authHeader = options.authHeader ?? 'PRIVATE-TOKEN';
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.requestTimeout = options.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    this.onResponse = options.onResponse;
+  }
+
+  private reportResponse(method: string, path: string, url: string, response: Response): void {
+    if (!this.onResponse) return;
+    const header = response.headers.get('content-length');
+    // Treat a present-but-blank header as absent: Number('') / Number('  ') are 0
+    // (finite), which would otherwise be reported as a real body size of 0.
+    const length = header !== null && header.trim() !== '' ? Number(header) : NaN;
+    this.onResponse({
+      method,
+      path,
+      url,
+      status: response.status,
+      responseContentLength: Number.isFinite(length) ? length : undefined,
+    });
   }
 
   url(path: string, query: Record<string, string | number | boolean | undefined> = {}): string {
@@ -100,7 +139,9 @@ export class GitLabClient {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.requestTimeout);
     try {
-      return await this.fetchImpl(url, { ...init, signal: controller.signal });
+      const response = await this.fetchImpl(url, { ...init, signal: controller.signal });
+      this.reportResponse(method, path, url, response);
+      return response;
     } catch (error) {
       if (isAbortError(error)) {
         throw new GitLabApiError(
@@ -108,6 +149,7 @@ export class GitLabClient {
           {
             method,
             path,
+            timeout: true,
             hint: 'Check GitLab API availability or increase requestTimeout.',
           },
         );

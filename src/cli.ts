@@ -7,13 +7,14 @@ import {
   createDiagnosticRunId,
   traceDiagnosticPhase,
   type DiagnosticContext,
+  type DiagnosticPhase,
 } from './diagnostics.js';
 import { formatError, RuntimeError } from './errors.js';
 import { extractExistingFingerprints } from './fingerprints.js';
-import { getMergeCommitLog, getMergeDiff, prepareGitHistory } from './git.js';
+import { getMergeCommitLog, getMergeDiff, prepareGitHistory, summarizeDiff } from './git.js';
 import type { ReviewUsage } from './gitlab-review.js';
 import { runReview } from './gitlab-review.js';
-import { GitLabClient } from './gitlab.js';
+import { GitLabClient, type GitLabResponseInfo } from './gitlab.js';
 import { createLogger } from './logger.js';
 import type { OtelBridge } from './otel.js';
 import { startOtelBridge } from './otel.js';
@@ -26,7 +27,7 @@ import {
   upsertSummaryNote,
 } from './posting.js';
 import { extractChangedFiles, extractPriorThreads } from './prior-threads.js';
-import type { DiffRefs, GeneratedComment } from './types.js';
+import type { DiffRefs, GeneratedComment, Severity } from './types.js';
 
 export type {
   DiagnosticContext,
@@ -135,24 +136,43 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
   const logger = createLogger(config.verbose ? 'debug' : 'info');
   const runId = createDiagnosticRunId();
   return traceDiagnosticPhase('run', config, runId, async (runContext) => {
+    // Captures the most recent GitLab HTTP response so each traced read phase
+    // can stamp HTTP semconv attributes onto its span. Each request reports a
+    // fresh object, so a phase compares the holder against its pre-call value
+    // and only stamps when its own request actually produced a response.
+    let lastHttp: GitLabResponseInfo | undefined;
     const gitlab = new GitLabClient({
       gitlabUrl: config.gitlabUrl,
       token: config.gitlabToken,
       authHeader: config.gitlabAuthHeader,
+      onResponse: (info) => {
+        lastHttp = info;
+      },
     });
+    // Wraps a single-request (or paginated) GitLab read so the phase span gets
+    // HTTP attributes on both success and error paths.
+    const tracedRead = <T>(phase: DiagnosticPhase, fn: () => Promise<T>): Promise<T> =>
+      traceDiagnosticPhase(phase, config, runId, async (context) => {
+        const before = lastHttp;
+        try {
+          return await fn();
+        } finally {
+          // Only stamp when this phase's own request produced a response; a
+          // phase that threw before any HTTP response must not inherit the
+          // previous phase's URL/status (which would mislabel its error span).
+          if (lastHttp !== before) applyHttpContext(context, lastHttp);
+        }
+      });
 
     logger.info('Fetching MR info...');
-    const mr = await traceDiagnosticPhase('gitlab.get_merge_request', config, runId, () =>
+    const mr = await tracedRead('gitlab.get_merge_request', () =>
       gitlab.getMergeRequest(config.project, config.mr),
     );
-    const version = await traceDiagnosticPhase('gitlab.get_latest_version', config, runId, () =>
+    const version = await tracedRead('gitlab.get_latest_version', () =>
       gitlab.getLatestVersion(config.project, config.mr),
     );
-    const initialDiscussions = await traceDiagnosticPhase(
-      'gitlab.get_discussions',
-      config,
-      runId,
-      () => gitlab.getDiscussions(config.project, config.mr),
+    const initialDiscussions = await tracedRead('gitlab.get_discussions', () =>
+      gitlab.getDiscussions(config.project, config.mr),
     );
 
     const reviewedCommitSha = findExistingReviewedCommitSha(initialDiscussions);
@@ -199,8 +219,18 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
     await traceDiagnosticPhase('git.prepare_history', config, runId, () =>
       prepareGitHistory(mr.source_branch, mr.target_branch, { cwd: config.cwd }),
     );
-    const diff = await traceDiagnosticPhase('git.get_merge_diff', config, runId, () =>
-      getMergeDiff(mr.target_branch, { cwd: config.cwd }),
+    const diff = await traceDiagnosticPhase(
+      'git.get_merge_diff',
+      config,
+      runId,
+      async (context) => {
+        const merged = await getMergeDiff(mr.target_branch, { cwd: config.cwd });
+        const summary = summarizeDiff(merged);
+        context.diffFilesChanged = summary.filesChanged;
+        context.diffLinesAdded = summary.linesAdded;
+        context.diffLinesRemoved = summary.linesRemoved;
+        return merged;
+      },
     );
     const commitLog = await traceDiagnosticPhase('git.get_commit_log', config, runId, () =>
       getMergeCommitLog(mr.target_branch, { cwd: config.cwd }),
@@ -245,7 +275,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
     );
     for (const warning of parsed.warnings) console.warn(`[gitlab-review] ${warning}`);
 
-    const discussions = await traceDiagnosticPhase('gitlab.get_discussions', config, runId, () =>
+    const discussions = await tracedRead('gitlab.get_discussions', () =>
       gitlab.getDiscussions(config.project, config.mr),
     );
     const existing = extractExistingFingerprints(discussions);
@@ -355,6 +385,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
       `Posted ${posted} new GitLab MR discussions (${duplicates} duplicates skipped${extra}).`,
     );
     runContext.posted = posted;
+    if (posted > 0) runContext.postedBySeverity = countPostedBySeverity(generated);
 
     return { generated, posted, usage, summary };
   });
@@ -390,6 +421,45 @@ function recordCommentCounts(context: DiagnosticContext, generated: GeneratedCom
   context.generated = generated.length;
   context.newComments = generated.filter((item) => !item.duplicate).length;
   context.duplicateComments = generated.length - context.newComments;
+}
+
+/**
+ * Stamp HTTP semantic-convention fields from a captured GitLab response onto a
+ * diagnostic phase context. The OTel bridge maps these to http.* / url.full /
+ * server.address span attributes. No-op when no response was captured.
+ */
+function applyHttpContext(context: DiagnosticContext, info: GitLabResponseInfo | undefined): void {
+  if (!info) return;
+  context.httpRequestMethod = info.method;
+  context.httpUrl = info.url;
+  context.httpStatusCode = info.status;
+  if (info.responseContentLength !== undefined) {
+    context.httpResponseBodySize = info.responseContentLength;
+  }
+  try {
+    context.serverAddress = new URL(info.url).hostname;
+  } catch {
+    // Malformed URL — leave server.address unset rather than throwing in telemetry.
+  }
+}
+
+/**
+ * Count the comments posted to the MR, grouped by severity. Duplicates are
+ * excluded since they are never posted. The total equals the new-comment count;
+ * in `draft` mode a concurrent run can race-delete some drafts before publish,
+ * so the breakdown reflects posted intent and may slightly exceed the published
+ * count in that rare case.
+ */
+export function countPostedBySeverity(
+  generated: GeneratedComment[],
+): Partial<Record<Severity, number>> {
+  const counts: Partial<Record<Severity, number>> = {};
+  for (const item of generated) {
+    if (item.duplicate) continue;
+    const severity = item.comment.severity;
+    counts[severity] = (counts[severity] ?? 0) + 1;
+  }
+  return counts;
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {

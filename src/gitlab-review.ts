@@ -682,6 +682,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
         () =>
           reject(
             new ReviewerError(`Review timed out after ${Math.round(timeoutMs / 1000)}s`, {
+              timeout: true,
               hint: 'Increase timeoutMs or reduce the diff size.',
             }),
           ),

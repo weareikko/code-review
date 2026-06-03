@@ -9,17 +9,25 @@ export type ErrorCode =
 export interface GitlabReviewErrorOptions extends ErrorOptions {
   code: ErrorCode;
   hint?: string;
+  /**
+   * Marks a deadline-exceeded failure. The CLI's `code` taxonomy stays coarse
+   * (one code per subsystem), so timeouts are flagged here rather than via a
+   * separate code; the OTel bridge reads it to label runs `status=timeout`.
+   */
+  timeout?: boolean;
 }
 
 export class GitlabReviewError extends Error {
   readonly code: ErrorCode;
   readonly hint?: string;
+  readonly timeout: boolean;
 
   constructor(message: string, options: GitlabReviewErrorOptions) {
     super(message, { cause: options.cause });
     this.name = new.target.name;
     this.code = options.code;
     this.hint = options.hint;
+    this.timeout = options.timeout ?? false;
   }
 }
 

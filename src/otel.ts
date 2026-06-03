@@ -243,6 +243,9 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     reviewCommentsTotal,
     reviewDraftsPublishedTotal,
     reviewPhaseDuration,
+    reviewRunsTotal,
+    reviewErrorsTotal,
+    reviewLlmTokens,
   } = createReviewInstruments(meter);
 
   const openByRun = new Map<string, Map<DiagnosticPhase, OpenSpan>>();
@@ -262,7 +265,12 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
       phases = new Map();
       openByRun.set(ctx.runId, phases);
     }
-    if (phases.has(ctx.phase)) return;
+    // A still-open span for this phase means a duplicate start — ignore it. A
+    // *closed* entry means the phase legitimately runs more than once per run
+    // (e.g. gitlab.get_discussions, fetched before and after the review); let it
+    // re-open so the second occurrence gets its own span and HTTP attributes.
+    const existing = phases.get(ctx.phase);
+    if (existing && !existing.closed) return;
     const span = tracer.startSpan(
       spanNameFor(ctx.phase),
       {
@@ -275,6 +283,10 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     // Seed run metadata for logComments, completion log, and per-turn agent
     // telemetry (model feeds gen_ai.system derivation in buildAgentSubscriber).
     if (ctx.phase === ROOT_PHASE) {
+      // Store root span context so logger.emit() can correlate log records to
+      // the trace — tracer.startSpan does not activate the span, so we capture
+      // the context explicitly here while the span is live.
+      const rootSpanCtx = trace.setSpan(context.active(), span);
       runMeta.set(ctx.runId, {
         project: ctx.project,
         mr: ctx.mr,
@@ -282,11 +294,11 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         ciAttrs,
         ciSpanAttrs,
         model: ctx.model,
-        // Store root span context so logger.emit() can correlate log records to
-        // the trace — tracer.startSpan does not activate the span, so we capture
-        // the context explicitly here while the span is live.
-        rootSpanCtx: trace.setSpan(context.active(), span),
+        rootSpanCtx,
       });
+      // Emit a run-start log so log-only consumers can compute duration and
+      // detect stuck/hung runs without waiting for (or ever seeing) a completion.
+      emitReviewStartedLog(logger, ctx, ciAttrs, ciSpanAttrs, rootSpanCtx);
     }
   };
 
@@ -341,26 +353,88 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         'gitlab.project_path': projectPath,
         'gitlab_review.dry_run': ctx.dryRun,
       };
+      const usage = meta?.usage ?? ctx.usage;
+      // gen_ai.request.model lets cost/duration/token series be compared across
+      // model versions. It is low-cardinality (changes only when the configured
+      // model changes), unlike run_id which we keep off metrics entirely.
+      const runModelAttrs = genAiModelAttrs(undefined, splitModel(usage?.model ?? '').modelId);
+
+      // One increment per run regardless of duration availability. This is the
+      // canonical "how many reviews ran" series; counting histogram `_count`
+      // proved unreliable for the dashboard, and run_id is deliberately NOT a
+      // label here — a per-run UUID would explode Prometheus/Mimir cardinality.
+      reviewRunsTotal.add(1, {
+        ...runMetricBase,
+        'gitlab.pipeline_source': pipelineSource,
+        'gitlab_review.status': status,
+      });
+
+      // Dedicated error counter so an error rate can be alerted on without
+      // decomposing the runs_total series. error.type mirrors the convention
+      // used for the gen_ai duration metric (typed-error code, else name).
+      if (isError) {
+        reviewErrorsTotal.add(1, {
+          ...runMetricBase,
+          'gitlab_review.status': status,
+          'error.type': errorTypeOf(ctx),
+        });
+      }
 
       if (typeof ctx.durationMs === 'number') {
         reviewRunDuration.record(ctx.durationMs / 1000, {
           ...runMetricBase,
+          ...runModelAttrs,
           'gitlab.pipeline_source': pipelineSource,
           'gitlab_review.status': status,
         });
       }
 
-      const totalCostUsd = meta?.usage?.cost.total ?? ctx.usage?.cost.total;
+      const totalCostUsd = usage?.cost.total;
       if (totalCostUsd !== undefined) {
         reviewTotalCost.record(totalCostUsd, {
           ...runMetricBase,
+          ...runModelAttrs,
           'gitlab_review.status': status,
         });
       }
 
-      const posted = ctx.posted ?? 0;
-      if (posted > 0) {
-        reviewCommentsTotal.add(posted, runMetricBase);
+      // LLM token consumption as cumulative counters (one per token type), so
+      // token trends can be alerted on and dashboarded with rate()/increase()
+      // without summing the per-turn gen_ai.client.token.usage histogram.
+      if (usage) {
+        const tokenAttrs = {
+          ...REVIEW_SERVICE_ATTRS,
+          ...runModelAttrs,
+          'gitlab.project_path': projectPath,
+        };
+        const tokenByType = [
+          ['input', 'input'],
+          ['output', 'output'],
+          ['cacheRead', 'cache_read'],
+          ['cacheWrite', 'cache_creation'],
+        ] as const;
+        for (const [field, type] of tokenByType) {
+          const value = usage.tokens[field];
+          if (value > 0) reviewLlmTokens[type].add(value, tokenAttrs);
+        }
+      }
+
+      // Prefer a per-severity breakdown (matching the gitlab_review.comment.severity
+      // log attribute) when the run provided one; fall back to a single
+      // unlabelled increment for callers/contexts that only know the total.
+      const bySeverity = ctx.postedBySeverity;
+      if (bySeverity) {
+        for (const [severity, count] of Object.entries(bySeverity)) {
+          if (count && count > 0) {
+            reviewCommentsTotal.add(count, {
+              ...runMetricBase,
+              'gitlab_review.comment.severity': severity,
+            });
+          }
+        }
+      } else {
+        const posted = ctx.posted ?? 0;
+        if (posted > 0) reviewCommentsTotal.add(posted, runMetricBase);
       }
 
       reviewDraftsPublishedTotal.add(meta?.draftsPublished ?? 0, runMetricBase);
@@ -565,6 +639,34 @@ function safeSerialize(value: unknown, maxLen = 2000): string | undefined {
 }
 
 /**
+ * Best-effort extraction of the command string from a tool call's start `args`.
+ * Tool args are tool-defined; Bash-style tools expose `command`. Returns
+ * `undefined` for tools without one (Read/Grep/Find/Ls), in which case
+ * `tool.command` is simply not set.
+ */
+function extractToolCommand(args: unknown): string | undefined {
+  if (typeof args !== 'object' || args === null) return undefined;
+  const command = (args as { command?: unknown }).command;
+  return typeof command === 'string' ? command : undefined;
+}
+
+/**
+ * Best-effort extraction of an exit code and stderr from a tool's error result.
+ * The result is tool-defined (`any`); shell-backed tools follow the
+ * `{ code, stderr }` ExecResult shape (also accepts `exitCode`). Missing fields
+ * are left `undefined` so no misleading attribute is set.
+ */
+function extractToolErrorDetail(result: unknown): { exitCode?: number; stderr?: string } {
+  if (typeof result !== 'object' || result === null) return {};
+  const r = result as { exitCode?: unknown; code?: unknown; stderr?: unknown };
+  const exitRaw = typeof r.exitCode === 'number' ? r.exitCode : r.code;
+  return {
+    exitCode: typeof exitRaw === 'number' ? exitRaw : undefined,
+    stderr: typeof r.stderr === 'string' ? r.stderr : undefined,
+  };
+}
+
+/**
  * Extracts printable text content from an assistant message's content array.
  * Returns a JSON-serialized array in Sentry's `{role, parts: [{type, text}]}` format,
  * or `undefined` when no text blocks are found.
@@ -608,7 +710,9 @@ function buildAgentSubscriber(
   };
   return (agent: AgentLike): (() => void) => {
     let currentTurn: { span: Span; startMs: number; firstTokenMs?: number } | undefined;
-    const openTools = new Map<string, Span>();
+    // Track the originating command alongside the span so tool.command can be
+    // attached on error (it lives on the start event's args, not the result).
+    const openTools = new Map<string, { span: Span; command?: string }>();
 
     return agent.subscribe(async (event) => {
       const type = (event as { type?: string }).type;
@@ -698,7 +802,7 @@ function buildAgentSubscriber(
           const argsStr = safeSerialize(args);
           if (argsStr) toolSpan.setAttribute('gen_ai.tool.call.arguments', argsStr);
         }
-        openTools.set(toolCallId, toolSpan);
+        openTools.set(toolCallId, { span: toolSpan, command: extractToolCommand(args) });
       }
 
       if (type === 'tool_execution_end') {
@@ -708,9 +812,23 @@ function buildAgentSubscriber(
           result?: unknown;
         };
         if (!toolCallId) return;
-        const span = openTools.get(toolCallId);
-        if (!span) return;
-        if (isError) span.setStatus({ code: SpanStatusCode.ERROR });
+        const entry = openTools.get(toolCallId);
+        if (!entry) return;
+        const { span, command } = entry;
+        if (isError) {
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          // Enrich the failure so a span isn't just "Unknown error". exit_code is
+          // a safe scalar; stderr/command can contain code, so gate them behind
+          // the same content-capture opt-in as tool arguments/results.
+          const { exitCode, stderr } = extractToolErrorDetail(result);
+          if (exitCode !== undefined) span.setAttribute('process.exit_code', exitCode);
+          if (captureContent) {
+            const stderrStr = stderr !== undefined ? safeSerialize(stderr) : undefined;
+            if (stderrStr) span.setAttribute('tool.stderr', stderrStr);
+            const commandStr = command !== undefined ? safeSerialize(command) : undefined;
+            if (commandStr) span.setAttribute('tool.command', commandStr);
+          }
+        }
         if (captureContent && result !== undefined) {
           const resultStr = safeSerialize(result);
           if (resultStr) span.setAttribute('gen_ai.tool.call.result', resultStr);
@@ -724,7 +842,7 @@ function buildAgentSubscriber(
           currentTurn.span.end();
           currentTurn = undefined;
         }
-        for (const span of openTools.values()) span.end();
+        for (const { span } of openTools.values()) span.end();
         openTools.clear();
       }
     });
@@ -815,6 +933,34 @@ interface RunMeta {
   draftsPublished?: number;
 }
 
+function emitReviewStartedLog(
+  logger: Logger,
+  ctx: DiagnosticContext,
+  ciAttrs: Record<string, string>,
+  ciSpanAttrs: Record<string, string>,
+  rootSpanCtx: Context,
+): void {
+  const modelId = splitModel(ctx.model ?? '').modelId;
+  logger.emit({
+    severityNumber: SeverityNumber.INFO,
+    severityText: 'INFO',
+    body: `review started: ${ctx.project} MR#${ctx.mr}`,
+    context: rootSpanCtx,
+    attributes: {
+      'service.name': SERVICE_NAME,
+      'event.name': 'gitlab_review.started',
+      'gitlab.project_id': ctx.project,
+      'gitlab.mr_iid': ctx.mr,
+      'gitlab.server_url': ctx.gitlabUrl,
+      ...ciAttrs,
+      ...ciSpanAttrs,
+      'gitlab_review.run_id': ctx.runId,
+      'gitlab_review.dry_run': ctx.dryRun,
+      ...(modelId !== undefined && { 'gen_ai.request.model': modelId }),
+    },
+  });
+}
+
 function emitReviewCompletedLog(
   logger: Logger,
   ctx: DiagnosticContext,
@@ -826,19 +972,31 @@ function emitReviewCompletedLog(
   const cost = usage?.cost.total;
   const costStr = cost !== undefined ? ` $${cost.toFixed(4)}` : '';
   const commentStr = ctx.generated !== undefined ? ` → ${ctx.generated} comments` : '';
+  // Failed runs get their own searchable event (gitlab_review.failed) with the
+  // error type/message, so an ERROR-level query surfaces every failure.
+  // errorInfo.message has the run's own secret values (GitLab token, API key)
+  // scrubbed by toDiagnosticError before it ever reaches the context.
+  const errorType = errorTypeOf(ctx);
+  const body = isError
+    ? `review failed: ${ctx.project} MR#${ctx.mr}${ctx.errorInfo ? ` — ${ctx.errorInfo.message}` : ''}`
+    : `review completed: ${ctx.project} MR#${ctx.mr}${commentStr}${costStr}`;
   logger.emit({
     severityNumber: isError ? SeverityNumber.ERROR : SeverityNumber.INFO,
     severityText: isError ? 'ERROR' : 'INFO',
-    body: `review completed: ${ctx.project} MR#${ctx.mr}${commentStr}${costStr}`,
+    body,
     context: meta?.rootSpanCtx,
     attributes: {
       'service.name': SERVICE_NAME,
-      'event.name': 'gitlab_review.completed',
+      'event.name': isError ? 'gitlab_review.failed' : 'gitlab_review.completed',
       'gitlab.project_id': ctx.project,
       'gitlab.mr_iid': ctx.mr,
       'gitlab.server_url': ctx.gitlabUrl,
       ...meta?.ciAttrs,
       ...meta?.ciSpanAttrs,
+      ...(isError && {
+        'error.type': errorType,
+        ...(ctx.errorInfo && { 'error.message': ctx.errorInfo.message }),
+      }),
       'gitlab_review.run_id': ctx.runId,
       'gitlab_review.duration_ms': ctx.durationMs ?? 0,
       'gitlab_review.dry_run': ctx.dryRun,
@@ -881,11 +1039,38 @@ interface ReviewInstruments {
   reviewCommentsTotal: Counter;
   reviewDraftsPublishedTotal: Counter;
   reviewPhaseDuration: Histogram;
+  reviewRunsTotal: Counter;
+  reviewErrorsTotal: Counter;
+  reviewLlmTokens: Record<'input' | 'output' | 'cache_read' | 'cache_creation', Counter>;
 }
 
-/** Creates the five review-level OTel metric instruments on the given meter. */
+/** Creates the review-level OTel metric instruments on the given meter. */
 function createReviewInstruments(meter: Meter): ReviewInstruments {
   return {
+    reviewRunsTotal: meter.createCounter('gitlab_review_runs_total', {
+      description: 'Total number of gitlab-review runs, labelled by terminal status',
+    }),
+    reviewErrorsTotal: meter.createCounter('gitlab_review_errors_total', {
+      description: 'Total number of failed gitlab-review runs, labelled by error type',
+    }),
+    reviewLlmTokens: {
+      input: meter.createCounter('gitlab_review_llm_input_tokens_total', {
+        description: 'Total non-cached LLM input tokens consumed across gitlab-review runs',
+        unit: '{token}',
+      }),
+      output: meter.createCounter('gitlab_review_llm_output_tokens_total', {
+        description: 'Total LLM output tokens generated across gitlab-review runs',
+        unit: '{token}',
+      }),
+      cache_read: meter.createCounter('gitlab_review_llm_cache_read_tokens_total', {
+        description: 'Total LLM cache-read input tokens across gitlab-review runs',
+        unit: '{token}',
+      }),
+      cache_creation: meter.createCounter('gitlab_review_llm_cache_creation_tokens_total', {
+        description: 'Total LLM cache-creation input tokens across gitlab-review runs',
+        unit: '{token}',
+      }),
+    },
     reviewRunDuration: meter.createHistogram('gitlab_review_run_duration_seconds', {
       description: 'Duration of a complete gitlab-review run',
       unit: 's',
@@ -911,6 +1096,15 @@ function createReviewInstruments(meter: Meter): ReviewInstruments {
 }
 
 /**
+ * Stable `error.type` label for a failed run: the typed-error code, else the
+ * error class name, else `_OTHER`. Shared by the run/error counters, the failed
+ * log record, and the gen_ai duration metric so they never drift.
+ */
+function errorTypeOf(ctx: DiagnosticContext): string {
+  return ctx.errorInfo?.code ?? ctx.errorInfo?.name ?? '_OTHER';
+}
+
+/**
  * Derives the `gitlab_review.status` label used by review-level OTel metrics.
  * Distinguishes timeouts (AbortError / ETIMEDOUT) from generic errors so
  * Grafana alerts can treat deadline-exceeded runs separately.
@@ -922,6 +1116,7 @@ function resolveRunStatus(
   if (!isError) return 'success';
   const { errorInfo } = ctx;
   if (
+    errorInfo?.timeout === true ||
     errorInfo?.name === 'AbortError' ||
     errorInfo?.name === 'TimeoutError' ||
     errorInfo?.code === 'ABORT_ERR' ||
@@ -987,6 +1182,22 @@ const NUMERIC_RESULT_ATTRIBUTES = [
   ['warnings', 'gitlab_review.warnings'],
   ['draftsAbandoned', 'gitlab_review.drafts.abandoned'],
   ['draftsDeletedPrePublish', 'gitlab_review.drafts.deleted_pre_publish'],
+  ['diffFilesChanged', 'diff.files_changed'],
+  ['diffLinesAdded', 'diff.lines_added'],
+  ['diffLinesRemoved', 'diff.lines_removed'],
+  // GitLab API spans — numeric HTTP semantic-convention attributes.
+  ['httpStatusCode', 'http.response.status_code'],
+  ['httpResponseBodySize', 'http.response.body.size'],
+] as const satisfies ReadonlyArray<readonly [keyof DiagnosticContext, string]>;
+
+// String DiagnosticContext fields mapped to their result span attribute. Each
+// is set only when present as a string. HTTP keys follow the stable OTel HTTP
+// semantic conventions (http.request.method, url.full, server.address).
+const STRING_RESULT_ATTRIBUTES = [
+  ['summaryAction', 'gitlab_review.summary.action'],
+  ['httpRequestMethod', 'http.request.method'],
+  ['httpUrl', 'url.full'],
+  ['serverAddress', 'server.address'],
 ] as const satisfies ReadonlyArray<readonly [keyof DiagnosticContext, string]>;
 
 function applyResultAttributes(span: Span, ctx: DiagnosticContext): void {
@@ -994,8 +1205,9 @@ function applyResultAttributes(span: Span, ctx: DiagnosticContext): void {
     const value = ctx[field];
     if (typeof value === 'number') span.setAttribute(attr, value);
   }
-  if (typeof ctx.summaryAction === 'string') {
-    span.setAttribute('gitlab_review.summary.action', ctx.summaryAction);
+  for (const [field, attr] of STRING_RESULT_ATTRIBUTES) {
+    const value = ctx[field];
+    if (typeof value === 'string') span.setAttribute(attr, value);
   }
 }
 
@@ -1049,7 +1261,7 @@ function recordGenAiMetrics(
     ...genAiModelAttrs(provider, modelId),
   };
   if (isError) {
-    attrs['error.type'] = ctx.errorInfo?.code ?? ctx.errorInfo?.name ?? '_OTHER';
+    attrs['error.type'] = errorTypeOf(ctx);
   }
   if (typeof ctx.durationMs === 'number') {
     durationHist.record(ctx.durationMs / 1000, attrs);
