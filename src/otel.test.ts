@@ -278,6 +278,16 @@ describe('OpenTelemetry bridge', () => {
     expect(reviewer.ended).toBe(true);
   });
 
+  it('stamps gitlab_review.run_id on the root invoke_workflow span for 3-pillar correlation', async () => {
+    const { spans } = await runWithBridge(async () => {}, 'run-correlation-id');
+    const root = spans.find((s) => s.name === 'invoke_workflow gitlab-review');
+    const attrs = Object.fromEntries(root!.attributes.map((a) => [a.key, a.value]));
+    // run_id on the root span is what lets a trace be joined to its metric
+    // series (via the status/project labels) and its log stream (via run_id).
+    expect(attrs['gitlab_review.run_id']).toBe('run-correlation-id');
+    expect(attrs['gen_ai.conversation.id']).toBe('run-correlation-id');
+  });
+
   it('stamps gen_ai.* attributes on reviewer.run from DiagnosticUsage', async () => {
     const { spans } = await runWithBridge(async (ctx) => {
       ctx.usage = {
