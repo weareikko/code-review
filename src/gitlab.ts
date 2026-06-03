@@ -102,7 +102,9 @@ export class GitLabClient {
   private reportResponse(method: string, path: string, url: string, response: Response): void {
     if (!this.onResponse) return;
     const header = response.headers.get('content-length');
-    const length = header !== null ? Number(header) : NaN;
+    // Treat a present-but-blank header as absent: Number('') / Number('  ') are 0
+    // (finite), which would otherwise be reported as a real body size of 0.
+    const length = header !== null && header.trim() !== '' ? Number(header) : NaN;
     this.onResponse({
       method,
       path,

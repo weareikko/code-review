@@ -195,6 +195,25 @@ describe('GitLab client onResponse instrumentation hook', () => {
     await client.request('/user');
     expect(seen[0].responseContentLength).toBeUndefined();
   });
+
+  it('treats a present-but-blank content-length header as absent', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: 1 }), {
+        headers: { 'content-length': ' ' },
+      }),
+    );
+    const seen: GitLabResponseInfo[] = [];
+    const client = new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+      onResponse: (info) => seen.push(info),
+    });
+
+    await client.request('/user');
+    // A blank header must not be reported as a real body size of 0.
+    expect(seen[0].responseContentLength).toBeUndefined();
+  });
 });
 
 describe('GitLab draft notes endpoints', () => {
