@@ -137,15 +137,68 @@ describe('parseSkillSpec', () => {
     });
   });
 
-  describe('git: protocol (Phase 2 placeholder)', () => {
-    it('parses a git: HTTPS URL', () => {
-      const spec = 'git:https://github.com/org/skill.git';
-      expect(parseSkillSpec(spec)).toEqual({ protocol: 'git', url: spec, ref: '', subpath: '' });
+  describe('git: protocol', () => {
+    it('parses a git: HTTPS URL without a fragment', () => {
+      expect(parseSkillSpec('git:https://github.com/org/skill.git')).toEqual({
+        protocol: 'git',
+        url: 'https://github.com/org/skill.git',
+        ref: '',
+        subpath: '',
+      });
     });
 
-    it('parses a git+ssh: URL', () => {
-      const spec = 'git+ssh://git@gitlab.com/org/skill.git';
-      expect(parseSkillSpec(spec)).toEqual({ protocol: 'git', url: spec, ref: '', subpath: '' });
+    it('parses a #ref fragment as the ref', () => {
+      expect(parseSkillSpec('git:https://github.com/org/skill.git#main')).toEqual({
+        protocol: 'git',
+        url: 'https://github.com/org/skill.git',
+        ref: 'main',
+        subpath: '',
+      });
+    });
+
+    it('parses a #ref/subpath fragment into ref and subpath', () => {
+      expect(parseSkillSpec('git:https://github.com/org/bundle.git#main/security')).toEqual({
+        protocol: 'git',
+        url: 'https://github.com/org/bundle.git',
+        ref: 'main',
+        subpath: 'security',
+      });
+    });
+
+    it('keeps a multi-segment subpath after the ref', () => {
+      expect(parseSkillSpec('git:https://github.com/org/bundle.git#v1.2.3/a/b')).toEqual({
+        protocol: 'git',
+        url: 'https://github.com/org/bundle.git',
+        ref: 'v1.2.3',
+        subpath: 'a/b',
+      });
+    });
+
+    it('treats a commit SHA as the ref', () => {
+      expect(parseSkillSpec('git:https://github.com/org/skill.git#0123abc')).toEqual({
+        protocol: 'git',
+        url: 'https://github.com/org/skill.git',
+        ref: '0123abc',
+        subpath: '',
+      });
+    });
+
+    it('rewrites git+ssh:// to an ssh:// URL git understands', () => {
+      expect(parseSkillSpec('git+ssh://git@gitlab.com/org/skill.git')).toEqual({
+        protocol: 'git',
+        url: 'ssh://git@gitlab.com/org/skill.git',
+        ref: '',
+        subpath: '',
+      });
+    });
+
+    it('parses a ref and subpath on a git+ssh:// URL', () => {
+      expect(parseSkillSpec('git+ssh://git@gitlab.com/org/bundle.git#release/sub')).toEqual({
+        protocol: 'git',
+        url: 'ssh://git@gitlab.com/org/bundle.git',
+        ref: 'release',
+        subpath: 'sub',
+      });
     });
   });
 });

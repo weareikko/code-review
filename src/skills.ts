@@ -174,13 +174,45 @@ export function parseSkillSpec(spec: string): SkillSpec {
     };
   }
 
-  // git: and git+ssh: — reserved for Phase 2
-  if (spec.startsWith('git:') || spec.startsWith('git+ssh:')) {
-    return { protocol: 'git', url: spec, ref: '', subpath: '' };
+  // git: and git+ssh: (and other git+<transport>:// forms)
+  if (spec.startsWith('git+') || spec.startsWith('git:')) {
+    return parseGitSpec(spec);
   }
 
   // Bare name → builtin
   return { protocol: 'builtin', name: spec };
+}
+
+/**
+ * Parse a `git:` / `git+ssh:` skill spec into its URL, pinned ref, and subpath.
+ *
+ * - `git:<url>`         strips the `git:` marker; what follows is the clone URL
+ *   (e.g. `git:https://host/org/repo.git`).
+ * - `git+<transport>://…` strips the leading `git+`, leaving a URL git
+ *   understands directly (`git+ssh://git@host/…` → `ssh://git@host/…`), matching
+ *   npm's `package.json` git-dependency convention.
+ *
+ * An optional `#<ref>[/<subpath>]` fragment pins the ref (tag, branch, or
+ * commit) and, after the first `/`, points at a skill directory inside the repo.
+ */
+function parseGitSpec(spec: string): Extract<SkillSpec, { protocol: 'git' }> {
+  const raw = spec.startsWith('git+') ? spec.slice('git+'.length) : spec.slice('git:'.length);
+  const hashIdx = raw.indexOf('#');
+  if (hashIdx === -1) {
+    return { protocol: 'git', url: raw, ref: '', subpath: '' };
+  }
+  const url = raw.slice(0, hashIdx);
+  const fragment = raw.slice(hashIdx + 1);
+  const slashIdx = fragment.indexOf('/');
+  if (slashIdx === -1) {
+    return { protocol: 'git', url, ref: fragment, subpath: '' };
+  }
+  return {
+    protocol: 'git',
+    url,
+    ref: fragment.slice(0, slashIdx),
+    subpath: fragment.slice(slashIdx + 1),
+  };
 }
 
 /**
