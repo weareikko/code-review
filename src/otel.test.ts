@@ -36,6 +36,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     verbose: false,
     cwd: '/tmp',
     skills: [],
+    refreshGitSkills: false,
     ...overrides,
   };
 }
@@ -223,6 +224,7 @@ describe('OpenTelemetry bridge', () => {
       verbose: false,
       cwd: '/tmp',
       skills: [],
+      refreshGitSkills: false,
     };
 
     const runContext = createDiagnosticContext('run', config, runId);
@@ -373,6 +375,7 @@ describe('OpenTelemetry bridge', () => {
       verbose: false,
       cwd: '/tmp',
       skills: [],
+      refreshGitSkills: false,
     };
     const ctx = createDiagnosticContext('reviewer.run', config, 'run-error');
     await expect(
@@ -617,6 +620,7 @@ describe('OpenTelemetry bridge', () => {
       verbose: false,
       cwd: '/tmp',
       skills: [],
+      refreshGitSkills: false,
     };
 
     const runContext = createDiagnosticContext('run', config, runId);
@@ -1331,6 +1335,7 @@ describe('OpenTelemetry bridge', () => {
       verbose: false,
       cwd: '/tmp',
       skills: [],
+      refreshGitSkills: false,
     };
     const runContext = createDiagnosticContext('run', config, 'run-logs');
     await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
@@ -1440,6 +1445,7 @@ describe('OpenTelemetry bridge', () => {
       verbose: false,
       cwd: '/tmp',
       skills: [],
+      refreshGitSkills: false,
     };
     const runContext = createDiagnosticContext('run', config, 'run-ci');
     await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
@@ -1583,6 +1589,7 @@ describe('OpenTelemetry bridge', () => {
       verbose: false,
       cwd: '/tmp',
       skills: [],
+      refreshGitSkills: false,
     };
     const runContext = createDiagnosticContext('run', config, 'run-trunc');
     await traceDiagnostic(diagnosticChannels.run, runContext, async () => {

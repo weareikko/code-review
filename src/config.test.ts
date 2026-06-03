@@ -111,6 +111,7 @@ describe('validateConfig', () => {
     verbose: false,
     cwd: '/tmp',
     skills: [],
+    refreshGitSkills: false,
   };
 
   it('throws listing all missing required fields', () => {
@@ -385,6 +386,22 @@ describe('summary posting configuration', () => {
     expect(resolveConfig([], { ...baseEnv, GITLAB_REVIEW_FORCE_REVIEW: 'true' }).forceReview).toBe(
       true,
     );
+  });
+
+  it('defaults refreshGitSkills to false', () => {
+    expect(resolveConfig([], baseEnv).refreshGitSkills).toBe(false);
+  });
+
+  it('enables refreshGitSkills via GITLAB_REVIEW_REFRESH_SKILLS=1', () => {
+    expect(
+      resolveConfig([], { ...baseEnv, GITLAB_REVIEW_REFRESH_SKILLS: '1' }).refreshGitSkills,
+    ).toBe(true);
+  });
+
+  it('enables refreshGitSkills via GITLAB_REVIEW_REFRESH_SKILLS=true', () => {
+    expect(
+      resolveConfig([], { ...baseEnv, GITLAB_REVIEW_REFRESH_SKILLS: 'true' }).refreshGitSkills,
+    ).toBe(true);
   });
 });
 

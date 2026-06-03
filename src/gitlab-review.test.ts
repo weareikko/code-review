@@ -39,6 +39,7 @@ describe('runReview pipeline', () => {
     verbose: false,
     cwd: '/tmp',
     skills: [],
+    refreshGitSkills: false,
   };
 
   const sampleDiff = [
@@ -424,6 +425,7 @@ describe('resolveModel (via runReview createAgent)', () => {
     verbose: false,
     cwd: '/tmp',
     skills: [],
+    refreshGitSkills: false,
   };
 
   it('builds an openai-completions model for ollama provider', async () => {

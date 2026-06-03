@@ -30,6 +30,7 @@ const diagnosticConfig: Config = {
   verbose: false,
   cwd: '/tmp',
   skills: [],
+  refreshGitSkills: false,
 };
 
 describe('diagnostics_channel instrumentation', () => {

@@ -29,6 +29,8 @@ export interface Config {
   verbose: boolean;
   cwd: string;
   skills: string[];
+  /** Re-clone `git:` / `git+ssh:` skills, bypassing the on-disk clone cache. */
+  refreshGitSkills: boolean;
 }
 
 export type ParsedArgs = Record<string, string | boolean | string[]>;
@@ -246,6 +248,7 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     verbose: toBoolean(args.verbose) || toBoolean(env.GITLAB_REVIEW_VERBOSE),
     cwd: String(args.cwd ?? process.cwd()),
     skills: resolveSkills(args, env),
+    refreshGitSkills: toBoolean(env.GITLAB_REVIEW_REFRESH_SKILLS),
   };
 }
 
