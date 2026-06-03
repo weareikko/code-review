@@ -1,17 +1,19 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ConfigError } from './errors.js';
 import {
+  gitSkillCacheKey,
   loadAutoDiscoveredSkills,
   loadNamedSkill,
   loadSkillFromDir,
   parseSkillSpec,
   resolveNpmSkillDir,
+  resolveSkillCacheDir,
 } from './skills.js';
 
 const execFileAsync = promisify(execFile);
@@ -310,6 +312,45 @@ describe('resolveNpmSkillDir', () => {
 });
 
 // ---------------------------------------------------------------------------
+// git-skill cache helpers
+// ---------------------------------------------------------------------------
+
+describe('resolveSkillCacheDir', () => {
+  it('honours XDG_CACHE_HOME', () => {
+    vi.stubEnv('XDG_CACHE_HOME', '/custom/cache');
+    try {
+      expect(resolveSkillCacheDir()).toBe(join('/custom/cache', 'gitlab-review', 'skills'));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('falls back to ~/.cache when XDG_CACHE_HOME is unset', () => {
+    vi.stubEnv('XDG_CACHE_HOME', '');
+    try {
+      expect(resolveSkillCacheDir()).toBe(join(homedir(), '.cache', 'gitlab-review', 'skills'));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
+describe('gitSkillCacheKey', () => {
+  it('is stable for the same url and ref', () => {
+    const a = gitSkillCacheKey('https://host/repo.git', 'v1');
+    const b = gitSkillCacheKey('https://host/repo.git', 'v1');
+    expect(a).toBe(b);
+    expect(a).toMatch(/^[0-9a-f]{16}$/);
+  });
+
+  it('differs when the ref differs', () => {
+    expect(gitSkillCacheKey('https://host/repo.git', 'v1')).not.toBe(
+      gitSkillCacheKey('https://host/repo.git', 'v2'),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // loadNamedSkill — integration tests with fixture directories
 // ---------------------------------------------------------------------------
 
@@ -521,6 +562,24 @@ describe('loadNamedSkill', () => {
       const second = await loadNamedSkill(spec, cwd, { cacheDir });
       expect(second.rootDir).toBe(first.rootDir);
       expect(existsSync(sentinel)).toBe(true);
+    });
+
+    it('recovers when a partial (non-.git) dir occupies the cache slot', async () => {
+      const cwd = await makeTmp();
+      const cacheDir = await makeTmp('git-cache-');
+      const repo = await makeTmp('git-repo-');
+      await initRepo(repo);
+      await writeSkillMd(repo, 'recovered', 'Recovered skill');
+      await commitAll(repo, 'add skill');
+
+      const url = fileUrl(repo);
+      // Simulate a crashed prior clone: a dir at the cache slot with no `.git`.
+      const stale = join(cacheDir, gitSkillCacheKey(url, ''));
+      await mkdir(stale, { recursive: true });
+      await writeFile(join(stale, 'junk.txt'), 'partial', 'utf8');
+
+      const skill = await loadNamedSkill(`git:${url}`, cwd, { cacheDir });
+      expect(skill.name).toBe('recovered');
     });
 
     it('re-clones when refresh is set, discarding the cached copy', async () => {
