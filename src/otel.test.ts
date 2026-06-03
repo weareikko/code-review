@@ -1699,6 +1699,56 @@ describe('OpenTelemetry bridge', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // LLM token total counters — token consumption as Prometheus counters
+  // ---------------------------------------------------------------------------
+
+  it('emits gitlab_review_llm_*_tokens_total counters from aggregated usage', async () => {
+    const { metricsRecorded } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-sonnet-4-5',
+        tokens: { input: 1000, output: 200, cacheRead: 300, cacheWrite: 50, total: 1550 },
+        cost: { input: 0.01, output: 0.02, cacheRead: 0.003, cacheWrite: 0.001, total: 0.034 },
+      };
+    });
+
+    const byName = (name: string) => metricsRecorded.find((m) => m.name === name);
+    expect(byName('gitlab_review_llm_input_tokens_total')?.value).toBe(1000);
+    expect(byName('gitlab_review_llm_output_tokens_total')?.value).toBe(200);
+    expect(byName('gitlab_review_llm_cache_read_tokens_total')?.value).toBe(300);
+    expect(byName('gitlab_review_llm_cache_creation_tokens_total')?.value).toBe(50);
+
+    expect(byName('gitlab_review_llm_input_tokens_total')?.attributes).toMatchObject({
+      'service.name': '@ikko-dev/gitlab-review',
+      'gen_ai.request.model': 'claude-sonnet-4-5',
+    });
+  });
+
+  it('omits cache token counters when no cache tokens were used', async () => {
+    const { metricsRecorded } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-sonnet-4-5',
+        tokens: { input: 500, output: 100, cacheRead: 0, cacheWrite: 0, total: 600 },
+        cost: { input: 0.005, output: 0.01, cacheRead: 0, cacheWrite: 0, total: 0.015 },
+      };
+    });
+
+    expect(
+      metricsRecorded.find((m) => m.name === 'gitlab_review_llm_input_tokens_total'),
+    ).toBeDefined();
+    expect(
+      metricsRecorded.find((m) => m.name === 'gitlab_review_llm_cache_read_tokens_total'),
+    ).toBeUndefined();
+    expect(
+      metricsRecorded.find((m) => m.name === 'gitlab_review_llm_cache_creation_tokens_total'),
+    ).toBeUndefined();
+  });
+
+  it('emits no LLM token counters when usage is absent', async () => {
+    const { metricsRecorded } = await runWithBridge(async () => {});
+    expect(metricsRecorded.some((m) => m.name.startsWith('gitlab_review_llm_'))).toBe(false);
+  });
+
+  // ---------------------------------------------------------------------------
   // isContentCaptureEnabled
   // ---------------------------------------------------------------------------
 

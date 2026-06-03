@@ -245,6 +245,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     reviewPhaseDuration,
     reviewRunsTotal,
     reviewErrorsTotal,
+    reviewLlmTokens,
   } = createReviewInstruments(meter);
 
   const openByRun = new Map<string, Map<DiagnosticPhase, OpenSpan>>();
@@ -373,12 +374,36 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         });
       }
 
-      const totalCostUsd = meta?.usage?.cost.total ?? ctx.usage?.cost.total;
+      const usage = meta?.usage ?? ctx.usage;
+      const runModelAttrs = genAiModelAttrs(undefined, splitModel(usage?.model ?? '').modelId);
+
+      const totalCostUsd = usage?.cost.total;
       if (totalCostUsd !== undefined) {
         reviewTotalCost.record(totalCostUsd, {
           ...runMetricBase,
           'gitlab_review.status': status,
         });
+      }
+
+      // LLM token consumption as cumulative counters (one per token type), so
+      // token trends can be alerted on and dashboarded with rate()/increase()
+      // without summing the per-turn gen_ai.client.token.usage histogram.
+      if (usage) {
+        const tokenAttrs = {
+          ...REVIEW_SERVICE_ATTRS,
+          ...runModelAttrs,
+          'gitlab.project_path': projectPath,
+        };
+        const tokenByType = [
+          ['input', 'input'],
+          ['output', 'output'],
+          ['cacheRead', 'cache_read'],
+          ['cacheWrite', 'cache_creation'],
+        ] as const;
+        for (const [field, type] of tokenByType) {
+          const value = usage.tokens[field];
+          if (value > 0) reviewLlmTokens[type].add(value, tokenAttrs);
+        }
       }
 
       const posted = ctx.posted ?? 0;
@@ -906,6 +931,7 @@ interface ReviewInstruments {
   reviewPhaseDuration: Histogram;
   reviewRunsTotal: Counter;
   reviewErrorsTotal: Counter;
+  reviewLlmTokens: Record<'input' | 'output' | 'cache_read' | 'cache_creation', Counter>;
 }
 
 /** Creates the review-level OTel metric instruments on the given meter. */
@@ -917,6 +943,24 @@ function createReviewInstruments(meter: Meter): ReviewInstruments {
     reviewErrorsTotal: meter.createCounter('gitlab_review_errors_total', {
       description: 'Total number of failed gitlab-review runs, labelled by error type',
     }),
+    reviewLlmTokens: {
+      input: meter.createCounter('gitlab_review_llm_input_tokens_total', {
+        description: 'Total non-cached LLM input tokens consumed across gitlab-review runs',
+        unit: '{token}',
+      }),
+      output: meter.createCounter('gitlab_review_llm_output_tokens_total', {
+        description: 'Total LLM output tokens generated across gitlab-review runs',
+        unit: '{token}',
+      }),
+      cache_read: meter.createCounter('gitlab_review_llm_cache_read_tokens_total', {
+        description: 'Total LLM cache-read input tokens across gitlab-review runs',
+        unit: '{token}',
+      }),
+      cache_creation: meter.createCounter('gitlab_review_llm_cache_creation_tokens_total', {
+        description: 'Total LLM cache-creation input tokens across gitlab-review runs',
+        unit: '{token}',
+      }),
+    },
     reviewRunDuration: meter.createHistogram('gitlab_review_run_duration_seconds', {
       description: 'Duration of a complete gitlab-review run',
       unit: 's',
