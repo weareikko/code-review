@@ -13,6 +13,7 @@ import {
   loadReviewContext,
   runReview,
   type AgentLike,
+  type CreateAgent,
 } from './gitlab-review.js';
 import { noopLogger, type Logger } from './logger.js';
 import type { Skill } from './skills.js';
@@ -406,6 +407,78 @@ describe('runReview pipeline', () => {
         { cwd, diff: sampleDiff, createAgent: () => fakeAgent(messages) },
       ),
     ).resolves.toBeDefined();
+  });
+
+  const findJson = JSON.stringify({
+    summary:
+      '**Risk: High** — do not merge until fixed.\n\nAdds a helper.\n\n' +
+      '**1 issue found:**\n- **issue (blocking)** — `src/a.ts:2` — Boom',
+    comments: [
+      {
+        file: 'src/a.ts',
+        line: 2,
+        side: 'RIGHT',
+        severity: 'critical',
+        confidence: 'high',
+        body: 'issue (blocking): Boom\n\nThis crashes on every call.',
+      },
+    ],
+  });
+
+  it('single depth writes the find output verbatim and never spawns a verifier', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    let verifierCalls = 0;
+    const createAgent: CreateAgent = (params) => {
+      if (params.systemPrompt.includes('adversarial verifier')) {
+        verifierCalls += 1;
+        return fakeAgent([makeAssistant('{"decision":"drop","reason":"x"}')]);
+      }
+      return fakeAgent([makeAssistant(findJson)]);
+    };
+    await runReview(
+      { ...minimalConfig, cwd, reviewDepth: 'single' },
+      { cwd, diff: sampleDiff, createAgent },
+    );
+    const written = await readFile(join(cwd, 'gitlab-review.md'), 'utf8');
+    expect(written).toBe(findJson);
+    expect(verifierCalls).toBe(0);
+  });
+
+  it('verify depth drops a finding the verifier refutes', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const createAgent: CreateAgent = (params) =>
+      params.systemPrompt.includes('adversarial verifier')
+        ? fakeAgent([makeAssistant('{"decision":"drop","reason":"not reachable from the diff"}')])
+        : fakeAgent([makeAssistant(findJson)]);
+    await runReview(
+      { ...minimalConfig, cwd, reviewDepth: 'verify' },
+      { cwd, diff: sampleDiff, createAgent },
+    );
+    const written = await readFile(join(cwd, 'gitlab-review.md'), 'utf8');
+    const parsed = JSON.parse(written) as { summary: string; comments: unknown[] };
+    expect(parsed.comments).toHaveLength(0);
+    expect(parsed.summary).toMatch(/^\*\*Risk: Low\*\*/);
+    expect(parsed.summary).toContain('Verify removed a CRITICAL finding at `src/a.ts:2`');
+  });
+
+  it('verify depth keeps a finding the verifier confirms', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const createAgent: CreateAgent = (params) =>
+      params.systemPrompt.includes('adversarial verifier')
+        ? fakeAgent([makeAssistant('{"decision":"keep","reason":"proven reachable"}')])
+        : fakeAgent([makeAssistant(findJson)]);
+    await runReview(
+      { ...minimalConfig, cwd, reviewDepth: 'verify' },
+      { cwd, diff: sampleDiff, createAgent },
+    );
+    const written = await readFile(join(cwd, 'gitlab-review.md'), 'utf8');
+    const parsed = JSON.parse(written) as {
+      summary: string;
+      comments: Array<{ severity: string }>;
+    };
+    expect(parsed.comments).toHaveLength(1);
+    expect(parsed.comments[0].severity).toBe('critical');
+    expect(parsed.summary).toMatch(/^\*\*Risk: High\*\*/);
   });
 });
 

@@ -11,12 +11,26 @@ import type { Config } from './config.js';
 import { ReviewerError } from './errors.js';
 import type { Logger } from './logger.js';
 import { noopLogger } from './logger.js';
+import { parseReviewMarkdownWithWarnings } from './parser.js';
 import type { PriorThread } from './prior-threads.js';
 import { renderPriorThreadsBlock } from './prior-threads.js';
 import type { Skill } from './skills.js';
 import { loadAutoDiscoveredSkills, loadNamedSkill } from './skills.js';
-import type { GitLabReviewSeverity, SizeSkippedFile, ThinkingLevel } from './types.js';
+import type {
+  GitLabReviewSeverity,
+  ReviewComment,
+  SizeSkippedFile,
+  ThinkingLevel,
+} from './types.js';
 import { splitModel, toGitLabReviewSeverity } from './types.js';
+import {
+  applyVerdicts,
+  buildVerifySystemPrompt,
+  buildVerifyUserPrompt,
+  parseVerdict,
+  synthesizeReviewJson,
+  type Verdict,
+} from './verify.js';
 
 export interface UsageBreakdown {
   input: number;
@@ -737,23 +751,92 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   const tools = createReadOnlyTools(cwd) as AgentTool[];
 
   const createAgent = options.createAgent ?? defaultCreateAgent;
-  const agent = createAgent({
+  const getApiKey = async () => config.apiKey;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS;
+  const aggregated = emptyUsage();
+
+  // --- Find: the single review pass. In `single` depth this is the whole
+  // review and its output is written verbatim, byte-identical to legacy runs.
+  const findAgent = createAgent({
     systemPrompt,
     model,
     tools,
     thinkingLevel: config.thinkingLevel,
-    getApiKey: async () => config.apiKey,
+    getApiKey,
   });
 
-  const aggregated = emptyUsage();
-  const collectedAssistantMessages: AssistantMessage[] = [];
+  // Attach telemetry before the first prompt so all events fire.
+  const detachTelemetry = options.attachTelemetry?.(findAgent);
   let turnCount = 0;
   let toolCallCount = 0;
+  let finalText: string;
+  try {
+    finalText = await runAgentToCompletion(findAgent, userPrompt, {
+      timeoutMs,
+      onAssistantMessage: (message) => accumulateUsage(aggregated, message),
+      onTurnStart: (turn) => {
+        turnCount = turn;
+        logger.debug(`Turn ${turn} started`);
+      },
+      onToolStart: (toolName, args) => {
+        toolCallCount += 1;
+        logger.debug(`  → ${toolName}${formatToolArgs(toolName, args)}`);
+      },
+    });
+  } finally {
+    detachTelemetry?.();
+  }
+  logger.debug(`Agent finished: ${turnCount} turn(s), ${toolCallCount} tool call(s)`);
 
-  // Attach telemetry before the first prompt so all events fire.
-  const detachTelemetry = options.attachTelemetry?.(agent);
+  // --- Verify + Synthesize: opt-in via `--review-depth verify`. Each severe
+  // finding is re-checked by a separate adversarial agent; survivors are
+  // re-synthesized into the same `{ summary, comments }` JSON contract.
+  let outputText = finalText;
+  if (config.reviewDepth === 'verify') {
+    outputText = await runVerifyStage(finalText, diff, options.commitLog, {
+      createAgent,
+      model,
+      tools,
+      thinkingLevel: config.thinkingLevel,
+      getApiKey,
+      timeoutMs,
+      logger,
+      aggregated,
+    });
+  }
 
-  const timeoutMs = options.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS;
+  const reviewPath = resolve(cwd, config.reviewFile);
+  await mkdir(dirname(reviewPath), { recursive: true });
+  await writeFile(reviewPath, outputText, 'utf8');
+
+  return {
+    model: config.model,
+    tokens: aggregated.tokens,
+    cost: aggregated.cost,
+    skills: context.skills.map((s) => s.name),
+    sizeNotice,
+  };
+}
+
+interface RunAgentCallbacks {
+  timeoutMs: number;
+  onAssistantMessage?: (message: AssistantMessage) => void;
+  onTurnStart?: (turn: number) => void;
+  onToolStart?: (toolName: string, args: unknown) => void;
+}
+
+/**
+ * Drive an agent through a single prompt to completion and return its final
+ * assistant text. Shared by the Find pass and each Verify agent so the
+ * subscribe/timeout/error handling lives in one place.
+ */
+async function runAgentToCompletion(
+  agent: AgentLike,
+  userPrompt: string,
+  callbacks: RunAgentCallbacks,
+): Promise<string> {
+  const collected: AssistantMessage[] = [];
+  let turnCount = 0;
   let unsubscribe: (() => void) | undefined;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   let finalText = '';
@@ -762,17 +845,15 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
       unsubscribe = agent.subscribe(async (event) => {
         if (event.type === 'turn_start') {
           turnCount += 1;
-          logger.debug(`Turn ${turnCount} started`);
+          callbacks.onTurnStart?.(turnCount);
         }
         if (event.type === 'tool_execution_start') {
-          toolCallCount += 1;
-          const argsPreview = formatToolArgs(event.toolName, event.args);
-          logger.debug(`  → ${event.toolName}${argsPreview}`);
+          callbacks.onToolStart?.(event.toolName, event.args);
         }
         if (event.type === 'message_end' && event.message.role === 'assistant') {
           const assistant = event.message as AssistantMessage;
-          collectedAssistantMessages.push(assistant);
-          accumulateUsage(aggregated, assistant);
+          collected.push(assistant);
+          callbacks.onAssistantMessage?.(assistant);
         }
         if (event.type !== 'agent_end') return;
         const messages = event.messages.filter(
@@ -783,9 +864,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
           rejectPromise(new ReviewerError(`Agent failed: ${last.errorMessage ?? 'unknown error'}`));
           return;
         }
-        finalText = extractLastAssistantText(
-          collectedAssistantMessages.length > 0 ? collectedAssistantMessages : messages,
-        );
+        finalText = extractLastAssistantText(collected.length > 0 ? collected : messages);
         if (!finalText) {
           rejectPromise(new ReviewerError('Agent returned an empty response.'));
           return;
@@ -798,12 +877,12 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
       timeoutId = setTimeout(
         () =>
           reject(
-            new ReviewerError(`Review timed out after ${Math.round(timeoutMs / 1000)}s`, {
+            new ReviewerError(`Review timed out after ${Math.round(callbacks.timeoutMs / 1000)}s`, {
               timeout: true,
               hint: 'Increase timeoutMs or reduce the diff size.',
             }),
           ),
-        timeoutMs,
+        callbacks.timeoutMs,
       );
     });
 
@@ -812,22 +891,100 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   } finally {
     clearTimeout(timeoutId);
     unsubscribe?.();
-    detachTelemetry?.();
+  }
+  return finalText;
+}
+
+/** Run async tasks with a bounded number running concurrently. */
+async function runBounded(tasks: Array<() => Promise<void>>, limit: number): Promise<void> {
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, async () => {
+    while (cursor < tasks.length) {
+      const index = cursor;
+      cursor += 1;
+      const task = tasks[index];
+      if (task) await task();
+    }
+  });
+  await Promise.all(workers);
+}
+
+const VERIFY_CONCURRENCY = 4;
+
+interface VerifyStageDeps {
+  createAgent: CreateAgent;
+  model: Model<string>;
+  tools: AgentTool[];
+  thinkingLevel: ThinkingLevel;
+  getApiKey: () => Promise<string>;
+  timeoutMs: number;
+  logger: Logger;
+  aggregated: AggregatedUsage;
+}
+
+/**
+ * Verify + Synthesize. Parse the Find output, hand each severe (CRITICAL/WARN)
+ * finding to a separate adversarial agent that tries to refute it, then
+ * deterministically apply the verdicts and re-synthesize the review. INFO
+ * findings are not verified — they are not the precision risk and re-checking
+ * them wastes tokens. Returns the canonical `{ summary, comments }` JSON, or the
+ * unchanged Find output when there is nothing severe to re-check.
+ */
+async function runVerifyStage(
+  finalText: string,
+  diff: string,
+  commitLog: string | undefined,
+  deps: VerifyStageDeps,
+): Promise<string> {
+  const parsed = parseReviewMarkdownWithWarnings(finalText);
+  const comments: ReviewComment[] = parsed.comments;
+  const severe = comments
+    .map((comment, index) => ({ comment, index }))
+    .filter(({ comment }) => comment.severity === 'critical' || comment.severity === 'warn');
+
+  if (severe.length === 0) {
+    return finalText;
   }
 
-  const reviewPath = resolve(cwd, config.reviewFile);
-  await mkdir(dirname(reviewPath), { recursive: true });
-  await writeFile(reviewPath, finalText, 'utf8');
+  const verifySystemPrompt = buildVerifySystemPrompt();
+  const verdicts = new Map<number, Verdict>();
 
-  logger.debug(`Agent finished: ${turnCount} turn(s), ${toolCallCount} tool call(s)`);
+  const tasks = severe.map(({ comment, index }) => async () => {
+    const verifier = deps.createAgent({
+      systemPrompt: verifySystemPrompt,
+      model: deps.model,
+      tools: deps.tools,
+      thinkingLevel: deps.thinkingLevel,
+      getApiKey: deps.getApiKey,
+    });
+    try {
+      const text = await runAgentToCompletion(
+        verifier,
+        buildVerifyUserPrompt(comment, diff, commitLog),
+        {
+          timeoutMs: deps.timeoutMs,
+          onAssistantMessage: (message) => accumulateUsage(deps.aggregated, message),
+        },
+      );
+      verdicts.set(index, parseVerdict(text));
+    } catch (error) {
+      deps.logger.warn(
+        `Verify failed for ${comment.file}:${comment.line}: ${(error as Error).message}; keeping finding.`,
+      );
+      verdicts.set(index, { decision: 'keep', reason: 'verifier error; finding kept' });
+    }
+  });
 
-  return {
-    model: config.model,
-    tokens: aggregated.tokens,
-    cost: aggregated.cost,
-    skills: context.skills.map((s) => s.name),
-    sizeNotice,
-  };
+  await runBounded(tasks, VERIFY_CONCURRENCY);
+
+  const result = applyVerdicts(comments, verdicts);
+  const dropped = result.audit.filter((entry) => entry.action === 'dropped').length;
+  const downgraded = result.audit.filter((entry) => entry.action === 'downgraded').length;
+  deps.logger.info(
+    `Verify: re-checked ${severe.length} severe finding(s) — ${dropped} dropped, ${downgraded} downgraded.`,
+  );
+
+  return synthesizeReviewJson(parsed.summary, result);
 }
 
 function formatToolArgs(toolName: string, args: unknown): string {
