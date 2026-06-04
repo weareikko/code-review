@@ -16,6 +16,7 @@ import type { PriorThread } from './prior-threads.js';
 import { renderPriorThreadsBlock } from './prior-threads.js';
 import type { Skill } from './skills.js';
 import { loadAutoDiscoveredSkills, loadNamedSkill } from './skills.js';
+import { REVIEW_ANGLES, triageFindings, type ReviewAngle } from './triage.js';
 import type {
   GitLabReviewSeverity,
   ReviewComment,
@@ -534,6 +535,29 @@ function renderIntentBlock(intent: ReviewIntent | undefined): string {
   return lines.join('\n');
 }
 
+/**
+ * Build a Find system prompt specialised to one review angle. Used by `full`
+ * depth, which runs one finder per angle. The base prompt (severity/confidence
+ * tiers, output format, skills, conventions) is unchanged; an `<review_angle>`
+ * section narrows the finder to its lane so the finders cover breadth rather
+ * than all re-finding the same top issue.
+ */
+export function buildAngleSystemPrompt(
+  context: ReviewContext,
+  minSeverity: GitLabReviewSeverity,
+  angle: ReviewAngle,
+): string {
+  return [
+    buildJSONSystemPrompt(context, minSeverity),
+    '',
+    '<review_angle>',
+    `You are ONE of several reviewers working in parallel, each assigned a different angle. Your assigned angle is "${angle.key}".`,
+    angle.directive,
+    'Report ONLY findings that fall within your angle — other reviewers cover the rest, so do not stray into their scope or duplicate it. If your angle surfaces nothing, return an empty comments array. The severity and confidence bars from the base instructions still apply.',
+    '</review_angle>',
+  ].join('\n');
+}
+
 export function buildUserPrompt(
   diff: string,
   skippedFiles: string[] = [],
@@ -754,55 +778,61 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   const getApiKey = async () => config.apiKey;
   const timeoutMs = options.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS;
   const aggregated = emptyUsage();
-
-  // --- Find: the single review pass. In `single` depth this is the whole
-  // review and its output is written verbatim, byte-identical to legacy runs.
-  const findAgent = createAgent({
-    systemPrompt,
+  const deps: StageDeps = {
+    createAgent,
     model,
     tools,
     thinkingLevel: config.thinkingLevel,
     getApiKey,
-  });
+    timeoutMs,
+    logger,
+    aggregated,
+  };
 
-  // Attach telemetry before the first prompt so all events fire.
-  const detachTelemetry = options.attachTelemetry?.(findAgent);
-  let turnCount = 0;
-  let toolCallCount = 0;
-  let finalText: string;
-  try {
-    finalText = await runAgentToCompletion(findAgent, userPrompt, {
-      timeoutMs,
-      onAssistantMessage: (message) => accumulateUsage(aggregated, message),
-      onTurnStart: (turn) => {
-        turnCount = turn;
-        logger.debug(`Turn ${turn} started`);
-      },
-      onToolStart: (toolName, args) => {
-        toolCallCount += 1;
-        logger.debug(`  → ${toolName}${formatToolArgs(toolName, args)}`);
-      },
-    });
-  } finally {
-    detachTelemetry?.();
-  }
-  logger.debug(`Agent finished: ${turnCount} turn(s), ${toolCallCount} tool call(s)`);
+  let outputText: string;
 
-  // --- Verify + Synthesize: opt-in via `--review-depth verify`. Each severe
-  // finding is re-checked by a separate adversarial agent; survivors are
-  // re-synthesized into the same `{ summary, comments }` JSON contract.
-  let outputText = finalText;
-  if (config.reviewDepth === 'verify') {
-    outputText = await runVerifyStage(finalText, diff, options.commitLog, {
-      createAgent,
+  if (config.reviewDepth === 'full') {
+    // --- Multi-angle Find → Triage → Verify → Synthesize.
+    const { comments, summary } = await runMultiAngleFind(context, minSeverity, userPrompt, deps);
+    outputText = await verifyAndSynthesize(comments, summary, diff, options.commitLog, deps);
+  } else {
+    // --- single / verify: one Find pass. In `single` depth its output is
+    // written verbatim, byte-identical to legacy runs.
+    const findAgent = createAgent({
+      systemPrompt,
       model,
       tools,
       thinkingLevel: config.thinkingLevel,
       getApiKey,
-      timeoutMs,
-      logger,
-      aggregated,
     });
+
+    // Attach telemetry before the first prompt so all events fire.
+    const detachTelemetry = options.attachTelemetry?.(findAgent);
+    let turnCount = 0;
+    let toolCallCount = 0;
+    let finalText: string;
+    try {
+      finalText = await runAgentToCompletion(findAgent, userPrompt, {
+        timeoutMs,
+        onAssistantMessage: (message) => accumulateUsage(aggregated, message),
+        onTurnStart: (turn) => {
+          turnCount = turn;
+          logger.debug(`Turn ${turn} started`);
+        },
+        onToolStart: (toolName, args) => {
+          toolCallCount += 1;
+          logger.debug(`  → ${toolName}${formatToolArgs(toolName, args)}`);
+        },
+      });
+    } finally {
+      detachTelemetry?.();
+    }
+    logger.debug(`Agent finished: ${turnCount} turn(s), ${toolCallCount} tool call(s)`);
+
+    outputText =
+      config.reviewDepth === 'verify'
+        ? await runVerifyStage(finalText, diff, options.commitLog, deps)
+        : finalText;
   }
 
   const reviewPath = resolve(cwd, config.reviewFile);
@@ -910,8 +940,9 @@ async function runBounded(tasks: Array<() => Promise<void>>, limit: number): Pro
 }
 
 const VERIFY_CONCURRENCY = 4;
+const FIND_CONCURRENCY = 3;
 
-interface VerifyStageDeps {
+interface StageDeps {
   createAgent: CreateAgent;
   model: Model<string>;
   tools: AgentTool[];
@@ -923,59 +954,103 @@ interface VerifyStageDeps {
 }
 
 /**
- * Verify + Synthesize. Parse the Find output, hand each severe (CRITICAL/WARN)
- * finding to a separate adversarial agent that tries to refute it, then
- * deterministically apply the verdicts and re-synthesize the review. INFO
- * findings are not verified — they are not the precision risk and re-checking
- * them wastes tokens. Returns the canonical `{ summary, comments }` JSON, or the
- * unchanged Find output when there is nothing severe to re-check.
+ * Multi-angle Find (used by `full` depth). Runs one finder per review angle
+ * concurrently — each with the same diff, skills, and read-only repo tools, but
+ * a system prompt narrowed to its lane — then merges and deduplicates their
+ * findings via Triage. Returns the triaged comments plus the first non-empty
+ * finder summary to seed the synthesized overview.
  */
-async function runVerifyStage(
-  finalText: string,
-  diff: string,
-  commitLog: string | undefined,
-  deps: VerifyStageDeps,
-): Promise<string> {
-  const parsed = parseReviewMarkdownWithWarnings(finalText);
-  const comments: ReviewComment[] = parsed.comments;
-  const severe = comments
-    .map((comment, index) => ({ comment, index }))
-    .filter(({ comment }) => comment.severity === 'critical' || comment.severity === 'warn');
+async function runMultiAngleFind(
+  context: ReviewContext,
+  minSeverity: GitLabReviewSeverity,
+  userPrompt: string,
+  deps: StageDeps,
+): Promise<{ comments: ReviewComment[]; summary: string | null }> {
+  const groups: ReviewComment[][] = REVIEW_ANGLES.map(() => []);
+  const summaries: Array<string | null> = REVIEW_ANGLES.map(() => null);
 
-  if (severe.length === 0) {
-    return finalText;
-  }
-
-  const verifySystemPrompt = buildVerifySystemPrompt();
-  const verdicts = new Map<number, Verdict>();
-
-  const tasks = severe.map(({ comment, index }) => async () => {
-    const verifier = deps.createAgent({
-      systemPrompt: verifySystemPrompt,
+  const tasks = REVIEW_ANGLES.map((angle, index) => async () => {
+    const agent = deps.createAgent({
+      systemPrompt: buildAngleSystemPrompt(context, minSeverity, angle),
       model: deps.model,
       tools: deps.tools,
       thinkingLevel: deps.thinkingLevel,
       getApiKey: deps.getApiKey,
     });
     try {
-      const text = await runAgentToCompletion(
-        verifier,
-        buildVerifyUserPrompt(comment, diff, commitLog),
-        {
-          timeoutMs: deps.timeoutMs,
-          onAssistantMessage: (message) => accumulateUsage(deps.aggregated, message),
-        },
-      );
-      verdicts.set(index, parseVerdict(text));
+      const text = await runAgentToCompletion(agent, userPrompt, {
+        timeoutMs: deps.timeoutMs,
+        onAssistantMessage: (message) => accumulateUsage(deps.aggregated, message),
+        onToolStart: (toolName, args) =>
+          deps.logger.debug(`  [${angle.key}] → ${toolName}${formatToolArgs(toolName, args)}`),
+      });
+      const parsed = parseReviewMarkdownWithWarnings(text);
+      groups[index] = parsed.comments;
+      summaries[index] = parsed.summary;
     } catch (error) {
-      deps.logger.warn(
-        `Verify failed for ${comment.file}:${comment.line}: ${(error as Error).message}; keeping finding.`,
-      );
-      verdicts.set(index, { decision: 'keep', reason: 'verifier error; finding kept' });
+      deps.logger.warn(`Find angle "${angle.key}" failed: ${(error as Error).message}; skipping.`);
     }
   });
 
-  await runBounded(tasks, VERIFY_CONCURRENCY);
+  await runBounded(tasks, FIND_CONCURRENCY);
+
+  const raw = groups.reduce((total, group) => total + group.length, 0);
+  const comments = triageFindings(groups);
+  deps.logger.info(
+    `Multi-angle Find: ${REVIEW_ANGLES.length} angles → ${raw} raw finding(s), ${comments.length} after triage.`,
+  );
+  const summary = summaries.find((value) => value && value.trim()) ?? null;
+  return { comments, summary };
+}
+
+/**
+ * Verify + Synthesize, shared by `verify` and `full` depth. Hands each severe
+ * (CRITICAL/WARN) finding to a separate adversarial agent that tries to refute
+ * it, deterministically applies the verdicts, and synthesizes the canonical
+ * `{ summary, comments }` JSON. INFO findings are not verified — they are not
+ * the precision risk and re-checking them wastes tokens.
+ */
+async function verifyAndSynthesize(
+  comments: ReviewComment[],
+  summary: string | null,
+  diff: string,
+  commitLog: string | undefined,
+  deps: StageDeps,
+): Promise<string> {
+  const severe = comments
+    .map((comment, index) => ({ comment, index }))
+    .filter(({ comment }) => comment.severity === 'critical' || comment.severity === 'warn');
+
+  const verdicts = new Map<number, Verdict>();
+  if (severe.length > 0) {
+    const verifySystemPrompt = buildVerifySystemPrompt();
+    const tasks = severe.map(({ comment, index }) => async () => {
+      const verifier = deps.createAgent({
+        systemPrompt: verifySystemPrompt,
+        model: deps.model,
+        tools: deps.tools,
+        thinkingLevel: deps.thinkingLevel,
+        getApiKey: deps.getApiKey,
+      });
+      try {
+        const text = await runAgentToCompletion(
+          verifier,
+          buildVerifyUserPrompt(comment, diff, commitLog),
+          {
+            timeoutMs: deps.timeoutMs,
+            onAssistantMessage: (message) => accumulateUsage(deps.aggregated, message),
+          },
+        );
+        verdicts.set(index, parseVerdict(text));
+      } catch (error) {
+        deps.logger.warn(
+          `Verify failed for ${comment.file}:${comment.line}: ${(error as Error).message}; keeping finding.`,
+        );
+        verdicts.set(index, { decision: 'keep', reason: 'verifier error; finding kept' });
+      }
+    });
+    await runBounded(tasks, VERIFY_CONCURRENCY);
+  }
 
   const result = applyVerdicts(comments, verdicts);
   const dropped = result.audit.filter((entry) => entry.action === 'dropped').length;
@@ -984,7 +1059,26 @@ async function runVerifyStage(
     `Verify: re-checked ${severe.length} severe finding(s) — ${dropped} dropped, ${downgraded} downgraded.`,
   );
 
-  return synthesizeReviewJson(parsed.summary, result);
+  return synthesizeReviewJson(summary, result);
+}
+
+/**
+ * `verify` depth wrapper: when the Find pass produced nothing severe, the model
+ * output is returned verbatim (byte-identical to a plain Find); otherwise the
+ * severe findings are verified and the review re-synthesized.
+ */
+async function runVerifyStage(
+  finalText: string,
+  diff: string,
+  commitLog: string | undefined,
+  deps: StageDeps,
+): Promise<string> {
+  const parsed = parseReviewMarkdownWithWarnings(finalText);
+  const hasSevere = parsed.comments.some(
+    (comment) => comment.severity === 'critical' || comment.severity === 'warn',
+  );
+  if (!hasSevere) return finalText;
+  return verifyAndSynthesize(parsed.comments, parsed.summary, diff, commitLog, deps);
 }
 
 function formatToolArgs(toolName: string, args: unknown): string {

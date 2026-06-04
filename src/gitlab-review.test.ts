@@ -480,6 +480,90 @@ describe('runReview pipeline', () => {
     expect(parsed.comments[0].severity).toBe('critical');
     expect(parsed.summary).toMatch(/^\*\*Risk: High\*\*/);
   });
+
+  it('full depth runs angle finders, triages duplicates, then verifies', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const angleJson = (comments: unknown[]) =>
+      JSON.stringify({ summary: '**Risk: High** — x\n\nMulti-angle overview.', comments });
+    // correctness and state-async-data both surface "Bug A" (must dedup to one);
+    // state adds "Bug B"; failure-security adds an INFO nit.
+    const correctness = angleJson([
+      {
+        file: 'src/x.ts',
+        line: 10,
+        side: 'RIGHT',
+        severity: 'critical',
+        confidence: 'high',
+        body: 'issue (blocking): Bug A off-by-one\n\nboom',
+      },
+    ]);
+    const stateAsync = angleJson([
+      {
+        file: 'src/x.ts',
+        line: 10,
+        side: 'RIGHT',
+        severity: 'warn',
+        confidence: 'medium',
+        body: 'issue: Bug A off-by-one\n\nboom',
+      },
+      {
+        file: 'src/y.ts',
+        line: 5,
+        side: 'RIGHT',
+        severity: 'warn',
+        confidence: 'high',
+        body: 'issue: Bug B unawaited promise\n\nboom',
+      },
+    ]);
+    const failureSecurity = angleJson([
+      {
+        file: 'src/z.ts',
+        line: 3,
+        side: 'RIGHT',
+        severity: 'info',
+        confidence: 'high',
+        body: 'note: minor nit C',
+      },
+    ]);
+
+    let angleFinders = 0;
+    const createAgent: CreateAgent = (params) => {
+      const p = params.systemPrompt;
+      if (p.includes('adversarial verifier')) {
+        return fakeAgent([makeAssistant('{"decision":"keep","reason":"ok"}')]);
+      }
+      if (p.includes('"correctness"')) {
+        angleFinders += 1;
+        return fakeAgent([makeAssistant(correctness)]);
+      }
+      if (p.includes('"state-async-data"')) {
+        angleFinders += 1;
+        return fakeAgent([makeAssistant(stateAsync)]);
+      }
+      if (p.includes('"failure-security"')) {
+        angleFinders += 1;
+        return fakeAgent([makeAssistant(failureSecurity)]);
+      }
+      return fakeAgent([makeAssistant(findJson)]);
+    };
+
+    await runReview(
+      { ...minimalConfig, cwd, reviewDepth: 'full' },
+      { cwd, diff: sampleDiff, createAgent },
+    );
+
+    const parsed = JSON.parse(await readFile(join(cwd, 'gitlab-review.md'), 'utf8')) as {
+      summary: string;
+      comments: Array<{ file: string; line: number; severity: string }>;
+    };
+    expect(angleFinders).toBe(3);
+    // Bug A (deduped, critical wins) + Bug B (warn) + nit C (info) = 3.
+    expect(parsed.comments).toHaveLength(3);
+    const bugA = parsed.comments.filter((c) => c.file === 'src/x.ts' && c.line === 10);
+    expect(bugA).toHaveLength(1);
+    expect(bugA[0].severity).toBe('critical');
+    expect(parsed.summary).toMatch(/^\*\*Risk: High\*\*/);
+  });
 });
 
 describe('resolveModel (via runReview createAgent)', () => {

@@ -324,6 +324,20 @@ describe('posting mode resolution', () => {
     expect(cfg.reviewDepth).toBe('single');
   });
 
+  it('accepts the full review depth', () => {
+    const cfg = resolveConfig(
+      ['--review-depth', 'full', '--model', 'anthropic/claude-sonnet-4-5', '--api-key', 'k'],
+      {
+        CI_PROJECT_ID: '1',
+        CI_MERGE_REQUEST_IID: '2',
+        CI_SERVER_URL: 'https://gl.example.com',
+        GITLAB_TOKEN: 't',
+      },
+    );
+    expect(cfg.reviewDepth).toBe('full');
+    expect(() => validateConfig(cfg)).not.toThrow();
+  });
+
   it('validateConfig rejects unknown review depths', () => {
     const cfg = resolveConfig(
       ['--review-depth', 'bogus', '--model', 'anthropic/claude-sonnet-4-5', '--api-key', 'k'],
