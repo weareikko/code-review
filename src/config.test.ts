@@ -31,6 +31,7 @@ describe('config env defaults', () => {
       minSeverity: 'info',
       thinkingLevel: 'off',
       postingMode: 'direct',
+      reviewDepth: 'single',
       reviewFile: 'gitlab-review.md',
       output: 'review-comments.json',
       dryRun: false,
@@ -101,6 +102,7 @@ describe('validateConfig', () => {
     minSeverity: 'info',
     thinkingLevel: 'off',
     postingMode: 'direct',
+    reviewDepth: 'single',
     apiKey: 'key',
     baseUrl: '',
     maxTokens: 0,
@@ -288,6 +290,51 @@ describe('posting mode resolution', () => {
       },
     );
     expect(() => validateConfig(cfg)).toThrow('--posting-mode must be one of');
+  });
+
+  it('defaults review depth to single', () => {
+    const cfg = resolveConfig([], {
+      CI_PROJECT_ID: '1',
+      CI_MERGE_REQUEST_IID: '2',
+      CI_SERVER_URL: 'https://gl.example.com',
+      GITLAB_TOKEN: 't',
+    });
+    expect(cfg.reviewDepth).toBe('single');
+  });
+
+  it('reads review depth from GITLAB_REVIEW_DEPTH env var and trims case', () => {
+    const cfg = resolveConfig([], {
+      CI_PROJECT_ID: '1',
+      CI_MERGE_REQUEST_IID: '2',
+      CI_SERVER_URL: 'https://gl.example.com',
+      GITLAB_TOKEN: 't',
+      GITLAB_REVIEW_DEPTH: '  VERIFY  ',
+    });
+    expect(cfg.reviewDepth).toBe('verify');
+  });
+
+  it('lets --review-depth override the env value', () => {
+    const cfg = resolveConfig(['--review-depth', 'single'], {
+      CI_PROJECT_ID: '1',
+      CI_MERGE_REQUEST_IID: '2',
+      CI_SERVER_URL: 'https://gl.example.com',
+      GITLAB_TOKEN: 't',
+      GITLAB_REVIEW_DEPTH: 'verify',
+    });
+    expect(cfg.reviewDepth).toBe('single');
+  });
+
+  it('validateConfig rejects unknown review depths', () => {
+    const cfg = resolveConfig(
+      ['--review-depth', 'bogus', '--model', 'anthropic/claude-sonnet-4-5', '--api-key', 'k'],
+      {
+        CI_PROJECT_ID: '1',
+        CI_MERGE_REQUEST_IID: '2',
+        CI_SERVER_URL: 'https://gl.example.com',
+        GITLAB_TOKEN: 't',
+      },
+    );
+    expect(() => validateConfig(cfg)).toThrow('--review-depth must be one of');
   });
 });
 

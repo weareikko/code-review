@@ -1,7 +1,14 @@
 import { getEnvApiKey } from '@earendil-works/pi-ai';
 import { ConfigError } from './errors.js';
 import { POSTING_MODES, type PostingMode } from './posting.js';
-import { splitModel, THINKING_LEVELS, type Severity, type ThinkingLevel } from './types.js';
+import {
+  REVIEW_DEPTHS,
+  splitModel,
+  THINKING_LEVELS,
+  type ReviewDepth,
+  type Severity,
+  type ThinkingLevel,
+} from './types.js';
 
 export type GitLabAuthHeader = 'PRIVATE-TOKEN' | 'JOB-TOKEN';
 
@@ -84,6 +91,11 @@ export interface Config {
   model: string;
   minSeverity: Severity;
   thinkingLevel: ThinkingLevel;
+  /**
+   * How many stages of the review pipeline run. `single` keeps the legacy
+   * single-pass behaviour; `verify` adds an adversarial Verify + Synthesize pass.
+   */
+  reviewDepth: ReviewDepth;
   postingMode: PostingMode;
   apiKey: string;
   /** Custom base URL for the AI provider API (e.g. Ollama or other OpenAI-compatible endpoints). */
@@ -326,6 +338,9 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     thinkingLevel: normalizeChoice(
       args.thinking ?? env.GITLAB_REVIEW_THINKING_LEVEL ?? 'off',
     ) as ThinkingLevel,
+    reviewDepth: normalizeChoice(
+      args.reviewDepth ?? env.GITLAB_REVIEW_DEPTH ?? 'single',
+    ) as ReviewDepth,
     postingMode: normalizeChoice(
       args.postingMode ?? env.GITLAB_REVIEW_POSTING_MODE ?? 'direct',
     ) as PostingMode,
@@ -399,6 +414,10 @@ export function validateConfig(config: Config): void {
 
   if (!THINKING_LEVELS.includes(config.thinkingLevel)) {
     throw new ConfigError(`--thinking must be one of: ${THINKING_LEVELS.join(', ')}`);
+  }
+
+  if (!REVIEW_DEPTHS.includes(config.reviewDepth)) {
+    throw new ConfigError(`--review-depth must be one of: ${REVIEW_DEPTHS.join(', ')}`);
   }
 
   if (!POSTING_MODES.includes(config.postingMode)) {

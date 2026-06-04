@@ -57,6 +57,7 @@ function makeConfig(overrides: Partial<Config>): Config {
     minSeverity: 'info',
     thinkingLevel: 'off',
     postingMode: 'direct',
+    reviewDepth: 'single',
     apiKey,
     baseUrl: process.env.GITLAB_REVIEW_BASE_URL ?? '',
     maxTokens: Number(process.env.GITLAB_REVIEW_MAX_TOKENS ?? 0),

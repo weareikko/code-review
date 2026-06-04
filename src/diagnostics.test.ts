@@ -20,6 +20,7 @@ const diagnosticConfig: Config = {
   minSeverity: 'info',
   thinkingLevel: 'off',
   postingMode: 'direct',
+  reviewDepth: 'single',
   apiKey: 'key',
   reviewFile: 'gitlab-review.md',
   output: 'review-comments.json',
