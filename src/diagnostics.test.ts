@@ -98,6 +98,52 @@ describe('diagnostics_channel instrumentation', () => {
     expect(errors[0].errorInfo?.timeout).toBeUndefined();
   });
 
+  it('captures the HTTP status from a GitLab API error so the bridge can label it', async () => {
+    const errors: DiagnosticContext[] = [];
+    const onError = (message: DiagnosticContext) => errors.push(message);
+
+    diagnosticChannels.run.error.subscribe(onError);
+    try {
+      const context = createDiagnosticContext('run', diagnosticConfig, 'run-http-500');
+      await expect(
+        traceDiagnostic(diagnosticChannels.run, context, async () => {
+          throw new GitLabApiError('GitLab API POST /draft_notes/bulk_publish failed: 500', {
+            method: 'POST',
+            path: '/draft_notes/bulk_publish',
+            status: 500,
+          });
+        }),
+      ).rejects.toThrow();
+    } finally {
+      diagnosticChannels.run.error.unsubscribe(onError);
+    }
+
+    expect(errors[0].errorInfo).toMatchObject({
+      name: 'GitLabApiError',
+      code: 'GITLAB_API_ERROR',
+      status: 500,
+    });
+  });
+
+  it('leaves status undefined for errors without an HTTP status', async () => {
+    const errors: DiagnosticContext[] = [];
+    const onError = (message: DiagnosticContext) => errors.push(message);
+
+    diagnosticChannels.run.error.subscribe(onError);
+    try {
+      const context = createDiagnosticContext('run', diagnosticConfig, 'run-no-status');
+      await expect(
+        traceDiagnostic(diagnosticChannels.run, context, async () => {
+          throw new ConfigError('bad config');
+        }),
+      ).rejects.toThrow();
+    } finally {
+      diagnosticChannels.run.error.unsubscribe(onError);
+    }
+
+    expect(errors[0].errorInfo?.status).toBeUndefined();
+  });
+
   it('flags timeout errors so the bridge can label the run status=timeout', async () => {
     const errors: DiagnosticContext[] = [];
     const onError = (message: DiagnosticContext) => errors.push(message);
