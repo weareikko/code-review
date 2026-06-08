@@ -152,17 +152,15 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
     // Wraps a single-request (or paginated) GitLab read so the phase span gets
     // HTTP attributes on both success and error paths.
     const tracedRead = <T>(phase: DiagnosticPhase, fn: () => Promise<T>): Promise<T> =>
-      traceDiagnosticPhase(phase, config, runId, async (context) => {
-        const before = lastHttp;
-        try {
-          return await fn();
-        } finally {
-          // Only stamp when this phase's own request produced a response; a
-          // phase that threw before any HTTP response must not inherit the
-          // previous phase's URL/status (which would mislabel its error span).
-          if (lastHttp !== before) applyHttpContext(context, lastHttp);
-        }
-      });
+      traceDiagnosticPhase(
+        phase,
+        config,
+        runId,
+        withHttpStamping(
+          () => lastHttp,
+          () => fn(),
+        ),
+      );
 
     logger.info('Fetching MR info...');
     const mr = await tracedRead('gitlab.get_merge_request', () =>
@@ -325,24 +323,27 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
         'gitlab.upsert_summary',
         config,
         runId,
-        async (context) => {
-          const result = await upsertSummaryNote(
-            gitlab,
-            config.project,
-            config.mr,
-            parsed.summary as string,
-            discussions,
-            {
-              costFooter: formatUsageLine(usage),
-              skillsFooter: formatSkillsFooter(usage.skills),
-              reviewedCommitSha: version.head_commit_sha,
-              runId,
-            },
-          );
-          context.summaryAction = result.action;
-          context.summaryNoteId = result.noteId;
-          return result;
-        },
+        withHttpStamping(
+          () => lastHttp,
+          async (context) => {
+            const result = await upsertSummaryNote(
+              gitlab,
+              config.project,
+              config.mr,
+              parsed.summary as string,
+              discussions,
+              {
+                costFooter: formatUsageLine(usage),
+                skillsFooter: formatSkillsFooter(usage.skills),
+                reviewedCommitSha: version.head_commit_sha,
+                runId,
+              },
+            );
+            context.summaryAction = result.action;
+            context.summaryNoteId = result.noteId;
+            return result;
+          },
+        ),
       );
       runContext.summaryAction = summary.action;
       runContext.summaryNoteId = summary.noteId;
@@ -359,24 +360,27 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
       'gitlab.post_comments',
       config,
       runId,
-      async (context) => {
-        const result = await postGeneratedComments(
-          gitlab,
-          config.project,
-          config.mr,
-          generated,
-          config.postingMode,
-        );
-        recordCommentCounts(context, generated);
-        context.posted = result.posted;
-        if (result.drafts) {
-          context.draftsAbandoned = result.drafts.abandoned;
-          context.draftsCreated = result.drafts.created;
-          context.draftsDeletedPrePublish = result.drafts.deletedPrePublish;
-          context.draftsPublished = result.drafts.published;
-        }
-        return result.posted;
-      },
+      withHttpStamping(
+        () => lastHttp,
+        async (context) => {
+          const result = await postGeneratedComments(
+            gitlab,
+            config.project,
+            config.mr,
+            generated,
+            config.postingMode,
+          );
+          recordCommentCounts(context, generated);
+          context.posted = result.posted;
+          if (result.drafts) {
+            context.draftsAbandoned = result.drafts.abandoned;
+            context.draftsCreated = result.drafts.created;
+            context.draftsDeletedPrePublish = result.drafts.deletedPrePublish;
+            context.draftsPublished = result.drafts.published;
+          }
+          return result.posted;
+        },
+      ),
     );
     const duplicates = generated.length - newCount;
     const raceLost = newCount - posted;
@@ -421,6 +425,33 @@ function recordCommentCounts(context: DiagnosticContext, generated: GeneratedCom
   context.generated = generated.length;
   context.newComments = generated.filter((item) => !item.duplicate).length;
   context.duplicateComments = generated.length - context.newComments;
+}
+
+/**
+ * Wraps a phase operation so the phase context gets HTTP semantic-convention
+ * attributes stamped from the most recent GitLab response — on both success and
+ * error paths. `readLastHttp` returns the holder updated by the client's
+ * `onResponse` callback; the wrapper snapshots it before the operation and only
+ * stamps when the operation's own request produced a *new* response, so a phase
+ * that threw before any HTTP call never inherits a previous phase's URL/status.
+ *
+ * Used by every traced GitLab phase, including the write phases
+ * (`gitlab.post_comments`, `gitlab.upsert_summary`) so a failure like a 500 on
+ * `bulk_publish` carries http.response.status_code / url.full / server.address.
+ */
+export function withHttpStamping<T>(
+  readLastHttp: () => GitLabResponseInfo | undefined,
+  operation: (context: DiagnosticContext) => Promise<T>,
+): (context: DiagnosticContext) => Promise<T> {
+  return async (context) => {
+    const before = readLastHttp();
+    try {
+      return await operation(context);
+    } finally {
+      const last = readLastHttp();
+      if (last !== before) applyHttpContext(context, last);
+    }
+  };
 }
 
 /**
