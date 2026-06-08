@@ -141,6 +141,8 @@ export interface DiagnosticContext {
   draftsCreated?: number;
   draftsDeletedPrePublish?: number;
   draftsPublished?: number;
+  /** Drafts that could not be published on the per-draft fallback path (silent comment drops). */
+  draftsPublishFailed?: number;
   summaryAction?: 'created' | 'updated' | 'skipped';
   summaryNoteId?: number;
   usage?: DiagnosticUsage;

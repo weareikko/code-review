@@ -57,6 +57,20 @@ export function getMergeDiffArguments(
   return [`${remoteRef(remote, targetBranch)}...HEAD`, `--unified=${context}`, '--'];
 }
 
+/**
+ * Full git argv for the merge diff. `-c core.quotepath=false` keeps non-ASCII
+ * paths literal instead of git's default octal-escaped + double-quoted form
+ * (`"a/caf\303\251.ts"`), which the comment-position parser cannot match —
+ * leaving such comments with invalid one-sided positions that 500 on
+ * `bulk_publish`. Diffing literally also gives the reviewer readable paths.
+ */
+export function getMergeDiffCommand(
+  targetBranch: string,
+  options: { remote?: string; context?: number } = {},
+): string[] {
+  return ['-c', 'core.quotepath=false', 'diff', ...getMergeDiffArguments(targetBranch, options)];
+}
+
 async function fetchBranch(remote: string, branch: string, options: GitOptions): Promise<void> {
   await git(
     ['fetch', '--no-tags', remote, `+refs/heads/${branch}:${remoteRef(remote, branch)}`],
@@ -137,7 +151,7 @@ export async function getMergeDiff(
   targetBranch: string,
   options: GitOptions & { remote?: string; context?: number } = {},
 ): Promise<string> {
-  return git(['diff', ...getMergeDiffArguments(targetBranch, options)], options);
+  return git(getMergeDiffCommand(targetBranch, options), options);
 }
 
 export function getMergeCommitLogArguments(

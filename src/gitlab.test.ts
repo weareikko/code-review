@@ -291,6 +291,21 @@ describe('GitLab draft notes endpoints', () => {
     expect(fetchImpl.mock.calls[0][1]?.method).toBe('DELETE');
   });
 
+  it('PUTs to publish a single draft note by id and tolerates 204 responses', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const client = new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+    });
+
+    await expect(client.publishDraftNote('group/repo', '12', 9)).resolves.toBeUndefined();
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'https://gitlab.example.com/api/v4/projects/group%2Frepo/merge_requests/12/draft_notes/9/publish',
+    );
+    expect(fetchImpl.mock.calls[0][1]?.method).toBe('PUT');
+  });
+
   it('POSTs to bulk_publish and tolerates 204 responses', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     const client = new GitLabClient({

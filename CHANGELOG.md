@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The `gitlab_review.failed` log additionally carries `http.response.status_code`.
   - The write phases (`gitlab.post_comments`, `gitlab.upsert_summary`) now stamp the HTTP semantic-convention attributes (`http.response.status_code`, `url.full`, `server.address`) on their spans on the error path, matching the read phases. A failed `bulk_publish` span now identifies the exact endpoint and status instead of being attribute-less.
 
+### Fixed
+
+- **`draft_notes/bulk_publish` no longer fails with a 500 when a comment lands on an unchanged context line.** Inline comments are anchored to the diff via a GitLab `text` position; an unchanged (context) line requires BOTH `old_line` and `new_line`, but only `new_line`/`old_line` was sent. The draft-notes API accepts the one-sided position, then `bulk_publish` returns `500 Internal Server Error` for the whole batch (GitLab skips position validation on draft creation — [gitlab-org/gitlab#579609](https://gitlab.com/gitlab-org/gitlab/-/issues/579609)), losing every queued comment and failing the CI job. The reviewer is fed ±20 lines of context, so it routinely anchors on unchanged lines. Positions are now resolved against the diff — added lines stay one-sided, removed lines stay one-sided, and context lines carry both line numbers. The diff is read with `core.quotepath=false` and the position parser tolerates git's tab-terminated headers, so comments on files with non-ASCII or space-containing paths resolve correctly instead of falling back to an invalid one-sided position. Reproduced and fix-verified against GitLab 19.0.1.
+- **Draft publishing now degrades gracefully instead of losing every comment when `bulk_publish` fails.** `bulk_publish` is one atomic batch server-side, so a single draft GitLab rejects takes down the whole set. When it fails, we now fall back to publishing each surviving draft individually (which GitLab isolates per draft), so one bad draft can no longer sink the batch or fail the job. The original error is re-thrown only when every individual publish also fails. The number of drafts that still could not be published is reported on the CLI and as the `gitlab_review.drafts.publish_failed` span attribute so silent drops are visible.
+
 ## [0.6.1] - 2026-06-03
 
 ### Added

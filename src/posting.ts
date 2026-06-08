@@ -210,6 +210,13 @@ export interface PostResult {
     created: number;
     deletedPrePublish: number;
     published: number;
+    /**
+     * Drafts that survived the pre-publish race check but could not be
+     * published, counted only on the per-draft fallback path (a `bulk_publish`
+     * 500 forced individual publishes and some still failed). 0 on the normal
+     * path. A non-zero value means inline comments were silently dropped.
+     */
+    publishFailed: number;
   };
 }
 
@@ -256,7 +263,7 @@ async function postViaDrafts(
   if (fresh.length === 0) {
     return {
       posted: 0,
-      drafts: { abandoned, created: 0, deletedPrePublish: 0, published: 0 },
+      drafts: { abandoned, created: 0, deletedPrePublish: 0, published: 0, publishFailed: 0 },
     };
   }
 
@@ -271,15 +278,44 @@ async function postViaDrafts(
     throw error;
   }
 
-  const deletedPrePublish = await deleteRaceLosers(gitlab, project, mr, drafts);
-  const published = drafts.length - deletedPrePublish;
+  const survivors = await deleteRaceLosers(gitlab, project, mr, drafts);
+  const deletedPrePublish = drafts.length - survivors.length;
 
-  if (published > 0) await gitlab.bulkPublishDraftNotes(project, mr);
+  const { published, publishFailed } = await publishDrafts(gitlab, project, mr, survivors);
 
   return {
     posted: published,
-    drafts: { abandoned, created: drafts.length, deletedPrePublish, published },
+    drafts: { abandoned, created: drafts.length, deletedPrePublish, published, publishFailed },
   };
+}
+
+/**
+ * Publishes the surviving drafts. `bulk_publish` is one atomic batch server-side
+ * — a single draft with an unresolvable diff position (e.g. a one-sided context
+ * line, gitlab-org/gitlab#579609) makes it 500 and nothing publishes. When that
+ * happens we fall back to publishing each draft individually, which GitLab
+ * isolates per draft, so one bad draft can no longer sink the whole set (and
+ * fail the CI job). The original error is re-thrown only when every individual
+ * publish also fails, so a genuinely broken run still surfaces loudly.
+ */
+async function publishDrafts(
+  gitlab: GitLabClient,
+  project: string,
+  mr: string,
+  drafts: DraftRecord[],
+): Promise<{ published: number; publishFailed: number }> {
+  if (drafts.length === 0) return { published: 0, publishFailed: 0 };
+  try {
+    await gitlab.bulkPublishDraftNotes(project, mr);
+    return { published: drafts.length, publishFailed: 0 };
+  } catch (bulkError) {
+    const results = await Promise.allSettled(
+      drafts.map((draft) => gitlab.publishDraftNote(project, mr, draft.id)),
+    );
+    const published = results.filter((result) => result.status === 'fulfilled').length;
+    if (published === 0) throw bulkError;
+    return { published, publishFailed: drafts.length - published };
+  }
 }
 
 async function cleanupOrphanDrafts(
@@ -325,17 +361,29 @@ async function createDraftsConcurrently(
   return records;
 }
 
+/**
+ * Deletes drafts whose fingerprints now collide with already-published
+ * discussions (a concurrent run won the race) and returns the surviving drafts
+ * still safe to publish.
+ */
 async function deleteRaceLosers(
   gitlab: GitLabClient,
   project: string,
   mr: string,
   drafts: DraftRecord[],
-): Promise<number> {
+): Promise<DraftRecord[]> {
   const live = extractExistingFingerprints(await gitlab.getDiscussions(project, mr));
-  const colliding = drafts.filter(
-    (draft) => live.has(draft.fingerprints.primary) || live.has(draft.fingerprints.secondary),
-  );
-  if (colliding.length === 0) return 0;
-  await Promise.all(colliding.map((draft) => gitlab.deleteDraftNote(project, mr, draft.id)));
-  return colliding.length;
+  const colliding: DraftRecord[] = [];
+  const survivors: DraftRecord[] = [];
+  for (const draft of drafts) {
+    if (live.has(draft.fingerprints.primary) || live.has(draft.fingerprints.secondary)) {
+      colliding.push(draft);
+    } else {
+      survivors.push(draft);
+    }
+  }
+  if (colliding.length > 0) {
+    await Promise.all(colliding.map((draft) => gitlab.deleteDraftNote(project, mr, draft.id)));
+  }
+  return survivors;
 }

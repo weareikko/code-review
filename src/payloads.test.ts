@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCommentBody, buildGeneratedComments } from './payloads.js';
+import { buildCommentBody, buildGeneratedComments, resolveDiffLine } from './payloads.js';
 import type { DiffRefs, ReviewComment } from './types.js';
 
 declare const __PKG_VERSION__: string;
@@ -69,6 +69,113 @@ describe('buildCommentBody', () => {
     expect(confIndex).toBeGreaterThan(0);
     expect(ruleIndex).toBeGreaterThan(confIndex);
     expect(footerIndex).toBeGreaterThan(ruleIndex);
+  });
+});
+
+describe('resolveDiffLine', () => {
+  // old: 8,9,10 context; 11 removed; 13,14 context. new: 8,9,10 context; 11,12 added; 13,14 context.
+  const diff = [
+    'diff --git a/src/index.ts b/src/index.ts',
+    'index 1111111..2222222 100644',
+    '--- a/src/index.ts',
+    '+++ b/src/index.ts',
+    '@@ -8,6 +8,7 @@ ctx',
+    ' line 8',
+    ' line 9',
+    ' line 10',
+    '-removed 11',
+    '+added 11',
+    '+added 12',
+    ' line 13',
+    ' line 14',
+  ].join('\n');
+
+  it('returns new_line only for a genuinely added line (RIGHT)', () => {
+    expect(resolveDiffLine(diff, 'src/index.ts', 11, 'RIGHT')).toEqual({ newLine: 11 });
+    expect(resolveDiffLine(diff, 'src/index.ts', 12, 'RIGHT')).toEqual({ newLine: 12 });
+  });
+
+  it('returns BOTH lines for an unchanged context line (RIGHT) — the bulk_publish 500 fix', () => {
+    // new_line 8 is context: old_line 8 must accompany it or bulk_publish 500s.
+    expect(resolveDiffLine(diff, 'src/index.ts', 8, 'RIGHT')).toEqual({ newLine: 8, oldLine: 8 });
+    // new_line 13 is context below the change: old/new line numbers diverge.
+    expect(resolveDiffLine(diff, 'src/index.ts', 13, 'RIGHT')).toEqual({
+      newLine: 13,
+      oldLine: 12,
+    });
+  });
+
+  it('returns old_line only for a removed line (LEFT)', () => {
+    expect(resolveDiffLine(diff, 'src/index.ts', 11, 'LEFT')).toEqual({ oldLine: 11 });
+  });
+
+  it('returns BOTH lines for an unchanged context line (LEFT)', () => {
+    expect(resolveDiffLine(diff, 'src/index.ts', 8, 'LEFT')).toEqual({ oldLine: 8, newLine: 8 });
+  });
+
+  it('returns null when the line is not part of the diff', () => {
+    expect(resolveDiffLine(diff, 'src/index.ts', 99, 'RIGHT')).toBeNull();
+    expect(resolveDiffLine(diff, 'other.ts', 8, 'RIGHT')).toBeNull();
+  });
+
+  it('resolves files whose paths contain spaces (git tab-terminates the header)', () => {
+    // git appends a literal tab after the path on the ---/+++ lines when the
+    // filename contains a space; the path captured must not include that tab.
+    const spaceDiff = [
+      'diff --git a/my file.ts b/my file.ts',
+      'index 1111111..2222222 100644',
+      '--- a/my file.ts\t',
+      '+++ b/my file.ts\t',
+      '@@ -1,2 +1,2 @@',
+      ' a',
+      '-b',
+      '+b CHANGED',
+    ].join('\n');
+    // Line 1 (' a') is an unchanged context line → must resolve two-sided.
+    expect(resolveDiffLine(spaceDiff, 'my file.ts', 1, 'RIGHT')).toEqual({
+      newLine: 1,
+      oldLine: 1,
+    });
+  });
+});
+
+describe('buildGeneratedComments position resolution', () => {
+  const diff = [
+    'diff --git a/src/index.ts b/src/index.ts',
+    'index 1111111..2222222 100644',
+    '--- a/src/index.ts',
+    '+++ b/src/index.ts',
+    '@@ -8,6 +8,7 @@ ctx',
+    ' line 8',
+    ' line 9',
+    ' line 10',
+    '-removed 11',
+    '+added 11',
+    '+added 12',
+    ' line 13',
+    ' line 14',
+  ].join('\n');
+
+  function commentAt(line: number, side: ReviewComment['side'] = 'RIGHT'): ReviewComment {
+    return { file: 'src/index.ts', line, side, severity: 'warn', confidence: 'high', body: 'x' };
+  }
+
+  it('emits a one-sided position for an added line', () => {
+    const [gen] = buildGeneratedComments([commentAt(11)], diff, refs, new Set());
+    expect(gen.payload.position.new_line).toBe(11);
+    expect(gen.payload.position.old_line).toBeUndefined();
+  });
+
+  it('emits a two-sided position for a context line (prevents the bulk_publish 500)', () => {
+    const [gen] = buildGeneratedComments([commentAt(13)], diff, refs, new Set());
+    expect(gen.payload.position.new_line).toBe(13);
+    expect(gen.payload.position.old_line).toBe(12);
+  });
+
+  it('falls back to a one-sided position when the line is not resolvable in the diff', () => {
+    const [gen] = buildGeneratedComments([commentAt(99)], diff, refs, new Set());
+    expect(gen.payload.position.new_line).toBe(99);
+    expect(gen.payload.position.old_line).toBeUndefined();
   });
 });
 
