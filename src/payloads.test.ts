@@ -117,6 +117,26 @@ describe('resolveDiffLine', () => {
     expect(resolveDiffLine(diff, 'src/index.ts', 99, 'RIGHT')).toBeNull();
     expect(resolveDiffLine(diff, 'other.ts', 8, 'RIGHT')).toBeNull();
   });
+
+  it('resolves files whose paths contain spaces (git tab-terminates the header)', () => {
+    // git appends a literal tab after the path on the ---/+++ lines when the
+    // filename contains a space; the path captured must not include that tab.
+    const spaceDiff = [
+      'diff --git a/my file.ts b/my file.ts',
+      'index 1111111..2222222 100644',
+      '--- a/my file.ts\t',
+      '+++ b/my file.ts\t',
+      '@@ -1,2 +1,2 @@',
+      ' a',
+      '-b',
+      '+b CHANGED',
+    ].join('\n');
+    // Line 1 (' a') is an unchanged context line → must resolve two-sided.
+    expect(resolveDiffLine(spaceDiff, 'my file.ts', 1, 'RIGHT')).toEqual({
+      newLine: 1,
+      oldLine: 1,
+    });
+  });
 });
 
 describe('buildGeneratedComments position resolution', () => {

@@ -55,6 +55,18 @@ export interface ResolvedDiffLine {
   oldLine?: number;
 }
 
+/**
+ * Normalizes the path captured from a `---`/`+++` diff header. git tab-
+ * terminates the path when the filename contains a space (and may append a
+ * timestamp after the tab), so the captured group can be `my file.ts\t` or
+ * `file.ts\t2026-...`. Cut at the first tab to recover the bare path. The
+ * `/dev/null` sentinel (added/deleted file) arrives as `undefined` from the
+ * regex alternation.
+ */
+function stripDiffPathSuffix(captured: string | undefined): string {
+  return captured?.split('\t')[0] ?? '/dev/null';
+}
+
 function parseHunkHeader(line: string): { oldLine: number; newLine: number } | null {
   const match = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
   if (!match) return null;
@@ -95,9 +107,9 @@ export function resolveDiffLine(
       continue;
     }
     const oldMatch = text.match(/^--- (?:a\/(.*)|\/dev\/null)$/);
-    if (oldMatch) oldPath = oldMatch[1] ?? '/dev/null';
+    if (oldMatch) oldPath = stripDiffPathSuffix(oldMatch[1]);
     const newMatch = text.match(/^\+\+\+ (?:b\/(.*)|\/dev\/null)$/);
-    if (newMatch) newPath = newMatch[1] ?? '/dev/null';
+    if (newMatch) newPath = stripDiffPathSuffix(newMatch[1]);
 
     if (!text.startsWith('@@') || (oldPath !== file && newPath !== file)) continue;
     const header = parseHunkHeader(text);
