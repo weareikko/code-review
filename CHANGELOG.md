@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-06-08
+
 ### Added
 
 - **GitLab API failures are now distinguishable by HTTP status in OpenTelemetry.** A 500 on `bulk_publish` (or any GitLab API error) previously collapsed to a single `error.type=GITLAB_API_ERROR` with no status, indistinguishable from a 404/401. When the OTel bridge is enabled (`GITLAB_REVIEW_OTEL=1`):
