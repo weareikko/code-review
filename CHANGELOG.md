@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **GitLab API failures are now distinguishable by HTTP status in OpenTelemetry.** A 500 on `bulk_publish` (or any GitLab API error) previously collapsed to a single `error.type=GITLAB_API_ERROR` with no status, indistinguishable from a 404/401. When the OTel bridge is enabled (`GITLAB_REVIEW_OTEL=1`):
+  - `error.type` on `gitlab_review_errors_total`, the `gen_ai.client.operation.duration` metric, and the `gitlab_review.failed` log is refined to include the HTTP status for GitLab API errors (e.g. `GITLAB_API_ERROR_500`), so a 5xx rate is alertable. HTTP status codes are low-cardinality, so this is safe as a metric label.
+  - The `gitlab_review.failed` log additionally carries `http.response.status_code`.
+  - The write phases (`gitlab.post_comments`, `gitlab.upsert_summary`) now stamp the HTTP semantic-convention attributes (`http.response.status_code`, `url.full`, `server.address`) on their spans on the error path, matching the read phases. A failed `bulk_publish` span now identifies the exact endpoint and status instead of being attribute-less.
+
 ## [0.6.1] - 2026-06-03
 
 ### Added
