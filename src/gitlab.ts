@@ -340,4 +340,11 @@ export class GitLabClient {
       { method: 'POST' },
     );
   }
+
+  async publishDraftNote(project: string, mr: string, id: number): Promise<void> {
+    await this.request(
+      `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}/draft_notes/${id}/publish`,
+      { method: 'PUT' },
+    );
+  }
 }

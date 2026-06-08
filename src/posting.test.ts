@@ -325,7 +325,7 @@ describe('postGeneratedComments strategies', () => {
 
     expect(result).toEqual({
       posted: 2,
-      drafts: { abandoned: 0, created: 2, deletedPrePublish: 0, published: 2 },
+      drafts: { abandoned: 0, created: 2, deletedPrePublish: 0, published: 2, publishFailed: 0 },
     });
     const calls = fetchImpl.mock.calls.map(
       (call) => `${call[1]?.method ?? 'GET'} ${call[0].replace(/.*\/api\/v4/, '')}`,
@@ -453,6 +453,91 @@ describe('postGeneratedComments strategies', () => {
     expect(deletes[0][0]).toContain(`/draft_notes/${successfulDraftId}`);
     // We never attempted to publish anything.
     expect(fetchImpl.mock.calls.filter((c) => c[0].includes('bulk_publish'))).toHaveLength(0);
+  });
+
+  it('draft mode: falls back to per-draft publish when bulk_publish 500s', async () => {
+    let createdId = 100;
+    const fetchImpl = routeFetch({
+      'GET /user': () => new Response(JSON.stringify({ id: 1 })),
+      'GET /draft_notes': () =>
+        new Response(JSON.stringify([]), { headers: { 'x-next-page': '' } }),
+      'GET /discussions': () =>
+        new Response(JSON.stringify([]), { headers: { 'x-next-page': '' } }),
+      // bulk_publish 500s as a batch (one draft has an unresolvable position).
+      'POST /draft_notes/bulk_publish': () =>
+        new Response('boom', { status: 500, statusText: 'Internal Server Error' }),
+      // single-publish succeeds per draft (GitLab isolates the failure here).
+      'PUT /draft_notes': () => new Response(null, { status: 204 }),
+      'POST /draft_notes': () =>
+        new Response(JSON.stringify({ id: createdId++, author_id: 1, note: 'x' })),
+    });
+
+    const result = await postGeneratedComments(
+      clientWith(fetchImpl),
+      'p',
+      '1',
+      [draftA, draftB],
+      'draft',
+    );
+
+    expect(result.posted).toBe(2);
+    expect(result.drafts).toMatchObject({ created: 2, published: 2, publishFailed: 0 });
+    const publishes = fetchImpl.mock.calls.filter(
+      (c) => c[1]?.method === 'PUT' && c[0].includes('/draft_notes/') && c[0].endsWith('/publish'),
+    );
+    expect(publishes).toHaveLength(2);
+  });
+
+  it('draft mode: counts per-draft publish failures and still posts the survivors', async () => {
+    let createdId = 100;
+    const fetchImpl = routeFetch({
+      'GET /user': () => new Response(JSON.stringify({ id: 1 })),
+      'GET /draft_notes': () =>
+        new Response(JSON.stringify([]), { headers: { 'x-next-page': '' } }),
+      'GET /discussions': () =>
+        new Response(JSON.stringify([]), { headers: { 'x-next-page': '' } }),
+      'POST /draft_notes/bulk_publish': () =>
+        new Response('boom', { status: 500, statusText: 'Internal Server Error' }),
+      // Draft 101 fails to publish on its own; the more specific route is
+      // listed first so it wins over the generic publish route below.
+      'PUT /draft_notes/101/publish': () =>
+        new Response('boom', { status: 500, statusText: 'Internal Server Error' }),
+      'PUT /draft_notes': () => new Response(null, { status: 204 }),
+      'POST /draft_notes': () =>
+        new Response(JSON.stringify({ id: createdId++, author_id: 1, note: 'x' })),
+    });
+
+    const result = await postGeneratedComments(
+      clientWith(fetchImpl),
+      'p',
+      '1',
+      [draftA, draftB],
+      'draft',
+    );
+
+    expect(result.posted).toBe(1);
+    expect(result.drafts).toMatchObject({ created: 2, published: 1, publishFailed: 1 });
+  });
+
+  it('draft mode: rethrows the bulk_publish error when every per-draft publish also fails', async () => {
+    let createdId = 100;
+    const fetchImpl = routeFetch({
+      'GET /user': () => new Response(JSON.stringify({ id: 1 })),
+      'GET /draft_notes': () =>
+        new Response(JSON.stringify([]), { headers: { 'x-next-page': '' } }),
+      'GET /discussions': () =>
+        new Response(JSON.stringify([]), { headers: { 'x-next-page': '' } }),
+      'POST /draft_notes/bulk_publish': () =>
+        new Response('boom', { status: 500, statusText: 'Internal Server Error' }),
+      'PUT /draft_notes': () =>
+        new Response('nope', { status: 500, statusText: 'Internal Server Error' }),
+      'POST /draft_notes': () =>
+        new Response(JSON.stringify({ id: createdId++, author_id: 1, note: 'x' })),
+    });
+
+    await expect(
+      postGeneratedComments(clientWith(fetchImpl), 'p', '1', [draftA, draftB], 'draft'),
+    ).rejects.toBeInstanceOf(GitLabApiError);
   });
 
   it('draft mode: deletes drafts whose fingerprints collide with newly-published discussions', async () => {
