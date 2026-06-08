@@ -3,7 +3,7 @@ import { trace } from '@opentelemetry/api';
 import { SeverityNumber } from '@opentelemetry/api-logs';
 import { describe, expect, it, vi } from 'vitest';
 import type { Config } from './config.js';
-import { ReviewerError } from './errors.js';
+import { GitLabApiError, ReviewerError } from './errors.js';
 import type { AgentLike } from './gitlab-review.js';
 import type { OtelRuntime } from './otel.js';
 import { isContentCaptureEnabled } from './otel.js';
@@ -1218,6 +1218,36 @@ describe('OpenTelemetry bridge', () => {
     ).toBe(false);
   });
 
+  it('puts the HTTP status on the failed log for a GitLab API error', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig();
+    const runContext = createDiagnosticContext('run', config, 'run-failed-log-500');
+    await expect(
+      traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+        throw new GitLabApiError('GitLab API POST /draft_notes/bulk_publish failed: 500', {
+          method: 'POST',
+          path: '/draft_notes/bulk_publish',
+          status: 500,
+        });
+      }),
+    ).rejects.toThrow();
+    await bridge!.shutdown();
+
+    const failed = fake.logsEmitted.find(
+      (l) => l.attributes['event.name'] === 'gitlab_review.failed',
+    );
+    expect(failed!.attributes).toMatchObject({
+      'error.type': 'GITLAB_API_ERROR_500',
+      'http.response.status_code': 500,
+    });
+  });
+
   it('emits a review.started log even when the run fails', async () => {
     const { startOtelBridge } = await import('./otel.js');
     const fake = createFakeRuntime();
@@ -1989,6 +2019,35 @@ describe('OpenTelemetry bridge', () => {
       'gitlab_review.status': 'error',
       // error.type prefers the typed-error code over the class name.
       'error.type': 'REVIEWER_ERROR',
+    });
+  });
+
+  it('refines error.type with the HTTP status for GitLab API errors (e.g. a 500 on bulk_publish)', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { GITLAB_REVIEW_OTEL: '1' },
+    });
+
+    const config = makeConfig();
+    const runContext = createDiagnosticContext('run', config, 'run-errors-bulk-publish');
+    await expect(
+      traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+        throw new GitLabApiError(
+          'GitLab API POST /draft_notes/bulk_publish failed: 500 Internal Server Error',
+          { method: 'POST', path: '/draft_notes/bulk_publish', status: 500 },
+        );
+      }),
+    ).rejects.toThrow('bulk_publish');
+    await bridge!.shutdown();
+
+    const errors = fake.metricsRecorded.find((m) => m.name === 'gitlab_review_errors_total');
+    expect(errors!.attributes).toMatchObject({
+      'gitlab_review.status': 'error',
+      // The bare GITLAB_API_ERROR code is refined with the status so a 500 on
+      // bulk_publish is distinguishable from a 404/401 in alerting.
+      'error.type': 'GITLAB_API_ERROR_500',
     });
   });
 

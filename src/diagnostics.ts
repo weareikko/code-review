@@ -25,6 +25,12 @@ export interface DiagnosticError {
   code?: string;
   /** True when the failure was a deadline/abort, so the bridge can label it `timeout`. */
   timeout?: boolean;
+  /**
+   * HTTP status code when the failure came from a GitLab API response (e.g. a
+   * 500 on `bulk_publish`). Propagates up the phase chain so the OTel bridge can
+   * refine `error.type` and label the error counter with the status.
+   */
+  status?: number;
 }
 
 const CENSOR = '[REDACTED]';
@@ -245,7 +251,17 @@ function toDiagnosticError(error: unknown, secretValues: readonly string[] = [])
     const code = 'code' in error && typeof error.code === 'string' ? error.code : undefined;
     const timeout =
       'timeout' in error && (error as { timeout?: unknown }).timeout === true ? true : undefined;
-    return { name: error.name, message: scrubSecrets(error.message, secretValues), code, timeout };
+    const status =
+      'status' in error && typeof (error as { status?: unknown }).status === 'number'
+        ? (error as { status: number }).status
+        : undefined;
+    return {
+      name: error.name,
+      message: scrubSecrets(error.message, secretValues),
+      code,
+      timeout,
+      status,
+    };
   }
   return { message: scrubSecrets(String(error), secretValues) };
 }

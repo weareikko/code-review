@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { countPostedBySeverity, formatUsageLine } from './cli.js';
+import { countPostedBySeverity, formatUsageLine, withHttpStamping } from './cli.js';
+import type { DiagnosticContext } from './diagnostics.js';
 import type { ReviewUsage } from './gitlab-review.js';
+import type { GitLabResponseInfo } from './gitlab.js';
 import type { GeneratedComment, Severity } from './types.js';
 
 function makeComment(severity: Severity, duplicate = false): GeneratedComment {
@@ -36,6 +38,63 @@ function makeUsage(overrides: Partial<ReviewUsage['tokens']> = {}): ReviewUsage 
     skills: [],
   };
 }
+
+describe('withHttpStamping', () => {
+  const response: GitLabResponseInfo = {
+    method: 'POST',
+    path: '/draft_notes/bulk_publish',
+    url: 'https://gitlab.example.com/api/v4/projects/1/merge_requests/2/draft_notes/bulk_publish',
+    status: 500,
+  };
+
+  function emptyContext(): DiagnosticContext {
+    return { phase: 'gitlab.post_comments' } as DiagnosticContext;
+  }
+
+  it('stamps HTTP attributes when the wrapped operation throws (e.g. a 500 on bulk_publish)', async () => {
+    let last: GitLabResponseInfo | undefined;
+    const wrapped = withHttpStamping(
+      () => last,
+      async () => {
+        // The failing request reports its response before the error is thrown.
+        last = response;
+        throw new Error('bulk_publish 500');
+      },
+    );
+    const context = emptyContext();
+    await expect(wrapped(context)).rejects.toThrow('bulk_publish 500');
+    expect(context.httpRequestMethod).toBe('POST');
+    expect(context.httpStatusCode).toBe(500);
+    expect(context.httpUrl).toBe(response.url);
+    expect(context.serverAddress).toBe('gitlab.example.com');
+  });
+
+  it('stamps HTTP attributes on the success path too', async () => {
+    let last: GitLabResponseInfo | undefined;
+    const wrapped = withHttpStamping(
+      () => last,
+      async () => {
+        last = { ...response, status: 204 };
+        return 'ok';
+      },
+    );
+    const context = emptyContext();
+    await expect(wrapped(context)).resolves.toBe('ok');
+    expect(context.httpStatusCode).toBe(204);
+  });
+
+  it('does not inherit a previous phase response when this phase made no request', async () => {
+    const stale = response;
+    const wrapped = withHttpStamping(
+      () => stale,
+      async () => 'ok',
+    );
+    const context = emptyContext();
+    await wrapped(context);
+    expect(context.httpStatusCode).toBeUndefined();
+    expect(context.httpUrl).toBeUndefined();
+  });
+});
 
 describe('formatUsageLine', () => {
   it('sums input, cacheRead, and cacheWrite as billable input volume', () => {
