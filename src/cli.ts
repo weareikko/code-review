@@ -356,6 +356,8 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
       console.log('No summary returned by the reviewer; skipping summary note.');
     }
 
+    let draftsPublishFailed = 0;
+    let raceLost = 0;
     const posted = await traceDiagnosticPhase(
       'gitlab.post_comments',
       config,
@@ -377,18 +379,26 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
             context.draftsCreated = result.drafts.created;
             context.draftsDeletedPrePublish = result.drafts.deletedPrePublish;
             context.draftsPublished = result.drafts.published;
+            context.draftsPublishFailed = result.drafts.publishFailed;
+            draftsPublishFailed = result.drafts.publishFailed;
+            raceLost = result.drafts.deletedPrePublish;
           }
           return result.posted;
         },
       ),
     );
     const duplicates = generated.length - newCount;
-    const raceLost = newCount - posted;
-    const extra = raceLost > 0 ? `, ${raceLost} dropped by pre-publish re-check` : '';
+    const raceExtra = raceLost > 0 ? `, ${raceLost} dropped by pre-publish re-check` : '';
     console.log(
-      `Posted ${posted} new GitLab MR discussions (${duplicates} duplicates skipped${extra}).`,
+      `Posted ${posted} new GitLab MR discussions (${duplicates} duplicates skipped${raceExtra}).`,
     );
+    if (draftsPublishFailed > 0) {
+      console.warn(
+        `[gitlab-review] ${draftsPublishFailed} comment(s) could not be published individually after bulk_publish failed and were dropped.`,
+      );
+    }
     runContext.posted = posted;
+    runContext.draftsPublishFailed = draftsPublishFailed;
     if (posted > 0) runContext.postedBySeverity = countPostedBySeverity(generated);
 
     return { generated, posted, usage, summary };

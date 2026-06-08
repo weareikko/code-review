@@ -427,6 +427,7 @@ describe('OpenTelemetry bridge', () => {
       ctx.warnings = 1;
       ctx.draftsAbandoned = 2;
       ctx.draftsDeletedPrePublish = 3;
+      ctx.draftsPublishFailed = 1;
     });
     const reviewer = spans.find((s) => s.name === 'invoke_agent gitlab-review');
     const attrs = Object.fromEntries(reviewer!.attributes.map((a) => [a.key, a.value]));
@@ -443,6 +444,7 @@ describe('OpenTelemetry bridge', () => {
       'gitlab_review.warnings': 1,
       'gitlab_review.drafts.abandoned': 2,
       'gitlab_review.drafts.deleted_pre_publish': 3,
+      'gitlab_review.drafts.publish_failed': 1,
     });
   });
 
