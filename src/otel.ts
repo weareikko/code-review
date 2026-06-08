@@ -996,6 +996,9 @@ function emitReviewCompletedLog(
       ...(isError && {
         'error.type': errorType,
         ...(ctx.errorInfo && { 'error.message': ctx.errorInfo.message }),
+        ...(typeof ctx.errorInfo?.status === 'number' && {
+          'http.response.status_code': ctx.errorInfo.status,
+        }),
       }),
       'gitlab_review.run_id': ctx.runId,
       'gitlab_review.duration_ms': ctx.durationMs ?? 0,
@@ -1099,9 +1102,17 @@ function createReviewInstruments(meter: Meter): ReviewInstruments {
  * Stable `error.type` label for a failed run: the typed-error code, else the
  * error class name, else `_OTHER`. Shared by the run/error counters, the failed
  * log record, and the gen_ai duration metric so they never drift.
+ *
+ * GitLab API failures are refined with their HTTP status (e.g.
+ * `GITLAB_API_ERROR_500`) so a 500 on `bulk_publish` is distinguishable from a
+ * 404/401 in alerting. HTTP status codes are low-cardinality, so they are safe
+ * as a metric label.
  */
 function errorTypeOf(ctx: DiagnosticContext): string {
-  return ctx.errorInfo?.code ?? ctx.errorInfo?.name ?? '_OTHER';
+  const base = ctx.errorInfo?.code ?? ctx.errorInfo?.name ?? '_OTHER';
+  const status = ctx.errorInfo?.status;
+  if (status !== undefined && base === 'GITLAB_API_ERROR') return `${base}_${status}`;
+  return base;
 }
 
 /**
