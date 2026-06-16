@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Provider and infra environment variables can now be optionally namespaced under `GITLAB_REVIEW_`.** In shared GitLab CI, the credentials and infra vars the AI SDK reads use generic, provider-standard names (`ANTHROPIC_API_KEY`, `CLOUDFLARE_API_KEY`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_GATEWAY_ID`, `OLLAMA_HOST`, ambient AWS/Vertex creds, …) — which can collide with unrelated jobs and give no signal about which variables belong to gitlab-review. A startup shim now exposes each `GITLAB_REVIEW_<NAME>` variable as `<NAME>` (e.g. `GITLAB_REVIEW_CLOUDFLARE_API_KEY` → `CLOUDFLARE_API_KEY`), except the tool's own reserved `GITLAB_REVIEW_*` settings (`MODEL`, `BASE_URL`, `OTEL`, …). This covers everything the AI SDK reads — including the values it resolves at request time, like the Cloudflare account/gateway placeholders — without enumerating its provider list. The shim is purely additive (unprefixed variables keep working), and when both `GITLAB_REVIEW_<NAME>` and a plain `<NAME>` are set the prefixed value wins, so a scoped value overrides an unrelated CI-wide one. Double-prefixed names (e.g. `GITLAB_REVIEW_GITLAB_REVIEW_MODEL`) are skipped so a de-prefixed suffix can never clobber the tool's own reserved `GITLAB_REVIEW_*` settings. The README documents the convention.
+
 ## [0.6.2] - 2026-06-08
 
 ### Added

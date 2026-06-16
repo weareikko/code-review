@@ -5,6 +5,74 @@ import { splitModel, THINKING_LEVELS, type Severity, type ThinkingLevel } from '
 
 export type GitLabAuthHeader = 'PRIVATE-TOKEN' | 'JOB-TOKEN';
 
+/**
+ * The single source of truth for the tool's own `GITLAB_REVIEW_*` settings.
+ *
+ * Each entry is the suffix after the `GITLAB_REVIEW_` prefix (e.g. `MODEL` for
+ * `GITLAB_REVIEW_MODEL`). These are read directly across `config.ts`/`otel.ts`
+ * and must NEVER be de-prefixed by {@link applyGitLabReviewEnvPrefix}.
+ *
+ * Note: `API_KEY` is reserved. `GITLAB_REVIEW_API_KEY` was intentionally retired
+ * as the AI provider key and must not be revived as one.
+ */
+export const RESERVED_ENV_SUFFIXES = [
+  'API_KEY',
+  'BASE_URL',
+  'MAX_TOKENS',
+  'MIN_SEVERITY',
+  'MODEL',
+  'OTEL',
+  'OTEL_CAPTURE_CONTENT',
+  'POSTING_MODE',
+  'POST_SUMMARY',
+  'FORCE_REVIEW',
+  'VERBOSE',
+  'SKILLS',
+  'REFRESH_SKILLS',
+  'THINKING_LEVEL',
+] as const;
+
+const GITLAB_REVIEW_PREFIX = 'GITLAB_REVIEW_';
+const RESERVED_ENV_SUFFIX_SET = new Set<string>(RESERVED_ENV_SUFFIXES);
+
+/**
+ * Optional namespacing shim for provider/infra environment variables.
+ *
+ * For each `GITLAB_REVIEW_<NAME>` variable whose `<NAME>` is not a reserved tool
+ * setting (see {@link RESERVED_ENV_SUFFIXES}), this exposes `<NAME>` in the same
+ * env object. The prefixed value wins when both `GITLAB_REVIEW_<NAME>` and a
+ * plain `<NAME>` are set — the tool's scoped value should override an unrelated
+ * CI-wide variable of the same name.
+ *
+ * This lets credentials and infra vars that `@earendil-works/pi-ai` reads
+ * (`ANTHROPIC_API_KEY`, `CLOUDFLARE_API_KEY`, `CLOUDFLARE_ACCOUNT_ID`,
+ * `OLLAMA_HOST`, ambient AWS/Vertex creds, …) — and the GitLab tokens — be
+ * scoped under `GITLAB_REVIEW_` in shared CI without enumerating pi-ai's
+ * provider list.
+ *
+ * Must run once at startup BEFORE config/key resolution: `getEnvApiKey` and
+ * pi-ai's request-time reads both read `process.env` directly, so mutating it
+ * in-process is what makes those reads pick up the de-prefixed values.
+ *
+ * Empty prefixed values are ignored (treated as unset). Double-prefixed names
+ * (e.g. `GITLAB_REVIEW_GITLAB_REVIEW_MODEL`) are also skipped so a de-prefixed
+ * suffix can never clobber the tool's own reserved `GITLAB_REVIEW_*` settings.
+ *
+ * @returns the same `env` object it was given, mutated in place.
+ */
+export function applyGitLabReviewEnvPrefix(env = process.env): NodeJS.ProcessEnv {
+  for (const key of Object.keys(env)) {
+    if (!key.startsWith(GITLAB_REVIEW_PREFIX)) continue;
+    const suffix = key.slice(GITLAB_REVIEW_PREFIX.length);
+    if (!suffix || RESERVED_ENV_SUFFIX_SET.has(suffix) || suffix.startsWith(GITLAB_REVIEW_PREFIX))
+      continue;
+    const value = env[key];
+    if (typeof value !== 'string' || value.length === 0) continue;
+    env[suffix] = value;
+  }
+  return env;
+}
+
 export interface Config {
   project: string;
   mr: string;

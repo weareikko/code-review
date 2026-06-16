@@ -157,6 +157,21 @@ The CLI auto-resolves values from CI variables and common token/key names.
 | `GITLAB_REVIEW_REFRESH_SKILLS`                | Set to `true`/`1` to re-clone `git:` / `git+ssh:` skills instead of reusing the on-disk cache                                                                                                                      |
 | `GITLAB_REVIEW_OTEL`                          | Set to `1` to enable the OpenTelemetry bridge (generic OTLP spans + metrics)                                                                                                                                       |
 
+### Namespacing provider/infra variables with `GITLAB_REVIEW_`
+
+In a shared GitLab CI environment, the provider credentials and infra variables read by the AI SDK use generic, provider-standard names (`ANTHROPIC_API_KEY`, `CLOUDFLARE_API_KEY`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_GATEWAY_ID`, `OLLAMA_HOST`, ambient AWS/Vertex creds, …). To avoid collisions with unrelated jobs and make it obvious which variables belong to gitlab-review, you can optionally prefix any of them with `GITLAB_REVIEW_`. At startup, each `GITLAB_REVIEW_<NAME>` variable is exposed as `<NAME>`:
+
+```
+GITLAB_REVIEW_ANTHROPIC_API_KEY     → ANTHROPIC_API_KEY
+GITLAB_REVIEW_CLOUDFLARE_API_KEY    → CLOUDFLARE_API_KEY
+GITLAB_REVIEW_CLOUDFLARE_ACCOUNT_ID → CLOUDFLARE_ACCOUNT_ID
+GITLAB_REVIEW_CLOUDFLARE_GATEWAY_ID → CLOUDFLARE_GATEWAY_ID
+GITLAB_REVIEW_OLLAMA_HOST           → OLLAMA_HOST
+GITLAB_REVIEW_GITLAB_TOKEN          → GITLAB_TOKEN
+```
+
+This is purely additive — unprefixed variables keep working unchanged. When both `GITLAB_REVIEW_<NAME>` and a plain `<NAME>` are set, the prefixed value wins, so the tool's scoped value overrides an unrelated CI-wide variable of the same name. The tool's own `GITLAB_REVIEW_*` settings listed above (e.g. `GITLAB_REVIEW_MODEL`, `GITLAB_REVIEW_OTEL`) are reserved and are never de-prefixed.
+
 ## Flags
 
 | Flag                     | Description                                                                                                                                                                                         | Default                                                                                                                    |

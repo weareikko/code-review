@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  applyGitLabReviewEnvPrefix,
   parseArgs,
   parseModelProvider,
+  RESERVED_ENV_SUFFIXES,
   resolveConfig,
   validateConfig,
   type Severity,
@@ -643,5 +645,110 @@ describe('provider-aware key resolution', () => {
     const cfg = resolveConfig(['--model', 'ollama/llama3:8b'], gitlab);
     expect(cfg.apiKey).toBe('ollama');
     expect(() => validateConfig(cfg)).not.toThrow();
+  });
+});
+
+describe('applyGitLabReviewEnvPrefix', () => {
+  it('exposes GITLAB_REVIEW_<NAME> as <NAME> for non-reserved names', () => {
+    const env: NodeJS.ProcessEnv = {
+      GITLAB_REVIEW_CLOUDFLARE_API_KEY: 'cf-key',
+      GITLAB_REVIEW_CLOUDFLARE_ACCOUNT_ID: 'acct',
+      GITLAB_REVIEW_GITLAB_TOKEN: 'tok',
+    };
+    applyGitLabReviewEnvPrefix(env);
+    expect(env.CLOUDFLARE_API_KEY).toBe('cf-key');
+    expect(env.CLOUDFLARE_ACCOUNT_ID).toBe('acct');
+    expect(env.GITLAB_TOKEN).toBe('tok');
+  });
+
+  it('lets the prefixed value win over a plain value of the same name', () => {
+    const env: NodeJS.ProcessEnv = {
+      CLOUDFLARE_API_KEY: 'project-wide',
+      GITLAB_REVIEW_CLOUDFLARE_API_KEY: 'scoped',
+    };
+    applyGitLabReviewEnvPrefix(env);
+    expect(env.CLOUDFLARE_API_KEY).toBe('scoped');
+  });
+
+  it('fills in a gap when only the prefixed value is set', () => {
+    const env: NodeJS.ProcessEnv = {
+      GITLAB_REVIEW_ANTHROPIC_API_KEY: 'sk-test',
+    };
+    applyGitLabReviewEnvPrefix(env);
+    expect(env.ANTHROPIC_API_KEY).toBe('sk-test');
+  });
+
+  it('never de-prefixes the tool’s own reserved settings', () => {
+    const env: NodeJS.ProcessEnv = {};
+    for (const suffix of RESERVED_ENV_SUFFIXES) {
+      env[`GITLAB_REVIEW_${suffix}`] = `reserved-${suffix}`;
+    }
+    applyGitLabReviewEnvPrefix(env);
+    for (const suffix of RESERVED_ENV_SUFFIXES) {
+      expect(env[suffix]).toBeUndefined();
+      expect(env[`GITLAB_REVIEW_${suffix}`]).toBe(`reserved-${suffix}`);
+    }
+  });
+
+  it('never revives GITLAB_REVIEW_API_KEY as a provider key', () => {
+    const env: NodeJS.ProcessEnv = {
+      GITLAB_REVIEW_API_KEY: 'legacy-key',
+    };
+    applyGitLabReviewEnvPrefix(env);
+    expect(env.API_KEY).toBeUndefined();
+  });
+
+  it('never lets a double-prefixed name clobber a reserved setting', () => {
+    const env: NodeJS.ProcessEnv = {
+      GITLAB_REVIEW_MODEL: 'reserved-model',
+      GITLAB_REVIEW_GITLAB_REVIEW_MODEL: 'attacker-model',
+    };
+    applyGitLabReviewEnvPrefix(env);
+    expect(env.GITLAB_REVIEW_MODEL).toBe('reserved-model');
+    expect(env.GITLAB_REVIEW_GITLAB_REVIEW_MODEL).toBe('attacker-model');
+  });
+
+  it('is a no-op when no GITLAB_REVIEW_ vars are set', () => {
+    const env: NodeJS.ProcessEnv = {
+      ANTHROPIC_API_KEY: 'existing',
+      GITLAB_TOKEN: 'tok',
+    };
+    const before = { ...env };
+    applyGitLabReviewEnvPrefix(env);
+    expect(env).toEqual(before);
+  });
+
+  it('does not introduce a key for an empty prefixed value', () => {
+    const env: NodeJS.ProcessEnv = {
+      GITLAB_REVIEW_OLLAMA_HOST: '',
+    };
+    applyGitLabReviewEnvPrefix(env);
+    expect('OLLAMA_HOST' in env).toBe(false);
+  });
+
+  it('returns the same env object it was given', () => {
+    const env: NodeJS.ProcessEnv = { GITLAB_REVIEW_FOO: 'bar' };
+    expect(applyGitLabReviewEnvPrefix(env)).toBe(env);
+  });
+
+  it('reserves exactly the documented suffixes', () => {
+    expect([...RESERVED_ENV_SUFFIXES].toSorted()).toEqual(
+      [
+        'API_KEY',
+        'BASE_URL',
+        'FORCE_REVIEW',
+        'MAX_TOKENS',
+        'MIN_SEVERITY',
+        'MODEL',
+        'OTEL',
+        'OTEL_CAPTURE_CONTENT',
+        'POSTING_MODE',
+        'POST_SUMMARY',
+        'REFRESH_SKILLS',
+        'SKILLS',
+        'THINKING_LEVEL',
+        'VERBOSE',
+      ].toSorted(),
+    );
   });
 });

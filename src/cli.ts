@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Config } from './config.js';
-import { resolveConfig, validateConfig } from './config.js';
+import { applyGitLabReviewEnvPrefix, resolveConfig, validateConfig } from './config.js';
 import {
   createDiagnosticRunId,
   traceDiagnosticPhase,
@@ -515,6 +515,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
   process.stderr.write(`[gitlab-review] ${__PKG_NAME__} v${__PKG_VERSION__}\n`);
   assertNodeVersion();
+  // Expose any GITLAB_REVIEW_<NAME> provider/infra vars as <NAME> before
+  // resolving config: getEnvApiKey and pi-ai's request-time reads both read
+  // process.env directly, so this must mutate the live env first.
+  applyGitLabReviewEnvPrefix();
   const config = resolveConfig(argv);
   const otel = await startOtelBridge();
   try {
