@@ -22,6 +22,7 @@ export type {
   AgentLike,
   CreateAgent,
   CreateAgentParams,
+  ReviewIntent,
   ReviewUsage,
   RunReviewOptions,
   UsageBreakdown,

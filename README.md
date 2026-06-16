@@ -7,6 +7,8 @@
 
 Run an agent-driven code review in GitLab CI, parse inline comments, post deduplicated merge request discussions, and report per-run token usage and cost.
 
+The reviewer reads the MR **title and description** as the author's declared intent: it checks the diff against the stated purpose and flags code/intent mismatches (the change does something the description never claimed, or omits something it promised) as a first-class finding. A missing or empty description degrades gracefully — the review still runs.
+
 ## Requirements
 
 - Node.js `>=24`

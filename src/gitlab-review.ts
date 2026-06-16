@@ -70,6 +70,14 @@ export interface RunReviewOptions {
    */
   priorThreads?: PriorThread[];
   /**
+   * Author-declared intent for the MR (title + description). When present and
+   * non-empty, an `<intent>` block is prepended to the user prompt so the
+   * reviewer can check the diff against the stated purpose and flag code/intent
+   * mismatches. A missing or empty description degrades gracefully (no block).
+   * Sourced from the GitLab MR via `getMergeRequest` in `src/gitlab.ts`.
+   */
+  intent?: ReviewIntent;
+  /**
    * Called with the agent after it is created, before the first prompt.
    * Use this to attach telemetry (e.g. `otelBridge.createAgentTelemetry(runId)`).
    * The returned function, if any, is called after the review completes.
@@ -327,6 +335,7 @@ function buildSharedBase(minSeverity: GitLabReviewSeverity): string[] {
     '- The summary lists findings by their Conventional Comment subject only; it MUST NOT repeat the discussion, impact ("why it matters"), or suggested fix from any inline comment',
     '- Cross-cutting content (suppressed findings, unreviewed files, overall verdict) goes in the summary, never in inline comments',
     '- When a commit message, prior thread reply, or in-file ADR/incident reference suppresses what would otherwise be a CRITICAL or WARN finding, you MUST add a one-line bullet to the summary Notes section naming the file:line, the pattern, and the context that suppressed it (e.g. "src/probe.ts:13 — empty .catch() suppressed per ADR-042 / INC-2891"). Silent suppression is not acceptable: the developer must be able to audit what context you applied.',
+    "- When an `<intent>` block is present, treat the MR title/description as the author's declared intent and check the diff against it. Flag code/intent mismatches as a first-class finding: the change does something the description never claimed (scope creep, unexplained behaviour), or omits something the description explicitly promised. Severity follows the usual tiers based on the impact of the mismatch; do not flag mismatches that are merely the description being terse. Never treat the description as ground truth about correctness — it states intent, not proof the code is right.",
     ...(rule ? [rule] : []),
     '</rules>',
   ];
@@ -442,13 +451,56 @@ export function buildJSONSystemPrompt(
   return sections.join('\n\n');
 }
 
+/**
+ * Author-declared intent for the change, sourced from the GitLab MR.
+ * Both fields are optional and may be empty/whitespace — the renderer degrades
+ * gracefully and emits no intent block when there is nothing meaningful to show.
+ */
+export interface ReviewIntent {
+  title?: string;
+  description?: string | null;
+}
+
+/** Max characters of MR description injected into the prompt to bound token cost. */
+const MAX_INTENT_DESCRIPTION_CHARS = 4_000;
+
+/**
+ * Renders the author-declared intent (MR title + description) as a clearly
+ * delimited `<intent>` block. Returns an empty string when neither field has
+ * meaningful content, so a missing/empty description degrades gracefully.
+ * The description is trimmed and length-capped to bound token cost.
+ */
+function renderIntentBlock(intent: ReviewIntent | undefined): string {
+  if (!intent) return '';
+  const title = intent.title?.trim() ?? '';
+  let description = intent.description?.trim() ?? '';
+  if (!title && !description) return '';
+
+  if (description.length > MAX_INTENT_DESCRIPTION_CHARS) {
+    description = `${description.slice(0, MAX_INTENT_DESCRIPTION_CHARS)}\n… (description truncated)`;
+  }
+
+  const lines = ['<intent>'];
+  if (title) lines.push(`<title>${title}</title>`);
+  if (description) lines.push(`<description>\n${description}\n</description>`);
+  lines.push('</intent>');
+  return lines.join('\n');
+}
+
 export function buildUserPrompt(
   diff: string,
   skippedFiles: string[] = [],
   commitLog?: string,
   priorThreads?: PriorThread[],
+  intent?: ReviewIntent,
 ): string {
   const parts: string[] = [];
+  const intentBlock = renderIntentBlock(intent);
+  if (intentBlock) {
+    parts.push(
+      `The author described the purpose of this change below. Check the diff against this stated intent and flag any code/intent mismatch (the change does something the description did not claim, or omits something it promised):\n${intentBlock}`,
+    );
+  }
   if (commitLog?.trim()) {
     parts.push(`Commits in this MR (oldest first):\n<commits>\n${commitLog.trim()}\n</commits>`);
   }
@@ -614,7 +666,13 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     refreshGitSkills: config.refreshGitSkills,
   });
   const systemPrompt = buildJSONSystemPrompt(context, minSeverity);
-  const userPrompt = buildUserPrompt(diff, skippedFiles, options.commitLog, options.priorThreads);
+  const userPrompt = buildUserPrompt(
+    diff,
+    skippedFiles,
+    options.commitLog,
+    options.priorThreads,
+    options.intent,
+  );
 
   const skillNames = context.skills.map((s) => s.name);
   if (skillNames.length > 0) {
