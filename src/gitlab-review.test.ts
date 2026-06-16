@@ -31,6 +31,8 @@ describe('runReview pipeline', () => {
     apiKey: 'key',
     baseUrl: '',
     maxTokens: 0,
+    maxDiffChars: 100_000,
+    decomposeHintLines: 0,
     reviewFile: 'gitlab-review.md',
     output: 'review-comments.json',
     dryRun: false,
@@ -127,9 +129,64 @@ describe('runReview pipeline', () => {
     ].join('\n');
 
     const result = filterDiff(noisy);
-    expect(result.skippedFiles).toEqual(['package-lock.json']);
+    expect(result.noiseSkippedFiles).toEqual(['package-lock.json']);
+    expect(result.sizeSkippedFiles).toEqual([]);
     expect(result.diff).toContain('src/a.ts');
     expect(result.diff).not.toContain('package-lock.json');
+  });
+
+  it('filterDiff tracks size-skips separately from noise-skips with per-file char counts', () => {
+    const bigBody = '+x\n'.repeat(50);
+    const raw = [
+      'diff --git a/package-lock.json b/package-lock.json',
+      '--- a/package-lock.json',
+      '+++ b/package-lock.json',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+      'diff --git a/src/big-a.ts b/src/big-a.ts',
+      '--- a/src/big-a.ts',
+      '+++ b/src/big-a.ts',
+      '@@ -1 +1 @@',
+      bigBody,
+      'diff --git a/src/big-b.ts b/src/big-b.ts',
+      '--- a/src/big-b.ts',
+      '+++ b/src/big-b.ts',
+      '@@ -1 +1 @@',
+      bigBody,
+      '',
+    ].join('\n');
+
+    // maxChars small enough that only the first non-noise file fits.
+    const result = filterDiff(raw, 200);
+
+    expect(result.noiseSkippedFiles).toEqual(['package-lock.json']);
+    expect(result.sizeSkippedFiles.map((f) => f.path)).toContain('src/big-b.ts');
+    for (const skipped of result.sizeSkippedFiles) {
+      expect(skipped.chars).toBeGreaterThan(0);
+    }
+    // size-skipped paths never appear under noise-skips
+    for (const skipped of result.sizeSkippedFiles) {
+      expect(result.noiseSkippedFiles).not.toContain(skipped.path);
+    }
+  });
+
+  it('filterDiff reports reviewed changed-line count for the included diff', () => {
+    const raw = [
+      'diff --git a/src/a.ts b/src/a.ts',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -1,2 +1,3 @@',
+      ' context',
+      '-removed',
+      '+added one',
+      '+added two',
+      '',
+    ].join('\n');
+
+    const result = filterDiff(raw);
+    // 2 additions + 1 removal = 3 changed lines (context lines excluded)
+    expect(result.reviewedChangedLines).toBe(3);
   });
 
   it('accumulates usage across multiple assistant messages and writes gitlab-review.md', async () => {

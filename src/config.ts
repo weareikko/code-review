@@ -18,6 +18,8 @@ export type GitLabAuthHeader = 'PRIVATE-TOKEN' | 'JOB-TOKEN';
 export const RESERVED_ENV_SUFFIXES = [
   'API_KEY',
   'BASE_URL',
+  'DECOMPOSE_HINT_LINES',
+  'MAX_DIFF_CHARS',
   'MAX_TOKENS',
   'MIN_SEVERITY',
   'MODEL',
@@ -88,6 +90,16 @@ export interface Config {
   baseUrl: string;
   /** Maximum output tokens to request from the model. 0 uses the model's default. */
   maxTokens: number;
+  /**
+   * Maximum cumulative diff characters sent to the reviewer. Files past this
+   * budget are dropped and surfaced as a size-skip callout. Defaults to 100_000.
+   */
+  maxDiffChars: number;
+  /**
+   * When > 0, an MR whose reviewed diff changes more lines than this threshold
+   * gets a "consider decomposing this MR" hint in the summary. 0 = off (default).
+   */
+  decomposeHintLines: number;
   reviewFile: string;
   output: string;
   dryRun: boolean;
@@ -288,6 +300,19 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
 
   const maxTokens = Number(args.maxTokens ?? env.GITLAB_REVIEW_MAX_TOKENS ?? 0);
 
+  const DEFAULT_MAX_DIFF_CHARS = 100_000;
+  const rawMaxDiffChars = Number(args.maxDiffChars ?? env.GITLAB_REVIEW_MAX_DIFF_CHARS);
+  const maxDiffChars =
+    Number.isFinite(rawMaxDiffChars) && rawMaxDiffChars > 0
+      ? rawMaxDiffChars
+      : DEFAULT_MAX_DIFF_CHARS;
+
+  const rawDecomposeHintLines = Number(
+    args.decomposeHintLines ?? env.GITLAB_REVIEW_DECOMPOSE_HINT_LINES ?? 0,
+  );
+  const decomposeHintLines =
+    Number.isFinite(rawDecomposeHintLines) && rawDecomposeHintLines > 0 ? rawDecomposeHintLines : 0;
+
   return {
     project: String(args.project ?? env.CI_PROJECT_ID ?? ''),
     mr: String(args.mr ?? env.CI_MERGE_REQUEST_IID ?? ''),
@@ -307,6 +332,8 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     apiKey,
     baseUrl,
     maxTokens,
+    maxDiffChars,
+    decomposeHintLines,
     reviewFile: String(args.reviewFile ?? 'gitlab-review.md'),
     output: String(args.output ?? 'review-comments.json'),
     dryRun: toBoolean(args.dryRun),

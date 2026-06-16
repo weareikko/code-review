@@ -22,11 +22,14 @@ export type {
   AgentLike,
   CreateAgent,
   CreateAgentParams,
+  FilteredDiff,
   ReviewIntent,
+  ReviewSizeNotice,
   ReviewUsage,
   RunReviewOptions,
   UsageBreakdown,
 } from './gitlab-review.js';
+export { filterDiff } from './gitlab-review.js';
 export { runReview } from './gitlab-review.js';
 export type {
   DiffRefs,
@@ -35,6 +38,7 @@ export type {
   GitLabDiscussionPayload,
   ReviewComment,
   Side,
+  SizeSkippedFile,
 } from './types.js';
 export { normalizeSeverity, toGitLabReviewSeverity } from './types.js';
 export {
@@ -67,6 +71,7 @@ export {
   SUMMARY_HISTORY_START,
   SUMMARY_MARKER,
   buildArchivedSummaryEntry,
+  buildSizeNoticeBlock,
   buildSummaryBody,
   buildReviewedCommitFooter,
   buildSummaryHistoryEntries,
@@ -78,6 +83,7 @@ export {
   stripSummaryHistory,
   stripSummaryMarker,
   upsertSummaryNote,
+  type SizeNotice,
   type SummaryAction,
   type SummaryBodyOptions,
   type SummaryNote,

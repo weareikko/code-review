@@ -518,6 +518,68 @@ describe('base URL and max tokens overrides', () => {
     expect(cfg.maxTokens).toBe(0);
   });
 
+  it('reads maxDiffChars from GITLAB_REVIEW_MAX_DIFF_CHARS', () => {
+    const cfg = resolveConfig([], { ...baseEnv, GITLAB_REVIEW_MAX_DIFF_CHARS: '50000' });
+    expect(cfg.maxDiffChars).toBe(50000);
+  });
+
+  it('reads maxDiffChars from --max-diff-chars flag', () => {
+    const cfg = resolveConfig(['--max-diff-chars', '250000'], baseEnv);
+    expect(cfg.maxDiffChars).toBe(250000);
+  });
+
+  it('--max-diff-chars flag overrides GITLAB_REVIEW_MAX_DIFF_CHARS', () => {
+    const cfg = resolveConfig(['--max-diff-chars', '250000'], {
+      ...baseEnv,
+      GITLAB_REVIEW_MAX_DIFF_CHARS: '50000',
+    });
+    expect(cfg.maxDiffChars).toBe(250000);
+  });
+
+  it('defaults maxDiffChars to 100_000 when not set', () => {
+    const cfg = resolveConfig([], baseEnv);
+    expect(cfg.maxDiffChars).toBe(100_000);
+  });
+
+  it('falls back to the 100_000 default when maxDiffChars is non-positive or invalid', () => {
+    expect(resolveConfig([], { ...baseEnv, GITLAB_REVIEW_MAX_DIFF_CHARS: '0' }).maxDiffChars).toBe(
+      100_000,
+    );
+    expect(
+      resolveConfig([], { ...baseEnv, GITLAB_REVIEW_MAX_DIFF_CHARS: 'nonsense' }).maxDiffChars,
+    ).toBe(100_000);
+  });
+
+  it('reads decomposeHintLines from GITLAB_REVIEW_DECOMPOSE_HINT_LINES', () => {
+    const cfg = resolveConfig([], { ...baseEnv, GITLAB_REVIEW_DECOMPOSE_HINT_LINES: '1500' });
+    expect(cfg.decomposeHintLines).toBe(1500);
+  });
+
+  it('reads decomposeHintLines from --decompose-hint-lines flag', () => {
+    const cfg = resolveConfig(['--decompose-hint-lines', '800'], baseEnv);
+    expect(cfg.decomposeHintLines).toBe(800);
+  });
+
+  it('--decompose-hint-lines flag overrides GITLAB_REVIEW_DECOMPOSE_HINT_LINES', () => {
+    const cfg = resolveConfig(['--decompose-hint-lines', '800'], {
+      ...baseEnv,
+      GITLAB_REVIEW_DECOMPOSE_HINT_LINES: '1500',
+    });
+    expect(cfg.decomposeHintLines).toBe(800);
+  });
+
+  it('defaults decomposeHintLines to 0 (off) when not set', () => {
+    const cfg = resolveConfig([], baseEnv);
+    expect(cfg.decomposeHintLines).toBe(0);
+  });
+
+  it('clamps an invalid decomposeHintLines to 0 (off)', () => {
+    expect(
+      resolveConfig([], { ...baseEnv, GITLAB_REVIEW_DECOMPOSE_HINT_LINES: 'nonsense' })
+        .decomposeHintLines,
+    ).toBe(0);
+  });
+
   it('GITLAB_REVIEW_BASE_URL takes priority over OLLAMA_HOST', () => {
     const cfg = resolveConfig(['--model', 'ollama/llama3:8b'], {
       ...baseEnv,
@@ -736,7 +798,9 @@ describe('applyGitLabReviewEnvPrefix', () => {
       [
         'API_KEY',
         'BASE_URL',
+        'DECOMPOSE_HINT_LINES',
         'FORCE_REVIEW',
+        'MAX_DIFF_CHARS',
         'MAX_TOKENS',
         'MIN_SEVERITY',
         'MODEL',

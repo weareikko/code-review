@@ -43,6 +43,52 @@ describe('summary note upsert', () => {
     expect(footerIndex).toBeGreaterThan(summaryIndex);
   });
 
+  it('renders a prominent size-skip callout above the summary body', () => {
+    const body = buildSummaryBody('Looks good.', undefined, {
+      sizeNotice: {
+        sizeSkippedFiles: [
+          { path: 'src/huge.ts', chars: 120_000 },
+          { path: 'src/also-huge.ts', chars: 80_000 },
+        ],
+      },
+    });
+
+    // callout sits between the title and the LLM summary body
+    const titleIndex = body.indexOf('### Code Review');
+    const calloutIndex = body.indexOf('2 file(s)');
+    const summaryIndex = body.indexOf('Looks good.');
+    expect(calloutIndex).toBeGreaterThan(titleIndex);
+    expect(calloutIndex).toBeLessThan(summaryIndex);
+
+    expect(body).toContain('src/huge.ts');
+    expect(body).toContain('src/also-huge.ts');
+    // an explicit split recommendation
+    expect(body.toLowerCase()).toContain('split');
+  });
+
+  it('renders an MR-level decompose hint when over threshold even with no skips', () => {
+    const body = buildSummaryBody('Looks good.', undefined, {
+      sizeNotice: { sizeSkippedFiles: [], decomposeHint: { lines: 2400, threshold: 1500 } },
+    });
+    const titleIndex = body.indexOf('### Code Review');
+    const hintIndex = body.toLowerCase().indexOf('decompos');
+    const summaryIndex = body.indexOf('Looks good.');
+    expect(hintIndex).toBeGreaterThan(titleIndex);
+    expect(hintIndex).toBeLessThan(summaryIndex);
+    expect(body).toContain('2400');
+    expect(body).toContain('1500');
+  });
+
+  it('omits the size callout entirely when sizeNotice has nothing to surface', () => {
+    const body = buildSummaryBody('Looks good.', undefined, {
+      sizeNotice: { sizeSkippedFiles: [], decomposeHint: undefined },
+    });
+    expect(body.toLowerCase()).not.toContain('split this');
+    expect(body.toLowerCase()).not.toContain('decompos');
+    // unchanged from no-options rendering
+    expect(body).toBe(buildSummaryBody('Looks good.'));
+  });
+
   it('appends the run ID footnote when provided', () => {
     const id = 'a1b2c3d4-0000-0000-0000-000000000000';
     const body = buildSummaryBody('Great work.', undefined, { runId: id });
