@@ -26,11 +26,27 @@ export interface UsageBreakdown {
   total: number;
 }
 
+/**
+ * MR size signals derived from the reviewed diff: files dropped for exceeding
+ * the char budget, and an optional "this MR is too big — decompose it" hint when
+ * the reviewed changed-line count crosses the configured threshold.
+ */
+export interface ReviewSizeNotice {
+  sizeSkippedFiles: SizeSkippedFile[];
+  decomposeHint?: { lines: number; threshold: number };
+}
+
 export interface ReviewUsage {
   model: string;
   tokens: UsageBreakdown;
   cost: UsageBreakdown;
   skills: string[];
+  /**
+   * Size signals for surfacing in the MR summary. `sizeSkippedFiles` lists files
+   * dropped for the char budget; `decomposeHint` is set when the reviewed diff is
+   * past the configured line threshold. Both feed the prominent summary callout.
+   */
+  sizeNotice: ReviewSizeNotice;
 }
 
 export interface AgentLike {
@@ -228,9 +244,19 @@ export async function loadReviewContext(
   return { conventions, reviewRules, skills };
 }
 
+export interface SizeSkippedFile {
+  path: string;
+  chars: number;
+}
+
 export interface FilteredDiff {
   diff: string;
-  skippedFiles: string[];
+  /** Files dropped because they matched a noise pattern (lockfiles, generated, build output). */
+  noiseSkippedFiles: string[];
+  /** Files dropped because including them would exceed the char budget, with their diff size. */
+  sizeSkippedFiles: SizeSkippedFile[];
+  /** Number of added/removed lines in the reviewed (included) diff. */
+  reviewedChangedLines: number;
 }
 
 function parseFilePath(header: string): string | null {
@@ -242,35 +268,47 @@ function isNoise(filePath: string): boolean {
   return NOISE_PATTERNS.some((re) => re.test(filePath));
 }
 
+function countChangedLines(diffSection: string): number {
+  let count = 0;
+  for (const line of diffSection.split('\n')) {
+    if (line.startsWith('+++') || line.startsWith('---')) continue;
+    if (line.startsWith('+') || line.startsWith('-')) count += 1;
+  }
+  return count;
+}
+
 export function filterDiff(raw: string, maxChars = DEFAULT_MAX_DIFF_CHARS): FilteredDiff {
   const sections = raw.split(/(?=^diff --git )/m).filter((section) => section.trim());
   const kept: string[] = [];
-  const skippedFiles: string[] = [];
+  const noiseSkippedFiles: string[] = [];
 
   for (const section of sections) {
     const firstLine = section.split('\n', 1)[0] ?? '';
     const filePath = parseFilePath(firstLine);
     if (filePath && isNoise(filePath)) {
-      skippedFiles.push(filePath);
+      noiseSkippedFiles.push(filePath);
     } else {
       kept.push(section);
     }
   }
 
   const included: string[] = [];
+  const sizeSkippedFiles: SizeSkippedFile[] = [];
   let totalChars = 0;
+  let reviewedChangedLines = 0;
   for (const section of kept) {
     if (totalChars + section.length > maxChars) {
       const firstLine = section.split('\n', 1)[0] ?? '';
       const filePath = parseFilePath(firstLine);
-      if (filePath) skippedFiles.push(filePath);
+      if (filePath) sizeSkippedFiles.push({ path: filePath, chars: section.length });
       continue;
     }
     included.push(section);
     totalChars += section.length;
+    reviewedChangedLines += countChangedLines(section);
   }
 
-  return { diff: included.join(''), skippedFiles };
+  return { diff: included.join(''), noiseSkippedFiles, sizeSkippedFiles, reviewedChangedLines };
 }
 
 function mergeContent(files: ContextFile[]): string {
@@ -655,12 +693,27 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   const minSeverity = toGitLabReviewSeverity(config.minSeverity);
   const logger = options.logger ?? noopLogger;
 
-  const { diff, skippedFiles } = filterDiff(options.diff);
+  const maxDiffChars = config.maxDiffChars > 0 ? config.maxDiffChars : DEFAULT_MAX_DIFF_CHARS;
+  const { diff, noiseSkippedFiles, sizeSkippedFiles, reviewedChangedLines } = filterDiff(
+    options.diff,
+    maxDiffChars,
+  );
   if (!diff.trim()) {
     throw new ReviewerError('No reviewable diff content after filtering noise files.', {
       hint: 'Ensure the merge request introduces changes outside of generated/lock files.',
     });
   }
+
+  // The agent still needs to know which files went unreviewed (size + noise), so
+  // it can mention them; the prominent split/decompose callout is surfaced
+  // separately in the MR summary via `sizeNotice`.
+  const skippedFiles = [...sizeSkippedFiles.map((f) => f.path), ...noiseSkippedFiles];
+
+  const decomposeHint =
+    config.decomposeHintLines > 0 && reviewedChangedLines > config.decomposeHintLines
+      ? { lines: reviewedChangedLines, threshold: config.decomposeHintLines }
+      : undefined;
+  const sizeNotice: ReviewSizeNotice = { sizeSkippedFiles, decomposeHint };
 
   const context = await loadReviewContext(cwd, config.skills, (msg) => logger.warn(msg), {
     refreshGitSkills: config.refreshGitSkills,
@@ -778,6 +831,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     tokens: aggregated.tokens,
     cost: aggregated.cost,
     skills: context.skills.map((s) => s.name),
+    sizeNotice,
   };
 }
 
