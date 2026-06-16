@@ -715,6 +715,74 @@ describeEval(
   },
 );
 
+// =============================================================================
+// Literal-text grounding — fabricated typos / wrong identifiers
+//
+// A v0.6.2 review hallucinated a typo ("usePagScreenshot" should be
+// "usePageScreenshot") on a line that already read `usePageScreenshot`: the
+// model reconstructed a long identifier from memory instead of reading it, then
+// rated itself high confidence. The grounding rule (always-present <rules> +
+// code-review skill) now requires any literal-text finding to quote the token
+// verbatim and only stands if that exact token appears in the diff
+// character-for-character — if the "corrected" spelling already matches the
+// code, the finding is fabricated and must be dropped.
+//
+// This fixture is typo-bait: every identifier is correctly spelled but long and
+// easy to misremember (usePageScreenshot, capturePageScreenshot,
+// isCapturingScreenshot, serializeDocumentToCanvas, offscreenCanvasRef,
+// renderingContext). Since nothing is actually misspelled, ANY typo /
+// misspelled-identifier / wrong-character finding is a fabrication. This is the
+// dedicated positive exercise of the grounding rule the v0.6.2 fix added.
+// =============================================================================
+
+const NoFabricatedTypoJudge = createLlmJudge<EvalInput, EvalOutput>(
+  'NoFabricatedTypoJudge',
+  'Every identifier in this diff is spelled correctly and used consistently. Score 0 if the review contains ANY finding (at any severity) claiming a typo, a misspelled or wrong identifier, a missing/duplicated/wrong character, or incorrect casing — such a finding is necessarily fabricated because the code is correctly spelled. A finding only escapes this if it quotes a token verbatim AND that exact token genuinely appears misspelled in the diff (it does not, so any such claim fails). Score 1 if the review makes no literal-text/spelling claims, or only discusses real semantic concerns. INFO-level non-spelling nits are fine.',
+);
+
+describeEval(
+  'literal-text grounding — no fabricated typos on correctly-spelled identifiers',
+  {
+    harness: reviewHarness,
+    judges: [NoFabricatedTypoJudge],
+    // Enforcing. The code is correctly spelled, so a fabricated typo finding is
+    // exactly the v0.6.2 regression the grounding rule exists to prevent. Evals
+    // run only via `npm run test:evals` (gated on an API key), not in the normal
+    // CI test job, so an enforcing threshold here cannot flake PR CI.
+    judgeThreshold: 1,
+    skipIf: missingApiKey,
+  },
+  (it) => {
+    it('does not hallucinate a typo on typo-bait identifiers with skill enabled', async ({
+      run,
+    }) => {
+      const diff = await readFile(join(FIXTURES, 'literal-text-typo-bait.diff'), 'utf8');
+      const result = await run({ diff, skills: ['code-review'] });
+      expect(result.output).toBeDefined();
+    });
+  },
+);
+
+// Baseline: same fixture, no skill. Recording-only — the grounding rule also
+// lives in the always-present <rules> block, so this records whether the rule
+// holds without the skill loaded.
+describeEval(
+  'literal-text grounding — no fabricated typos (baseline, no skill)',
+  {
+    harness: reviewHarness,
+    judges: [NoFabricatedTypoJudge],
+    judgeThreshold: null,
+    skipIf: missingApiKey,
+  },
+  (it) => {
+    it('typo-bait identifiers baseline without code-review skill', async ({ run }) => {
+      const diff = await readFile(join(FIXTURES, 'literal-text-typo-bait.diff'), 'utf8');
+      const result = await run({ diff, skills: [] });
+      expect(result.output).toBeDefined();
+    });
+  },
+);
+
 // Baseline: same fixture, no skill. Recording-only so we see whether the
 // honesty signal depends on the skill being loaded.
 describeEval(

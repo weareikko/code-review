@@ -1,0 +1,65 @@
+diff --git a/src/screenshot/use-page-screenshot.ts b/src/screenshot/use-page-screenshot.ts
+new file mode 100644
+index 0000000..b3c1f0e
+--- /dev/null
++++ b/src/screenshot/use-page-screenshot.ts
+@@ -0,0 +1,52 @@
++import { useCallback, useRef, useState } from 'react';
++
++/**
++ * Captures a full-page screenshot of the current document and returns the
++ * resulting PNG as a data URL. The capture runs off the main paint frame so
++ * the visible viewport is never blocked while the off-screen canvas renders.
++ */
++export function usePageScreenshot(): {
++  capturePageScreenshot: () => Promise<string>;
++  isCapturingScreenshot: boolean;
++} {
++  const offscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
++  const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
++
++  const capturePageScreenshot = useCallback(async (): Promise<string> => {
++    setIsCapturingScreenshot(true);
++    try {
++      const offscreenCanvas =
++        offscreenCanvasRef.current ?? document.createElement('canvas');
++      offscreenCanvasRef.current = offscreenCanvas;
++
++      const renderingContext = offscreenCanvas.getContext('2d');
++      if (!renderingContext) {
++        throw new Error('Canvas 2D rendering context is unavailable');
++      }
++
++      const documentElement = document.documentElement;
++      offscreenCanvas.width = documentElement.scrollWidth;
++      offscreenCanvas.height = documentElement.scrollHeight;
++
++      await serializeDocumentToCanvas(documentElement, renderingContext);
++
++      return offscreenCanvas.toDataURL('image/png');
++    } finally {
++      setIsCapturingScreenshot(false);
++    }
++  }, []);
++
++  return { capturePageScreenshot, isCapturingScreenshot };
++}
++
++async function serializeDocumentToCanvas(
++  documentElement: HTMLElement,
++  renderingContext: CanvasRenderingContext2D,
++): Promise<void> {
++  const serializedMarkup = new XMLSerializer().serializeToString(documentElement);
++  const encodedMarkup = encodeURIComponent(serializedMarkup);
++  const svgDataUrl = `data:image/svg+xml,${encodedMarkup}`;
++
++  await new Promise<void>((resolve, reject) => {
++    const sourceImage = new Image();
++    sourceImage.addEventListener('load', () => {
++      renderingContext.drawImage(sourceImage, 0, 0);
++      resolve();
++    });
++    sourceImage.addEventListener('error', () => reject(new Error('Failed to rasterize document markup')));
++    sourceImage.src = svgDataUrl;
++  });
++}
