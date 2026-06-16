@@ -722,7 +722,7 @@ describe('applyGitLabReviewEnvPrefix', () => {
   });
 
   it('reserves exactly the documented suffixes', () => {
-    expect([...RESERVED_ENV_SUFFIXES].sort()).toEqual(
+    expect([...RESERVED_ENV_SUFFIXES].toSorted()).toEqual(
       [
         'API_KEY',
         'BASE_URL',
@@ -738,7 +738,7 @@ describe('applyGitLabReviewEnvPrefix', () => {
         'SKILLS',
         'THINKING_LEVEL',
         'VERBOSE',
-      ].sort(),
+      ].toSorted(),
     );
   });
 });
