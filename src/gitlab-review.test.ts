@@ -895,6 +895,69 @@ describe('buildUserPrompt', () => {
     expect(diffPos).toBeLessThan(skippedPos);
     expect(skippedPos).toBeLessThan(priorPos);
   });
+
+  it('with intent: prepends an <intent> block before <commits> and <diff>', () => {
+    const log = 'commit abc\nfeat: x\n';
+    const prompt = buildUserPrompt(diff, [], log, undefined, {
+      title: 'Add retry helper',
+      description: 'Retries failed checkout calls.',
+    });
+
+    expect(prompt).toContain('<intent>');
+    expect(prompt).toContain('Add retry helper');
+    expect(prompt).toContain('Retries failed checkout calls.');
+    expect(prompt).toContain('</intent>');
+    expect(prompt.indexOf('<intent>')).toBeLessThan(prompt.indexOf('<commits>'));
+    expect(prompt.indexOf('<intent>')).toBeLessThan(prompt.indexOf('<diff>'));
+  });
+
+  it('with intent title only: renders the title without an empty description', () => {
+    const prompt = buildUserPrompt(diff, [], undefined, undefined, {
+      title: 'Add retry helper',
+    });
+    expect(prompt).toContain('<intent>');
+    expect(prompt).toContain('Add retry helper');
+  });
+
+  it('trims whitespace from the intent title and description', () => {
+    const prompt = buildUserPrompt(diff, [], undefined, undefined, {
+      title: '  Add retry helper  \n',
+      description: '\n\n  Retries failed checkout calls.  \n\n',
+    });
+    expect(prompt).toContain('Add retry helper');
+    expect(prompt).toContain('Retries failed checkout calls.');
+    expect(prompt).not.toContain('  Add retry helper  ');
+  });
+
+  it('with empty/whitespace intent: omits the <intent> section', () => {
+    expect(buildUserPrompt(diff, [], undefined, undefined, {})).not.toContain('<intent>');
+    expect(
+      buildUserPrompt(diff, [], undefined, undefined, { title: '   ', description: '\n\n' }),
+    ).not.toContain('<intent>');
+    expect(buildUserPrompt(diff, [], undefined, undefined, undefined)).not.toContain('<intent>');
+  });
+
+  it('with all sections: order is <intent> → <commits> → <diff> → <skipped_files> → <prior_review_feedback>', () => {
+    const log = 'commit abc\nfeat: x\n';
+    const threads = [
+      { file: 'src/a.ts', line: 1, resolved: false, botComment: 'Bug.', replies: ['Fixed.'] },
+    ];
+    const prompt = buildUserPrompt(diff, ['lock.json'], log, threads, {
+      title: 'Add retry helper',
+      description: 'Retries failed checkout calls.',
+    });
+
+    const intentPos = prompt.indexOf('<intent>');
+    const commitsPos = prompt.indexOf('<commits>');
+    const diffPos = prompt.indexOf('<diff>');
+    const skippedPos = prompt.indexOf('<skipped_files>');
+    const priorPos = prompt.indexOf('<prior_review_feedback>');
+
+    expect(intentPos).toBeLessThan(commitsPos);
+    expect(commitsPos).toBeLessThan(diffPos);
+    expect(diffPos).toBeLessThan(skippedPos);
+    expect(skippedPos).toBeLessThan(priorPos);
+  });
 });
 
 describe('loadReviewContext', () => {
