@@ -25,11 +25,35 @@ export interface SummaryNote {
   body: string;
 }
 
+/**
+ * A file dropped from the reviewed diff because the cumulative diff exceeded the
+ * char budget (distinct from quiet noise skips like lockfiles). `chars` is the
+ * size of that file's diff section.
+ */
+export interface SizeSkippedFile {
+  path: string;
+  chars: number;
+}
+
+/**
+ * MR-level "this change is too big" signal. Surfaced as a prominent callout at
+ * the top of the summary so a reviewer cannot miss that part of the change went
+ * unreviewed or that the MR is past a human's reviewability threshold.
+ */
+export interface SizeNotice {
+  /** Files dropped for exceeding the char budget. */
+  sizeSkippedFiles?: SizeSkippedFile[];
+  /** Set when the reviewed diff's changed-line count crossed the configured threshold. */
+  decomposeHint?: { lines: number; threshold: number };
+}
+
 export interface SummaryBodyOptions {
   historyEntries?: string[];
   reviewedCommitSha?: string;
   skillsFooter?: string;
   runId?: string;
+  /** Prominent size/decompose callout rendered above the reviewer's summary. */
+  sizeNotice?: SizeNotice;
 }
 
 export interface UpsertSummaryOptions extends SummaryBodyOptions {
@@ -37,12 +61,58 @@ export interface UpsertSummaryOptions extends SummaryBodyOptions {
   costFooter?: string;
 }
 
+function formatChars(chars: number): string {
+  if (chars >= 1000) return `${Math.round(chars / 1000)}k chars`;
+  return `${chars} chars`;
+}
+
+/**
+ * Render the prominent size/decompose callout that sits directly under the
+ * "### Code Review" heading. Returns an empty string when there is nothing to
+ * surface, so the summary body is byte-for-byte unchanged in the common case.
+ */
+export function buildSizeNoticeBlock(notice?: SizeNotice): string {
+  if (!notice) return '';
+  const sizeSkippedFiles = notice.sizeSkippedFiles ?? [];
+  const blocks: string[] = [];
+
+  if (sizeSkippedFiles.length > 0) {
+    const fileList = sizeSkippedFiles
+      .map((file) => `- \`${file.path}\` (${formatChars(file.chars)})`)
+      .join('\n');
+    blocks.push(
+      [
+        `> [!WARNING]`,
+        `> **${sizeSkippedFiles.length} file(s) were not reviewed** — the diff exceeded the size budget, so these files were dropped from the review:`,
+        `>`,
+        ...fileList.split('\n').map((line) => `> ${line}`),
+        `>`,
+        `> This MR is past the reviewability threshold. **Split this MR into smaller, atomic changes** so the whole change can be reviewed.`,
+      ].join('\n'),
+    );
+  }
+
+  if (notice.decomposeHint) {
+    const { lines, threshold } = notice.decomposeHint;
+    blocks.push(
+      [
+        `> [!NOTE]`,
+        `> This MR changes **${lines} lines**, above the configured threshold of **${threshold}**. Consider decomposing this MR into atomic changes — smaller MRs get more thorough review and merge faster.`,
+      ].join('\n'),
+    );
+  }
+
+  return blocks.join('\n\n');
+}
+
 export function buildSummaryBody(
   summary: string,
   costFooter?: string,
   options: SummaryBodyOptions = {},
 ): string {
-  const body = `${SUMMARY_MARKER}\n\n### Code Review\n\n${summary.trim()}`;
+  const sizeNotice = buildSizeNoticeBlock(options.sizeNotice);
+  const header = sizeNotice ? `${sizeNotice}\n\n${summary.trim()}` : summary.trim();
+  const body = `${SUMMARY_MARKER}\n\n### Code Review\n\n${header}`;
   const footerLines = [
     costFooter?.trim(),
     options.skillsFooter?.trim(),
@@ -165,6 +235,7 @@ export async function upsertSummaryNote(
     historyEntries,
     reviewedCommitSha: options.reviewedCommitSha,
     skillsFooter: options.skillsFooter,
+    sizeNotice: options.sizeNotice,
   });
   if (existing) {
     await gitlab.updateMergeRequestNote(project, mr, existing.id, body);
