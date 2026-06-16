@@ -70,6 +70,13 @@ Options:
                           (env: GITLAB_REVIEW_BASE_URL)
   --max-tokens <n>        Override maximum output tokens for the model. 0 = model default.
                           (env: GITLAB_REVIEW_MAX_TOKENS)
+  --max-diff-chars <n>    Cumulative diff char budget sent to the reviewer. Files past this
+                          budget are dropped and surfaced as a size-skip callout. (default: 100000)
+                          (env: GITLAB_REVIEW_MAX_DIFF_CHARS)
+  --decompose-hint-lines <n>
+                          When > 0, an MR whose reviewed diff changes more lines than this
+                          threshold gets a "consider decomposing this MR" note in the summary.
+                          0 = off (default). (env: GITLAB_REVIEW_DECOMPOSE_HINT_LINES)
   --min-severity <level>  info, warn, or critical (default: info)
   --thinking <level>      off, minimal, low, medium, high, or xhigh (default: off).
                           Higher levels add billable thinking tokens at the model output rate.
@@ -338,6 +345,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
                 skillsFooter: formatSkillsFooter(usage.skills),
                 reviewedCommitSha: version.head_commit_sha,
                 runId,
+                sizeNotice: usage.sizeNotice,
               },
             );
             context.summaryAction = result.action;
@@ -412,6 +420,7 @@ function zeroReviewUsage(model: string): ReviewUsage {
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     skills: [],
+    sizeNotice: { sizeSkippedFiles: [] },
   };
 }
 
