@@ -36,6 +36,29 @@ describe('GitLab client URL construction', () => {
       'https://gitlab.example.com/api/v4/projects/group%2Fsubgroup%2Frepo/merge_requests/12',
     );
   });
+
+  it('returns the MR title and description alongside the branches', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          source_branch: 'feature',
+          target_branch: 'main',
+          title: 'Add retry helper',
+          description: 'Adds a retry helper for the cart route.',
+        }),
+      ),
+    );
+    const client = new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+    });
+
+    const mr = await client.getMergeRequest('group/repo', '12');
+
+    expect(mr.title).toBe('Add retry helper');
+    expect(mr.description).toBe('Adds a retry helper for the cart route.');
+  });
 });
 
 describe('GitLab pagination with mocked fetch', () => {

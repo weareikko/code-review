@@ -40,6 +40,10 @@ function isAbortError(error: unknown): boolean {
 export interface MergeRequest {
   source_branch: string;
   target_branch: string;
+  /** MR title — the one-line declared intent of the change. May be empty. */
+  title?: string;
+  /** MR description — the author's full reasoning / decision log. May be empty or null. */
+  description?: string | null;
 }
 
 export interface Version {
