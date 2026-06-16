@@ -27,7 +27,6 @@ export type {
   ReviewSizeNotice,
   ReviewUsage,
   RunReviewOptions,
-  SizeSkippedFile,
   UsageBreakdown,
 } from './gitlab-review.js';
 export { filterDiff } from './gitlab-review.js';
@@ -39,6 +38,7 @@ export type {
   GitLabDiscussionPayload,
   ReviewComment,
   Side,
+  SizeSkippedFile,
 } from './types.js';
 export { normalizeSeverity, toGitLabReviewSeverity } from './types.js';
 export {
@@ -84,7 +84,6 @@ export {
   stripSummaryMarker,
   upsertSummaryNote,
   type SizeNotice,
-  type SizeSkippedFile as SummarySizeSkippedFile,
   type SummaryAction,
   type SummaryBodyOptions,
   type SummaryNote,

@@ -1,6 +1,6 @@
 import { extractExistingFingerprints } from './fingerprints.js';
 import type { Discussion, GitLabClient } from './gitlab.js';
-import type { Fingerprints, GeneratedComment } from './types.js';
+import type { Fingerprints, GeneratedComment, SizeSkippedFile } from './types.js';
 
 export const SUMMARY_MARKER = '<!-- gitlab-review:summary -->';
 export const SUMMARY_HISTORY_START = '<!-- gitlab-review:summary-history:start -->';
@@ -26,23 +26,13 @@ export interface SummaryNote {
 }
 
 /**
- * A file dropped from the reviewed diff because the cumulative diff exceeded the
- * char budget (distinct from quiet noise skips like lockfiles). `chars` is the
- * size of that file's diff section.
- */
-export interface SizeSkippedFile {
-  path: string;
-  chars: number;
-}
-
-/**
  * MR-level "this change is too big" signal. Surfaced as a prominent callout at
  * the top of the summary so a reviewer cannot miss that part of the change went
  * unreviewed or that the MR is past a human's reviewability threshold.
  */
 export interface SizeNotice {
   /** Files dropped for exceeding the char budget. */
-  sizeSkippedFiles?: SizeSkippedFile[];
+  sizeSkippedFiles: SizeSkippedFile[];
   /** Set when the reviewed diff's changed-line count crossed the configured threshold. */
   decomposeHint?: { lines: number; threshold: number };
 }
@@ -73,7 +63,7 @@ function formatChars(chars: number): string {
  */
 export function buildSizeNoticeBlock(notice?: SizeNotice): string {
   if (!notice) return '';
-  const sizeSkippedFiles = notice.sizeSkippedFiles ?? [];
+  const sizeSkippedFiles = notice.sizeSkippedFiles;
   const blocks: string[] = [];
 
   if (sizeSkippedFiles.length > 0) {

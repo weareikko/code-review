@@ -68,7 +68,7 @@ describe('summary note upsert', () => {
 
   it('renders an MR-level decompose hint when over threshold even with no skips', () => {
     const body = buildSummaryBody('Looks good.', undefined, {
-      sizeNotice: { decomposeHint: { lines: 2400, threshold: 1500 } },
+      sizeNotice: { sizeSkippedFiles: [], decomposeHint: { lines: 2400, threshold: 1500 } },
     });
     const titleIndex = body.indexOf('### Code Review');
     const hintIndex = body.toLowerCase().indexOf('decompos');

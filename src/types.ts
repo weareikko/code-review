@@ -27,6 +27,16 @@ export interface ReviewComment {
   body: string;
 }
 
+/**
+ * A file dropped from the reviewed diff because the cumulative diff exceeded the
+ * char budget (distinct from quiet noise skips like lockfiles). `chars` is the
+ * size of that file's diff section.
+ */
+export interface SizeSkippedFile {
+  path: string;
+  chars: number;
+}
+
 export interface DiffRefs {
   base_sha: string;
   start_sha: string;

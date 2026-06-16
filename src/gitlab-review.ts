@@ -15,7 +15,7 @@ import type { PriorThread } from './prior-threads.js';
 import { renderPriorThreadsBlock } from './prior-threads.js';
 import type { Skill } from './skills.js';
 import { loadAutoDiscoveredSkills, loadNamedSkill } from './skills.js';
-import type { GitLabReviewSeverity, ThinkingLevel } from './types.js';
+import type { GitLabReviewSeverity, SizeSkippedFile, ThinkingLevel } from './types.js';
 import { splitModel, toGitLabReviewSeverity } from './types.js';
 
 export interface UsageBreakdown {
@@ -242,11 +242,6 @@ export async function loadReviewContext(
   skills.push(...named);
 
   return { conventions, reviewRules, skills };
-}
-
-export interface SizeSkippedFile {
-  path: string;
-  chars: number;
 }
 
 export interface FilteredDiff {
