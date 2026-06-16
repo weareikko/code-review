@@ -54,7 +54,9 @@ const RESERVED_ENV_SUFFIX_SET = new Set<string>(RESERVED_ENV_SUFFIXES);
  * pi-ai's request-time reads both read `process.env` directly, so mutating it
  * in-process is what makes those reads pick up the de-prefixed values.
  *
- * Empty prefixed values are ignored (treated as unset).
+ * Empty prefixed values are ignored (treated as unset). Double-prefixed names
+ * (e.g. `GITLAB_REVIEW_GITLAB_REVIEW_MODEL`) are also skipped so a de-prefixed
+ * suffix can never clobber the tool's own reserved `GITLAB_REVIEW_*` settings.
  *
  * @returns the same `env` object it was given, mutated in place.
  */
@@ -62,7 +64,8 @@ export function applyGitLabReviewEnvPrefix(env = process.env): NodeJS.ProcessEnv
   for (const key of Object.keys(env)) {
     if (!key.startsWith(GITLAB_REVIEW_PREFIX)) continue;
     const suffix = key.slice(GITLAB_REVIEW_PREFIX.length);
-    if (!suffix || RESERVED_ENV_SUFFIX_SET.has(suffix)) continue;
+    if (!suffix || RESERVED_ENV_SUFFIX_SET.has(suffix) || suffix.startsWith(GITLAB_REVIEW_PREFIX))
+      continue;
     const value = env[key];
     if (typeof value !== 'string' || value.length === 0) continue;
     env[suffix] = value;

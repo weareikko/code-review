@@ -698,6 +698,16 @@ describe('applyGitLabReviewEnvPrefix', () => {
     expect(env.API_KEY).toBeUndefined();
   });
 
+  it('never lets a double-prefixed name clobber a reserved setting', () => {
+    const env: NodeJS.ProcessEnv = {
+      GITLAB_REVIEW_MODEL: 'reserved-model',
+      GITLAB_REVIEW_GITLAB_REVIEW_MODEL: 'attacker-model',
+    };
+    applyGitLabReviewEnvPrefix(env);
+    expect(env.GITLAB_REVIEW_MODEL).toBe('reserved-model');
+    expect(env.GITLAB_REVIEW_GITLAB_REVIEW_MODEL).toBe('attacker-model');
+  });
+
   it('is a no-op when no GITLAB_REVIEW_ vars are set', () => {
     const env: NodeJS.ProcessEnv = {
       ANTHROPIC_API_KEY: 'existing',
