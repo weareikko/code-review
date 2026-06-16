@@ -322,6 +322,7 @@ function buildSharedBase(minSeverity: GitLabReviewSeverity): string[] {
     '- Only flag what is actually wrong in the diff — no hypotheticals',
     '- If nothing is wrong, say so clearly',
     '- Do not make claims about external state (dates, library versions, deprecation status, API availability) that cannot be verified from the diff itself',
+    '- A finding that asserts something about the literal text of the code — a typo, a misspelled or wrong identifier, a missing or duplicated character, wrong casing — MUST quote the offending token verbatim and only stands if that exact token appears in the diff character-for-character. Re-read the line before reporting: if the spelling you claim is correct already matches the code, the finding is fabricated — drop it.',
     '- Write declaratively. Avoid "consider", "might want to", "could potentially", "you may want to" in issue and suggestion subjects. State the defect and the fix directly. If unsure it is wrong, omit it. (The question and thought labels are inherently tentative and exempt.)',
     '- The summary lists findings by their Conventional Comment subject only; it MUST NOT repeat the discussion, impact ("why it matters"), or suggested fix from any inline comment',
     '- Cross-cutting content (suppressed findings, unreviewed files, overall verdict) goes in the summary, never in inline comments',

@@ -702,6 +702,19 @@ describe('buildJSONSystemPrompt — skill section', () => {
       expect(prompt).toMatch(/MUST NOT repeat the discussion/);
     });
 
+    it('requires literal-text findings (typos, wrong identifiers) to quote the token verbatim', () => {
+      const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
+
+      // A v0.6.2 review hallucinated a typo ("usePagScreenshot" should be
+      // "usePageScreenshot") on a line that actually read `usePageScreenshot`.
+      // Claims about the literal text are hallucination-prone; the rule forces
+      // a verbatim quote and a re-read before any such finding can stand.
+      expect(prompt).toMatch(/literal text of the code/i);
+      expect(prompt).toMatch(/quote the offending token verbatim/i);
+      expect(prompt).toMatch(/character-for-character/i);
+      expect(prompt).toMatch(/the finding is fabricated — drop it/i);
+    });
+
     it('includes the declarative tone rule excluding question and thought labels', () => {
       const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
 

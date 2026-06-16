@@ -78,6 +78,7 @@ Use the lower severity when impact depends on unproven preconditions.
 - Performance unless the change causes a reachable timeout, hang, or resource exhaustion.
 - Missing tests unless the changed test now asserts the wrong behavior or hides a real regression.
 - Existing bugs untouched by the diff.
+- Typos, misspelled identifiers, or wrong characters unless you quote the offending token verbatim from the diff and it appears there character-for-character. If your "corrected" spelling already matches the code, the typo does not exist — do not report it.
 - Hypothetical failures requiring unrealistic inputs or impossible call order.
 - Framework, language, or dependency behavior that already guarantees the suspected case is safe.
 - Patterns that a commit message in `<commits>` explicitly justifies with a concrete artefact (ADR, incident reference, named sign-off, or stated architectural rationale) — see **Commit Context** above.
