@@ -175,14 +175,28 @@ export function triageFindings(groups: AuthoredFinding[][]): AuthoredFinding[] {
   }
   normalized.sort(compareForClustering);
 
+  // Each cluster keeps a frozen proximity anchor line (the sort-stable first
+  // line seen for that cluster). Survivorship may swap in a higher-ranked copy,
+  // but the anchor line must NOT drift: otherwise a later finding out of range
+  // of the original anchor could fall within range of the replacement and be
+  // transitively over-merged across genuinely distinct findings.
   const survivors: NormalizedFinding[] = [];
+  const anchorLines: number[] = [];
   for (const finding of normalized) {
-    const clusterIndex = survivors.findIndex((survivor) => isSameFinding(survivor, finding));
+    const clusterIndex = survivors.findIndex((survivor, i) =>
+      isSameFinding(
+        { ...survivor, comment: { ...survivor.comment, line: anchorLines[i] } },
+        finding,
+      ),
+    );
     if (clusterIndex === -1) {
       survivors.push(finding);
+      anchorLines.push(finding.comment.line);
       continue;
     }
     if (outranks(finding, survivors[clusterIndex])) {
+      // Adopt the higher-ranked copy (severity/confidence/body/authorModel/line)
+      // but leave the cluster's frozen proximity anchor untouched.
       survivors[clusterIndex] = finding;
     }
   }

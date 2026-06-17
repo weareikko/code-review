@@ -147,6 +147,81 @@ describe('triageFindings', () => {
       expect(out).toHaveLength(2);
     });
 
+    it('does not transitively over-merge a 3-finding chain via anchor drift', () => {
+      // Subject-similar enough to pass Jaccard pairwise, but representing
+      // distinct issues. With MAX_LINE_DELTA = 2, sorted order is 40, 42, 44.
+      // If the line-42 critical finding replaced the cluster anchor's line, the
+      // line-44 finding (4 lines from the original line-40 anchor) would wrongly
+      // fall within range of the moved anchor and collapse three findings into
+      // one. The proximity anchor must stay frozen at line 40.
+      const out = triageFindings([
+        [
+          f({
+            file: 'a.ts',
+            line: 40,
+            severity: 'warn',
+            body: 'issue: Unawaited promise in retry loop',
+          }),
+        ],
+        [
+          f({
+            file: 'a.ts',
+            line: 42,
+            severity: 'critical',
+            body: 'issue (blocking): Promise in retry loop is not awaited',
+          }),
+        ],
+        [
+          f({
+            file: 'a.ts',
+            line: 44,
+            severity: 'warn',
+            body: 'issue: Promise in retry loop not awaited again',
+          }),
+        ],
+      ]);
+      expect(out).toHaveLength(2);
+      // Two distinct findings survive: the line-40 cluster (which absorbed the
+      // line-42 critical near-duplicate and reports the surviving copy's line
+      // 42) and the standalone line-44 finding. They never collapse, because
+      // proximity is measured against the frozen line-40 anchor (44 is 4 lines
+      // away), not the drifted line-42 replacement.
+      const lines = out.map((o) => o.comment.line).sort((x, y) => x - y);
+      expect(lines).toEqual([42, 44]);
+      // The cluster kept the higher-severity copy.
+      const cluster = out.find((o) => o.comment.severity === 'critical');
+      expect(cluster).toBeDefined();
+      // The line-44 finding survives independently.
+      expect(out.some((o) => o.comment.line === 44 && o.comment.severity === 'warn')).toBe(true);
+    });
+
+    it('is deterministic on the 3-finding chain under reordering', () => {
+      const a = f({
+        file: 'a.ts',
+        line: 40,
+        severity: 'warn',
+        body: 'issue: Unawaited promise in retry loop',
+      });
+      const b = f({
+        file: 'a.ts',
+        line: 42,
+        severity: 'critical',
+        body: 'issue (blocking): Promise in retry loop is not awaited',
+      });
+      const cc = f({
+        file: 'a.ts',
+        line: 44,
+        severity: 'warn',
+        body: 'issue: Promise in retry loop not awaited again',
+      });
+      const out1 = triageFindings([[a], [b], [cc]]);
+      const out2 = triageFindings([[cc], [b], [a]]);
+      const out3 = triageFindings([[b], [a], [cc]]);
+      expect(out1).toHaveLength(2);
+      expect(out2).toEqual(out1);
+      expect(out3).toEqual(out1);
+    });
+
     it('does not merge similar subjects in different files', () => {
       const out = triageFindings([
         [f({ file: 'a.ts', line: 40, body: 'issue: Unawaited promise in retry loop' })],
