@@ -65,6 +65,12 @@ Options:
                           openrouter/anthropic/claude-3-opus are supported by splitting on the
                           first slash. Use ollama/<model> for local Ollama models.
                           (required; env: GITLAB_REVIEW_MODEL)
+  --model-pool <list>     Comma-separated provider/modelId list for heterogeneous full-depth
+                          review. Angles map to pool members (angle i → member i % pool size)
+                          and each finding is verified by a model other than its author. Each
+                          member resolves its own provider key; members without a key are
+                          dropped with a warning. Empty (default) = single model = no change.
+                          (env: GITLAB_REVIEW_MODEL_POOL)
   --base-url <url>        Override the provider base URL (e.g. a custom OpenAI-compatible
                           endpoint). For Ollama, set OLLAMA_HOST instead.
                           (env: GITLAB_REVIEW_BASE_URL)
@@ -314,6 +320,8 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
     });
 
     console.log(formatUsageLine(usage));
+    const perModel = formatPerModelUsage(usage);
+    if (perModel) console.log(perModel);
 
     const newCount = generated.filter((item) => !item.duplicate).length;
     recordCommentCounts(runContext, generated);
@@ -442,6 +450,26 @@ export function formatUsageLine(usage: ReviewUsage): string {
   const output = formatter.format(usage.tokens.output);
   const cost = usage.cost.total.toFixed(4);
   return `Review usage: ${inputLabel} / ${output} out tokens — $${cost} (${usage.model})`;
+}
+
+/**
+ * Render the per-model usage breakdown for heterogeneous `full`-depth runs: one
+ * indented line per pool member with its billable input / output tokens and
+ * cost. Returns `undefined` when there is no breakdown (single-model runs), so
+ * the caller prints nothing extra. Surfaces model ids and numbers only — never
+ * any key or secret.
+ */
+export function formatPerModelUsage(usage: ReviewUsage): string | undefined {
+  if (!usage.byModel || usage.byModel.length < 2) return undefined;
+  const formatter = new Intl.NumberFormat('en-US');
+  const lines = usage.byModel.map((entry) => {
+    const billableInput = entry.tokens.input + entry.tokens.cacheRead + entry.tokens.cacheWrite;
+    const input = formatter.format(billableInput);
+    const out = formatter.format(entry.tokens.output);
+    const cost = entry.cost.total.toFixed(4);
+    return `  - ${entry.model}: ${input} in / ${out} out tokens — $${cost}`;
+  });
+  return ['Per-model usage:', ...lines].join('\n');
 }
 
 function recordCommentCounts(context: DiagnosticContext, generated: GeneratedComment[]): void {
