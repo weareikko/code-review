@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-17
+
 ### Added
 
 - **Heterogeneous `full`-depth review via a model pool (`--model-pool`, env `GITLAB_REVIEW_MODEL_POOL`).** Multi-agent review derives most of its value from _model_ diversity, not just prompt diversity — but until now every agent in the `full` pipeline ran the same `--model`, so the multi-angle finders were one reviewer with a larger invoice and the adversarial verifier shared the finder's blind spots. You can now pass a comma-separated `provider/modelId` pool (e.g. `--model-pool anthropic/claude-sonnet-4-5,google/gemini-2.5-pro`):
