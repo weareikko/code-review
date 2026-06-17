@@ -30,6 +30,7 @@ export const RESERVED_ENV_SUFFIXES = [
   'MAX_TOKENS',
   'MIN_SEVERITY',
   'MODEL',
+  'MODEL_POOL',
   'OTEL',
   'OTEL_CAPTURE_CONTENT',
   'POSTING_MODE',
@@ -89,6 +90,15 @@ export interface Config {
   gitlabToken: string;
   gitlabAuthHeader: GitLabAuthHeader;
   model: string;
+  /**
+   * Optional pool of `provider/modelId` models for heterogeneous `full`-depth
+   * review. When non-empty, multi-angle Find maps each angle to a pool member and
+   * the adversarial verifier prefers a member other than the one that authored a
+   * finding. Empty (the default) means the effective pool is just `[model]`, which
+   * reproduces single-model behaviour byte-for-byte. Sourced from `--model-pool`
+   * or `GITLAB_REVIEW_MODEL_POOL` (comma-separated).
+   */
+  modelPool: string[];
   minSeverity: Severity;
   thinkingLevel: ThinkingLevel;
   /**
@@ -245,7 +255,7 @@ function resolveOllamaBaseUrl(model: string, env: NodeJS.ProcessEnv): string | u
  * NOTE: `getEnvApiKey` reads `process.env` directly (not a passed-in env), so
  * tests stub `process.env` or pass `--api-key` to control the resolved key.
  */
-function resolveProviderApiKey(model: string): string {
+export function resolveProviderApiKey(model: string): string {
   const provider = parseModelProvider(model);
   if (!provider) return '';
   // Ollama is a local endpoint — no real key needed.
@@ -264,6 +274,23 @@ function resolveSkills(args: ParsedArgs, env: NodeJS.ProcessEnv): string[] {
       .map((s) => s.trim())
       .filter(Boolean);
   return [];
+}
+
+/**
+ * Resolve the model pool from `--model-pool` (preferred) or
+ * `GITLAB_REVIEW_MODEL_POOL`. Both are comma-separated `provider/modelId` lists.
+ * Entries are trimmed and empty entries dropped. Returns `[]` when unset, which
+ * downstream treats as "use the single `config.model`".
+ */
+function resolveModelPool(args: ParsedArgs, env: NodeJS.ProcessEnv): string[] {
+  const raw =
+    (typeof args.modelPool === 'string' && args.modelPool.length > 0
+      ? args.modelPool
+      : env.GITLAB_REVIEW_MODEL_POOL) ?? '';
+  return raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function resolveGitLabToken(
@@ -332,6 +359,7 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     gitlabToken: token.token,
     gitlabAuthHeader: token.header,
     model,
+    modelPool: resolveModelPool(args, env),
     minSeverity: normalizeChoice(
       args.minSeverity ?? env.GITLAB_REVIEW_MIN_SEVERITY ?? 'info',
     ) as Severity,
