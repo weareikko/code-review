@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Split the bloated README into a lean landing page plus dedicated reference pages under `docs/` (configuration, providers, skills, observability, output format). Docs-only reorganization with no behavior change; `docs/` stays out of the published npm artifact, so the README remains self-sufficient for getting started.
+
 ## [0.7.0] - 2026-06-17
 
 ### Added
