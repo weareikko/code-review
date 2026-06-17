@@ -23,6 +23,7 @@ export type {
   CreateAgent,
   CreateAgentParams,
   FilteredDiff,
+  ModelUsage,
   ReviewIntent,
   ReviewSizeNotice,
   ReviewUsage,

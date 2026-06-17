@@ -45,6 +45,7 @@ describe('runReview pipeline', () => {
     cwd: '/tmp',
     skills: [],
     refreshGitSkills: false,
+    modelPool: [],
   };
 
   const sampleDiff = [
@@ -483,11 +484,9 @@ describe('runReview pipeline', () => {
 
   it('full depth runs angle finders, triages duplicates, then verifies', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
-    const angleJson = (comments: unknown[]) =>
-      JSON.stringify({ summary: '**Risk: High** — x\n\nMulti-angle overview.', comments });
     // correctness and state-async-data both surface "Bug A" (must dedup to one);
     // state adds "Bug B"; failure-security adds an INFO nit.
-    const correctness = angleJson([
+    const correctness = poolAngleJson([
       {
         file: 'src/x.ts',
         line: 10,
@@ -497,7 +496,7 @@ describe('runReview pipeline', () => {
         body: 'issue (blocking): Bug A off-by-one\n\nboom',
       },
     ]);
-    const stateAsync = angleJson([
+    const stateAsync = poolAngleJson([
       {
         file: 'src/x.ts',
         line: 10,
@@ -515,7 +514,7 @@ describe('runReview pipeline', () => {
         body: 'issue: Bug B unawaited promise\n\nboom',
       },
     ]);
-    const failureSecurity = angleJson([
+    const failureSecurity = poolAngleJson([
       {
         file: 'src/z.ts',
         line: 3,
@@ -643,6 +642,7 @@ describe('resolveModel (via runReview createAgent)', () => {
     cwd: '/tmp',
     skills: [],
     refreshGitSkills: false,
+    modelPool: [],
   };
 
   it('builds an openai-completions model for ollama provider', async () => {
@@ -1187,5 +1187,251 @@ describe('loadReviewContext', () => {
       refreshGitSkills: false,
     });
     expect(ctx.skills.map((s) => s.name)).toContain('code-review');
+  });
+});
+
+const poolAngleJson = (comments: unknown[]) =>
+  JSON.stringify({ summary: '**Risk: High** — x\n\noverview.', comments });
+
+describe('full depth with a model pool', () => {
+  const baseConfig: Config = {
+    project: 'proj',
+    mr: '1',
+    gitlabUrl: 'https://gitlab.example.com',
+    gitlabToken: 'tok',
+    gitlabAuthHeader: 'PRIVATE-TOKEN',
+    model: 'anthropic/claude-sonnet-4-5',
+    minSeverity: 'info',
+    thinkingLevel: 'off',
+    postingMode: 'direct',
+    reviewDepth: 'full',
+    apiKey: 'key',
+    baseUrl: '',
+    maxTokens: 0,
+    maxDiffChars: 100_000,
+    decomposeHintLines: 0,
+    reviewFile: 'gitlab-review.md',
+    output: 'review-comments.json',
+    dryRun: false,
+    noPost: false,
+    postSummary: false,
+    forceReview: false,
+    verbose: false,
+    cwd: '/tmp',
+    skills: [],
+    refreshGitSkills: false,
+    modelPool: [],
+  };
+
+  const sampleDiff = [
+    'diff --git a/src/a.ts b/src/a.ts',
+    '--- a/src/a.ts',
+    '+++ b/src/a.ts',
+    '@@ -1,2 +1,3 @@',
+    ' line1',
+    '+added',
+    ' line2',
+    '',
+  ].join('\n');
+
+  function makeAssistant(text: string): AssistantMessage {
+    return {
+      role: 'assistant',
+      content: text ? [{ type: 'text', text }] : [],
+      api: 'anthropic-messages',
+      provider: 'anthropic',
+      model: 'm',
+      stopReason: 'stop',
+      timestamp: Date.now(),
+      usage: {
+        input: 10,
+        output: 5,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 15,
+        cost: { input: 0.001, output: 0.002, cacheRead: 0, cacheWrite: 0, total: 0.003 },
+      },
+    } as AssistantMessage;
+  }
+
+  function fakeAgent(messages: AssistantMessage[]): AgentLike {
+    let listener: ((event: AgentEvent) => void | Promise<void>) | undefined;
+    return {
+      subscribe(fn) {
+        listener = fn;
+        return () => {
+          listener = undefined;
+        };
+      },
+      async prompt() {
+        if (!listener) return;
+        for (const message of messages) await listener({ type: 'message_end', message });
+        await listener({ type: 'agent_end', messages });
+      },
+    };
+  }
+
+  it('maps angle i to pool member i % pool.length (fixed mapping)', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'pool-'));
+    vi.stubEnv('ANTHROPIC_API_KEY', 'anthropic-key');
+    vi.stubEnv('GEMINI_API_KEY', 'gemini-key');
+    try {
+      const finderProviders: string[] = [];
+      const createAgent: CreateAgent = (params) => {
+        const p = params.systemPrompt;
+        if (p.includes('adversarial verifier')) {
+          return fakeAgent([makeAssistant('{"decision":"keep","reason":"ok"}')]);
+        }
+        // record (angleKey, provider) for each finder
+        const angleMatch = p.match(/Your assigned angle is "([^"]+)"/);
+        finderProviders.push(`${angleMatch?.[1]}:${params.model.provider}`);
+        return fakeAgent([makeAssistant(poolAngleJson([]))]);
+      };
+      await runReview(
+        {
+          ...baseConfig,
+          cwd,
+          modelPool: ['anthropic/claude-sonnet-4-5', 'google/gemini-2.5-pro'],
+        },
+        { cwd, diff: sampleDiff, createAgent },
+      );
+      // 3 angles, pool size 2 → providers cycle anthropic, google, anthropic.
+      expect(finderProviders).toContain('correctness:anthropic');
+      expect(finderProviders).toContain('state-async-data:google');
+      expect(finderProviders).toContain('failure-security:anthropic');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('verifies each finding with a model other than its author', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'pool-'));
+    vi.stubEnv('ANTHROPIC_API_KEY', 'anthropic-key');
+    vi.stubEnv('GEMINI_API_KEY', 'gemini-key');
+    try {
+      // Only the correctness angle (pool member 0 = anthropic) raises a severe
+      // finding. Its verifier must therefore run on the OTHER pool member (google).
+      const verifierProviders: string[] = [];
+      const createAgent: CreateAgent = (params) => {
+        const p = params.systemPrompt;
+        if (p.includes('adversarial verifier')) {
+          verifierProviders.push(params.model.provider);
+          return fakeAgent([makeAssistant('{"decision":"keep","reason":"ok"}')]);
+        }
+        if (p.includes('"correctness"')) {
+          return fakeAgent([
+            makeAssistant(
+              poolAngleJson([
+                {
+                  file: 'src/x.ts',
+                  line: 10,
+                  side: 'RIGHT',
+                  severity: 'critical',
+                  confidence: 'high',
+                  body: 'issue (blocking): real bug\n\nboom',
+                },
+              ]),
+            ),
+          ]);
+        }
+        return fakeAgent([makeAssistant(poolAngleJson([]))]);
+      };
+      await runReview(
+        {
+          ...baseConfig,
+          cwd,
+          modelPool: ['anthropic/claude-sonnet-4-5', 'google/gemini-2.5-pro'],
+        },
+        { cwd, diff: sampleDiff, createAgent },
+      );
+      expect(verifierProviders).toEqual(['google']);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('resolves each pool member key independently and drops members whose key is missing', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'pool-'));
+    vi.stubEnv('ANTHROPIC_API_KEY', 'anthropic-key');
+    vi.stubEnv('GEMINI_API_KEY', ''); // google key missing → member dropped
+    try {
+      const warnings: string[] = [];
+      const logger: Logger = { ...noopLogger, warn: (m) => warnings.push(m) };
+      const providers = new Set<string>();
+      const createAgent: CreateAgent = (params) => {
+        providers.add(params.model.provider);
+        const p = params.systemPrompt;
+        if (p.includes('adversarial verifier')) {
+          return fakeAgent([makeAssistant('{"decision":"keep","reason":"ok"}')]);
+        }
+        return fakeAgent([makeAssistant(poolAngleJson([]))]);
+      };
+      await runReview(
+        {
+          ...baseConfig,
+          cwd,
+          model: 'anthropic/claude-sonnet-4-5',
+          apiKey: 'anthropic-key',
+          modelPool: ['anthropic/claude-sonnet-4-5', 'google/gemini-2.5-pro'],
+        },
+        { cwd, diff: sampleDiff, createAgent, logger },
+      );
+      // google was dropped → only anthropic runs.
+      expect([...providers]).toEqual(['anthropic']);
+      expect(warnings.some((w) => /google/.test(w) && /key/i.test(w))).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('reports a per-model usage breakdown when the pool has >1 model', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'pool-'));
+    vi.stubEnv('ANTHROPIC_API_KEY', 'anthropic-key');
+    vi.stubEnv('GEMINI_API_KEY', 'gemini-key');
+    try {
+      const createAgent: CreateAgent = (params) => {
+        const p = params.systemPrompt;
+        if (p.includes('adversarial verifier')) {
+          return fakeAgent([makeAssistant('{"decision":"keep","reason":"ok"}')]);
+        }
+        return fakeAgent([makeAssistant(poolAngleJson([]))]);
+      };
+      const usage = await runReview(
+        {
+          ...baseConfig,
+          cwd,
+          modelPool: ['anthropic/claude-sonnet-4-5', 'google/gemini-2.5-pro'],
+        },
+        { cwd, diff: sampleDiff, createAgent },
+      );
+      expect(usage.byModel).toBeDefined();
+      const ids = (usage.byModel ?? []).map((b) => b.model).toSorted();
+      expect(ids).toEqual(['anthropic/claude-sonnet-4-5', 'google/gemini-2.5-pro']);
+      // totals are the sum of per-model token totals
+      const summed = (usage.byModel ?? []).reduce((acc, b) => acc + b.tokens.total, 0);
+      expect(summed).toBe(usage.tokens.total);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('falls back to config.model when no pool is configured (single-model byte-identical)', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'pool-'));
+    const providers = new Set<string>();
+    const createAgent: CreateAgent = (params) => {
+      providers.add(params.model.provider);
+      const p = params.systemPrompt;
+      if (p.includes('adversarial verifier')) {
+        return fakeAgent([makeAssistant('{"decision":"keep","reason":"ok"}')]);
+      }
+      return fakeAgent([makeAssistant(poolAngleJson([]))]);
+    };
+    const usage = await runReview(
+      { ...baseConfig, cwd, modelPool: [] },
+      { cwd, diff: sampleDiff, createAgent },
+    );
+    expect([...providers]).toEqual(['anthropic']);
+    // single distinct model → no per-model breakdown surfaced
+    expect(usage.byModel === undefined || usage.byModel.length <= 1).toBe(true);
   });
 });

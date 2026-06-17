@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { countPostedBySeverity, formatUsageLine, withHttpStamping } from './cli.js';
+import {
+  countPostedBySeverity,
+  formatPerModelUsage,
+  formatUsageLine,
+  withHttpStamping,
+} from './cli.js';
 import type { DiagnosticContext } from './diagnostics.js';
 import type { ReviewUsage } from './gitlab-review.js';
 import type { GitLabResponseInfo } from './gitlab.js';
@@ -117,6 +122,42 @@ describe('formatUsageLine', () => {
     expect(formatUsageLine(usage)).toBe(
       'Review usage: 600 in / 25 out tokens — $0.0533 (anthropic/claude-sonnet-4-5)',
     );
+  });
+});
+
+function zeroBreakdown() {
+  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
+}
+
+describe('formatPerModelUsage', () => {
+  it('returns undefined when there is no per-model breakdown', () => {
+    expect(formatPerModelUsage(makeUsage())).toBeUndefined();
+  });
+
+  it('renders one line per model with token totals and cost', () => {
+    const usage: ReviewUsage = {
+      ...makeUsage(),
+      byModel: [
+        {
+          model: 'anthropic/claude-sonnet-4-5',
+          tokens: { ...zeroBreakdown(), input: 1000, output: 200, total: 1200 },
+          cost: { ...zeroBreakdown(), total: 0.04 },
+        },
+        {
+          model: 'google/gemini-2.5-pro',
+          tokens: { ...zeroBreakdown(), input: 500, output: 100, total: 600 },
+          cost: { ...zeroBreakdown(), total: 0.0133 },
+        },
+      ],
+    };
+    const out = formatPerModelUsage(usage);
+    expect(out).toBeDefined();
+    expect(out).toContain('anthropic/claude-sonnet-4-5');
+    expect(out).toContain('google/gemini-2.5-pro');
+    expect(out).toContain('$0.0400');
+    expect(out).toContain('$0.0133');
+    // never leak keys — only model ids and numbers
+    expect(out).not.toMatch(/key/i);
   });
 });
 

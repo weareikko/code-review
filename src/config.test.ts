@@ -89,6 +89,41 @@ describe('config env defaults', () => {
       gitlabAuthHeader: 'JOB-TOKEN',
     });
   });
+
+  it('defaults modelPool to an empty list when unset', () => {
+    const cfg = resolveConfig([], {
+      CI_PROJECT_ID: '1',
+      CI_MERGE_REQUEST_IID: '2',
+      CI_SERVER_URL: 'https://gitlab.example.com',
+      GITLAB_TOKEN: 'tok',
+      GITLAB_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
+    });
+    expect(cfg.modelPool).toEqual([]);
+  });
+
+  it('parses GITLAB_REVIEW_MODEL_POOL as a comma-separated, trimmed list', () => {
+    const cfg = resolveConfig([], {
+      CI_PROJECT_ID: '1',
+      CI_MERGE_REQUEST_IID: '2',
+      CI_SERVER_URL: 'https://gitlab.example.com',
+      GITLAB_TOKEN: 'tok',
+      GITLAB_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
+      GITLAB_REVIEW_MODEL_POOL: ' anthropic/claude-sonnet-4-5 , google/gemini-2.5-pro ,',
+    });
+    expect(cfg.modelPool).toEqual(['anthropic/claude-sonnet-4-5', 'google/gemini-2.5-pro']);
+  });
+
+  it('prefers --model-pool over GITLAB_REVIEW_MODEL_POOL', () => {
+    const cfg = resolveConfig(['--model-pool', 'anthropic/claude-opus-4-1,openai/gpt-5'], {
+      CI_PROJECT_ID: '1',
+      CI_MERGE_REQUEST_IID: '2',
+      CI_SERVER_URL: 'https://gitlab.example.com',
+      GITLAB_TOKEN: 'tok',
+      GITLAB_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
+      GITLAB_REVIEW_MODEL_POOL: 'google/gemini-2.5-pro',
+    });
+    expect(cfg.modelPool).toEqual(['anthropic/claude-opus-4-1', 'openai/gpt-5']);
+  });
 });
 
 describe('validateConfig', () => {
@@ -116,7 +151,8 @@ describe('validateConfig', () => {
     cwd: '/tmp',
     skills: [],
     refreshGitSkills: false,
-  };
+    modelPool: [],
+  } as Config;
 
   it('throws listing all missing required fields', () => {
     expect(() => validateConfig({ ...minimalConfig, project: '', mr: '' })).toThrow(
@@ -865,6 +901,7 @@ describe('applyGitLabReviewEnvPrefix', () => {
         'MAX_TOKENS',
         'MIN_SEVERITY',
         'MODEL',
+        'MODEL_POOL',
         'OTEL',
         'OTEL_CAPTURE_CONTENT',
         'POSTING_MODE',
