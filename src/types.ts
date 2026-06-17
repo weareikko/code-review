@@ -4,6 +4,18 @@ export type Confidence = 'high' | 'medium' | 'low';
 export type Side = 'RIGHT' | 'LEFT';
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
+/**
+ * How many stages of the review pipeline run.
+ * - `single`: one Find pass; the model's output is used verbatim (legacy behaviour).
+ * - `verify`: Find → Verify → Synthesize; each severe finding is re-checked by a
+ *   separate adversarial agent before it survives into the posted review.
+ * - `full`: multi-angle Find (several finders, each a different lens) → Triage
+ *   (dedup) → Verify → Synthesize.
+ */
+export type ReviewDepth = 'single' | 'verify' | 'full';
+
+export const REVIEW_DEPTHS: readonly ReviewDepth[] = ['single', 'verify', 'full'];
+
 export const THINKING_LEVELS: readonly ThinkingLevel[] = [
   'off',
   'minimal',

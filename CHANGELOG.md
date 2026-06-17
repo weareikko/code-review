@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Multi-stage review via `--review-depth` (env `GITLAB_REVIEW_DEPTH`), default `single`.** The reviewer can now run as a staged pipeline instead of a single pass. Three depths:
+  - `single` (default) — one Find pass; output written verbatim, byte-identical to previous behaviour.
+  - `verify` — Find → **Verify** → Synthesize. Each **severe** (CRITICAL/WARN) finding is handed to a separate adversarial agent prompted to _refute_ it; only survivors are kept, an overstated finding is downgraded one tier, and the surviving set is re-synthesized into the same `{ summary, comments }` contract — risk line and issues block regenerated from survivors, every drop/downgrade recorded in the summary **Notes** section so suppression stays auditable. INFO findings are not re-checked.
+  - `full` — **multi-angle Find** (one finder per angle: correctness; state/async/data; failure/security — run concurrently, each with the same diff, skills, and read-only repo tools but a system prompt narrowed to its lane) → **Triage** (dedup by file+line+subject, higher severity wins) → Verify → Synthesize. Trades ~3× tokens for materially higher recall; intended as a selective/opt-in tier for high-stakes or large MRs.
+
+  Verifier and angle-finder token usage are folded into the reported review cost. See `docs/multi-stage-review.md` for the design and the deferred work (LLM-based Synthesize, Sweep, and chunked Find to remove the 100k diff cap).
+
 - **Oversized diffs are now surfaced as a decompose signal instead of being silently trimmed.** When the diff exceeds the char budget, the reviewer used to drop whole files and mention them only as a footnote buried in the summary — easy to miss that part of the change went unreviewed. Size-skips (budget overflow) are now tracked separately from quiet noise-skips (lockfiles/generated/build output) and surfaced as a prominent callout at the top of the MR summary: how many files were dropped, their paths and sizes, and an explicit recommendation to split the MR. Two new knobs control this:
   - `--max-diff-chars` / `GITLAB_REVIEW_MAX_DIFF_CHARS` (default `100000`) makes the diff char budget configurable so teams can tune the review/skip boundary.
   - `--decompose-hint-lines` / `GITLAB_REVIEW_DECOMPOSE_HINT_LINES` (default `0` = off) adds an MR-level size check independent of the char budget: when the reviewed diff changes more lines than the threshold, the summary gets a "consider decomposing this MR into atomic changes" note — even when nothing was skipped. The bot stays a sensor: it never fails the pipeline on size, and dry-run/no-post still only writes artifacts.

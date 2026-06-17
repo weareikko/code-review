@@ -10,6 +10,7 @@ import type { Config } from '../../src/config.js';
 import { runReview } from '../../src/gitlab-review.js';
 import { parseReviewMarkdownWithWarnings } from '../../src/parser.js';
 import type { PriorThread } from '../../src/prior-threads.js';
+import type { ReviewDepth } from '../../src/types.js';
 import { createLlmJudge } from './llm-judge.js';
 import type { Trajectory } from './trajectory.js';
 import { createTrajectoryCollector } from './trajectory.js';
@@ -21,6 +22,7 @@ type EvalInput = {
   commitLog?: string;
   priorThreads?: PriorThread[];
   skills: string[];
+  reviewDepth?: ReviewDepth;
 };
 
 type ReviewComment = {
@@ -36,6 +38,7 @@ type EvalOutput = {
   summary: string;
   comments: ReviewComment[];
   trajectory: Trajectory;
+  usageTokens: { input: number; output: number; total: number };
 };
 
 function makeConfig(overrides: Partial<Config>): Config {
@@ -57,6 +60,7 @@ function makeConfig(overrides: Partial<Config>): Config {
     minSeverity: 'info',
     thinkingLevel: 'off',
     postingMode: 'direct',
+    reviewDepth: 'single',
     apiKey,
     baseUrl: process.env.GITLAB_REVIEW_BASE_URL ?? '',
     maxTokens: Number(process.env.GITLAB_REVIEW_MAX_TOKENS ?? 0),
@@ -77,7 +81,11 @@ const reviewHarness = createHarness<EvalInput, EvalOutput, Record<string, unknow
   run: async ({ input }) => {
     const dir = await mkdtemp(join(tmpdir(), 'gitlab-review-eval-'));
     try {
-      const config = makeConfig({ cwd: dir, skills: input.skills });
+      const config = makeConfig({
+        cwd: dir,
+        skills: input.skills,
+        reviewDepth: input.reviewDepth ?? 'single',
+      });
       const { trajectory, attach } = createTrajectoryCollector();
       const usage = await runReview(config, {
         diff: input.diff,
@@ -100,6 +108,11 @@ const reviewHarness = createHarness<EvalInput, EvalOutput, Record<string, unknow
           body: c.body,
         })),
         trajectory,
+        usageTokens: {
+          input: usage.tokens.input,
+          output: usage.tokens.output,
+          total: usage.tokens.total,
+        },
       };
 
       return {
@@ -1156,6 +1169,92 @@ describeEval(
       ];
       const result = await run({ diff, priorThreads, skills: [] });
       expect(result.output).toBeDefined();
+    });
+  },
+);
+
+// =============================================================================
+// Verify stage — adversarial re-check (--review-depth verify)
+//
+// These evals A/B the SAME fixture at `single` (today's behaviour) and `verify`
+// (Find → Verify → Synthesize). The thesis: an independent adversarial pass that
+// tries to REFUTE each severe finding raises precision (drops fabricated
+// CRITICAL/WARN findings) without sacrificing recall (still catches real bugs).
+//
+// Recording-only counters surface the severe-finding count and token cost so a
+// run reveals both the precision lift and the cost delta of the extra pass.
+// =============================================================================
+
+// Records the severe-finding count and review token usage so a run reveals the
+// single-vs-verify delta in both precision and cost. Always scores 1.
+const SevereCountAndCostJudge = createJudge(
+  'SevereCountAndCostJudge',
+  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
+    const severe = output.comments.filter(
+      (c) => c.severity === 'critical' || c.severity === 'warn',
+    );
+    return {
+      score: 1,
+      metadata: {
+        rationale: `${severe.length} severe finding(s); ${output.usageTokens.total} total tokens`,
+        severeCount: severe.length,
+        totalComments: output.comments.length,
+        tokens: output.usageTokens,
+        severeComments: severe.map((c) => ({ file: c.file, severity: c.severity })),
+      },
+    };
+  },
+);
+
+// The justified-intentional fixture is suspicious-but-correct probe code: each
+// unusual pattern is justified by an in-file comment. The single pass has been
+// observed to fabricate a CRITICAL "timer leak" despite the finally-block
+// clearTimeout. A good outcome: HonestRefusal/NoSevereFindings score higher at
+// `verify` than at `single` as the adversarial pass refutes the fabricated
+// finding.
+describeEval(
+  'verify stage — adversarial pass drops fabricated severe findings',
+  {
+    harness: reviewHarness,
+    judges: [HonestRefusalJudge, NoSevereFindingsJudge, SevereCountAndCostJudge],
+    // Recording-only: the value is in comparing single vs verify, not a fixed bar.
+    judgeThreshold: null,
+    skipIf: missingApiKey,
+  },
+  (it) => {
+    it('single depth: reviews justified-intentional probe code', async ({ run }) => {
+      const diff = await readFile(join(FIXTURES, 'justified-intentional.diff'), 'utf8');
+      const result = await run({ diff, skills: ['code-review'], reviewDepth: 'single' });
+      expect(result.output).toBeDefined();
+    });
+
+    it('verify depth: adversarial re-check refutes fabricated severe findings', async ({ run }) => {
+      const diff = await readFile(join(FIXTURES, 'justified-intentional.diff'), 'utf8');
+      const result = await run({ diff, skills: ['code-review'], reviewDepth: 'verify' });
+      expect(result.output).toBeDefined();
+    });
+  },
+);
+
+// Recall guard: the verify pass must NOT delete a real, demonstrable bug. The
+// async/forEach fixture is an unambiguous defect, so the adversarial verifier
+// should confirm (keep) it. Enforced — if verify starts dropping this, the
+// precision/recall trade-off has tipped the wrong way. (Evals run only via
+// `npm run test:evals`, never in the default unit-test CI, so this enforcing
+// bar cannot flake the main pipeline.)
+describeEval(
+  'verify stage — preserves true-positive detection',
+  {
+    harness: reviewHarness,
+    judges: [AsyncBugDetectedJudge, HasSevereFindingJudge, SevereCountAndCostJudge],
+    judgeThreshold: 1,
+    skipIf: missingApiKey,
+  },
+  (it) => {
+    it('verify depth still detects the async/forEach bug', async ({ run }) => {
+      const diff = await readFile(join(FIXTURES, 'async-foreach-bug.diff'), 'utf8');
+      const result = await run({ diff, skills: ['code-review'], reviewDepth: 'verify' });
+      expect(result.output.comments.length).toBeGreaterThan(0);
     });
   },
 );
