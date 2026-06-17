@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -50,6 +50,13 @@ describe('parseSkillSpec', () => {
 
     it('returns builtin for a name without any prefix', () => {
       expect(parseSkillSpec('my-skill')).toEqual({ protocol: 'builtin', name: 'my-skill' });
+    });
+
+    it('returns builtin protocol for the test-integrity skill name', () => {
+      expect(parseSkillSpec('test-integrity')).toEqual({
+        protocol: 'builtin',
+        name: 'test-integrity',
+      });
     });
 
     it('returns builtin for a name with only alphanumerics and hyphens', () => {
@@ -345,6 +352,28 @@ describe('loadNamedSkill', () => {
       expect(skill.source).toBe('builtin');
       expect(skill.name).toBe('code-review');
       expect(skill.description).toBeTruthy();
+    });
+
+    it('loads the built-in test-integrity skill', async () => {
+      const cwd = await makeTmp();
+      const skill = await loadNamedSkill('test-integrity', cwd);
+      expect(skill.source).toBe('builtin');
+      expect(skill.name).toBe('test-integrity');
+      expect(skill.description).toBeTruthy();
+    });
+
+    it('the test-integrity skill body covers its key heuristics', async () => {
+      const cwd = await makeTmp();
+      const skill = await loadNamedSkill('test-integrity', cwd);
+      const body = await readFile(skill.filePath, 'utf8');
+      expect(body.length).toBeGreaterThan(0);
+      // Core heuristics the skill must instruct the reviewer on.
+      expect(body).toMatch(/weaken/i);
+      expect(body).toMatch(/\.skip/);
+      expect(body).toMatch(/toBeDefined/);
+      expect(body).toMatch(/CRITICAL/);
+      // Honours the same commit-context suppression contract as code-review.
+      expect(body).toMatch(/Commit Context/);
     });
 
     it('throws ConfigError for a non-existent builtin name', async () => {

@@ -214,9 +214,10 @@ Skills are domain-specific review modules that sharpen the agent's focus on a pa
 
 ### Built-in skills
 
-| Name          | What it does                                                                                                                                                                                                                                        |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `code-review` | Adversarial correctness review: finds real, demonstrable bugs only. Reports nothing without a concrete proof path (specific input → failure → observable symptom). Includes per-language reference files for JavaScript/TypeScript and PHP/Laravel. |
+| Name             | What it does                                                                                                                                                                                                                                                                              |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `code-review`    | Adversarial correctness review: finds real, demonstrable bugs only. Reports nothing without a concrete proof path (specific input → failure → observable symptom). Includes per-language reference files for JavaScript/TypeScript and PHP/Laravel.                                       |
+| `test-integrity` | Catches silent test tampering: test edits that hide a behavior change rather than track a genuine spec change. Flags weakened/deleted/disabled/rewritten assertions, snapshots, and lowered coverage thresholds (Vitest/Jest, PHPUnit), reporting only when a regression could be masked. |
 
 Enable a built-in skill with `--skill`:
 
@@ -243,7 +244,7 @@ A `--skill` value can carry a protocol prefix to load a skill from outside the p
 
 | Spec                                           | Resolves to                                                                      |
 | ---------------------------------------------- | -------------------------------------------------------------------------------- |
-| `code-review`                                  | A built-in skill bundled with the package                                        |
+| `code-review`, `test-integrity`                | Built-in skills bundled with the package                                         |
 | `npm:@scope/pkg`                               | `node_modules/@scope/pkg` (walked up from the working dir; monorepo-hoist aware) |
 | `npm:@scope/bundle/security`                   | A `security/` sub-directory inside an installed npm bundle                       |
 | `file:./path/to/skill`                         | A local path (relative paths resolve from the working dir)                       |
