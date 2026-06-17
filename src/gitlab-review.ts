@@ -8,6 +8,7 @@ import type { AssistantMessage, KnownProvider, Model } from '@earendil-works/pi-
 import { getModel } from '@earendil-works/pi-ai';
 import { createReadOnlyTools } from '@earendil-works/pi-coding-agent';
 import type { Config } from './config.js';
+import { resolveProviderApiKey } from './config.js';
 import { ReviewerError } from './errors.js';
 import type { Logger } from './logger.js';
 import { noopLogger } from './logger.js';
@@ -16,13 +17,8 @@ import type { PriorThread } from './prior-threads.js';
 import { renderPriorThreadsBlock } from './prior-threads.js';
 import type { Skill } from './skills.js';
 import { loadAutoDiscoveredSkills, loadNamedSkill } from './skills.js';
-import { REVIEW_ANGLES, triageFindings, type ReviewAngle } from './triage.js';
-import type {
-  GitLabReviewSeverity,
-  ReviewComment,
-  SizeSkippedFile,
-  ThinkingLevel,
-} from './types.js';
+import { REVIEW_ANGLES, triageFindings, type AuthoredFinding, type ReviewAngle } from './triage.js';
+import type { GitLabReviewSeverity, SizeSkippedFile, ThinkingLevel } from './types.js';
 import { splitModel, toGitLabReviewSeverity } from './types.js';
 import {
   applyVerdicts,
@@ -51,10 +47,25 @@ export interface ReviewSizeNotice {
   decomposeHint?: { lines: number; threshold: number };
 }
 
+/** Token and cost usage attributed to a single pool member. */
+export interface ModelUsage {
+  model: string;
+  tokens: UsageBreakdown;
+  cost: UsageBreakdown;
+}
+
 export interface ReviewUsage {
   model: string;
   tokens: UsageBreakdown;
   cost: UsageBreakdown;
+  /**
+   * Per-pool-member usage breakdown for heterogeneous `full`-depth runs. Each
+   * entry attributes the tokens/cost of the agents that ran on that pool member.
+   * The top-level `model`/`tokens`/`cost` stay the main model and the totals (the
+   * sum of all entries). Present only when more than one distinct model ran; the
+   * single-model path leaves it undefined so output is byte-identical to before.
+   */
+  byModel?: ModelUsage[];
   skills: string[];
   /**
    * Size signals for surfacing in the MR summary. `sizeSkippedFiles` lists files
@@ -692,32 +703,129 @@ function resolveModel(modelString: string, baseUrl: string, maxTokens: number): 
   return model;
 }
 
-interface AggregatedUsage {
+/**
+ * One usable model in the review pool. `id` is the original `provider/modelId`
+ * string — the stable identity used for fixed angle→model mapping, cross-family
+ * verifier selection, and per-model usage keying. `getApiKey` resolves THIS
+ * member's provider key, so a key for provider X is never sent to provider Y.
+ */
+export interface PoolMember {
+  id: string;
+  model: Model<string>;
+  getApiKey: () => Promise<string>;
+}
+
+/**
+ * Build the effective model pool from `config.model` plus `config.modelPool`,
+ * resolving each member's own provider key and dropping (with a warning) any
+ * member whose key is missing/empty. Order and duplicates from `config.modelPool`
+ * are preserved by first occurrence. When the pool is empty or every member is
+ * unusable, falls back to a single-member pool of `config.model` (already
+ * validated to have a key) — reproducing single-model behaviour exactly.
+ *
+ * `config.apiKey` (which honours `--api-key`) is used for any member whose id
+ * equals `config.model`, so an explicit override key still applies; other members
+ * resolve their key via the provider-aware resolver.
+ */
+export function buildEffectivePool(config: Config, logger: Logger): PoolMember[] {
+  const ids = config.modelPool.length > 0 ? config.modelPool : [config.model];
+  const seen = new Set<string>();
+  const members: PoolMember[] = [];
+
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+
+    let model: Model<string>;
+    try {
+      model = resolveModel(id, config.baseUrl ?? '', config.maxTokens ?? 0);
+    } catch (error) {
+      logger.warn(`Model pool: dropping "${id}" — ${(error as Error).message}`);
+      continue;
+    }
+
+    // The configured main model already resolved its key into config.apiKey
+    // (honouring --api-key); other members resolve their provider key directly.
+    const key = id === config.model ? config.apiKey : resolveProviderApiKey(id);
+    if (!key) {
+      logger.warn(
+        `Model pool: dropping "${id}" — no API key found for its provider; set the provider's key env var to use it.`,
+      );
+      continue;
+    }
+
+    members.push({ id, model, getApiKey: async () => key });
+  }
+
+  if (members.length === 0) {
+    // Every configured member was unusable — fall back to the validated main
+    // model so the run still proceeds (single-model behaviour).
+    const model = resolveModel(config.model, config.baseUrl ?? '', config.maxTokens ?? 0);
+    return [{ id: config.model, model, getApiKey: async () => config.apiKey }];
+  }
+
+  return members;
+}
+
+interface ModelUsageBucket {
   tokens: UsageBreakdown;
   cost: UsageBreakdown;
 }
 
-function emptyUsage(): AggregatedUsage {
+interface AggregatedUsage {
+  tokens: UsageBreakdown;
+  cost: UsageBreakdown;
+  /** Per-pool-member buckets, keyed by the member's `provider/modelId` id. */
+  byModel: Map<string, ModelUsageBucket>;
+}
+
+function emptyBucket(): ModelUsageBucket {
   return {
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
   };
 }
 
-function accumulateUsage(target: AggregatedUsage, message: AssistantMessage): void {
+function emptyUsage(): AggregatedUsage {
+  return { ...emptyBucket(), byModel: new Map() };
+}
+
+function addUsageToBucket(bucket: ModelUsageBucket, message: AssistantMessage): void {
   const usage = message.usage;
   if (!usage) return;
-  target.tokens.input += usage.input;
-  target.tokens.output += usage.output;
-  target.tokens.cacheRead += usage.cacheRead;
-  target.tokens.cacheWrite += usage.cacheWrite;
-  target.tokens.total += usage.totalTokens;
+  bucket.tokens.input += usage.input;
+  bucket.tokens.output += usage.output;
+  bucket.tokens.cacheRead += usage.cacheRead;
+  bucket.tokens.cacheWrite += usage.cacheWrite;
+  bucket.tokens.total += usage.totalTokens;
   if (usage.cost) {
-    target.cost.input += usage.cost.input;
-    target.cost.output += usage.cost.output;
-    target.cost.cacheRead += usage.cost.cacheRead;
-    target.cost.cacheWrite += usage.cost.cacheWrite;
-    target.cost.total += usage.cost.total;
+    bucket.cost.input += usage.cost.input;
+    bucket.cost.output += usage.cost.output;
+    bucket.cost.cacheRead += usage.cost.cacheRead;
+    bucket.cost.cacheWrite += usage.cost.cacheWrite;
+    bucket.cost.total += usage.cost.total;
+  }
+}
+
+/**
+ * Add an assistant message's usage to the global totals and, when a pool member
+ * id is given, to that member's per-model bucket. `modelId` is the member's
+ * `provider/modelId` string — never a key or any secret.
+ */
+function accumulateUsage(
+  target: AggregatedUsage,
+  message: AssistantMessage,
+  modelId?: string,
+): void {
+  if (!message.usage) return;
+  addUsageToBucket(target, message);
+  if (modelId) {
+    let bucket = target.byModel.get(modelId);
+    if (!bucket) {
+      bucket = emptyBucket();
+      target.byModel.set(modelId, bucket);
+    }
+    addUsageToBucket(bucket, message);
   }
 }
 
@@ -771,19 +879,21 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     logger.debug(`Review rules: ${context.reviewRules.map((f) => f.path).join(', ')}`);
   }
 
-  const model = resolveModel(config.model, config.baseUrl ?? '', config.maxTokens ?? 0);
+  const pool = buildEffectivePool(config, logger);
+  if (pool.length > 1) {
+    logger.info(`Model pool: ${pool.map((m) => m.id).join(', ')}.`);
+  }
+  const primary = pool[0];
   const tools = createReadOnlyTools(cwd) as AgentTool[];
 
   const createAgent = options.createAgent ?? defaultCreateAgent;
-  const getApiKey = async () => config.apiKey;
   const timeoutMs = options.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS;
   const aggregated = emptyUsage();
   const deps: StageDeps = {
     createAgent,
-    model,
+    pool,
     tools,
     thinkingLevel: config.thinkingLevel,
-    getApiKey,
     timeoutMs,
     logger,
     aggregated,
@@ -793,17 +903,17 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
 
   if (config.reviewDepth === 'full') {
     // --- Multi-angle Find → Triage → Verify → Synthesize.
-    const { comments, summary } = await runMultiAngleFind(context, minSeverity, userPrompt, deps);
-    outputText = await verifyAndSynthesize(comments, summary, diff, options.commitLog, deps);
+    const { findings, summary } = await runMultiAngleFind(context, minSeverity, userPrompt, deps);
+    outputText = await verifyAndSynthesize(findings, summary, diff, options.commitLog, deps);
   } else {
-    // --- single / verify: one Find pass. In `single` depth its output is
-    // written verbatim, byte-identical to legacy runs.
+    // --- single / verify: one Find pass on the primary model. In `single` depth
+    // its output is written verbatim, byte-identical to legacy runs.
     const findAgent = createAgent({
       systemPrompt,
-      model,
+      model: primary.model,
       tools,
       thinkingLevel: config.thinkingLevel,
-      getApiKey,
+      getApiKey: primary.getApiKey,
     });
 
     // Attach telemetry before the first prompt so all events fire.
@@ -814,7 +924,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     try {
       finalText = await runAgentToCompletion(findAgent, userPrompt, {
         timeoutMs,
-        onAssistantMessage: (message) => accumulateUsage(aggregated, message),
+        onAssistantMessage: (message) => accumulateUsage(aggregated, message, primary.id),
         onTurnStart: (turn) => {
           turnCount = turn;
           logger.debug(`Turn ${turn} started`);
@@ -843,9 +953,22 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     model: config.model,
     tokens: aggregated.tokens,
     cost: aggregated.cost,
+    byModel: buildByModelUsage(aggregated),
     skills: context.skills.map((s) => s.name),
     sizeNotice,
   };
+}
+
+/**
+ * Convert the per-model usage buckets into the public {@link ModelUsage} array,
+ * sorted by model id for deterministic output. Returns `undefined` when fewer
+ * than two distinct models ran, so single-model runs stay byte-identical.
+ */
+function buildByModelUsage(aggregated: AggregatedUsage): ModelUsage[] | undefined {
+  if (aggregated.byModel.size < 2) return undefined;
+  return [...aggregated.byModel.entries()]
+    .map(([model, bucket]) => ({ model, tokens: bucket.tokens, cost: bucket.cost }))
+    .toSorted((a, b) => (a.model < b.model ? -1 : a.model > b.model ? 1 : 0));
 }
 
 interface RunAgentCallbacks {
@@ -944,13 +1067,29 @@ const FIND_CONCURRENCY = 3;
 
 interface StageDeps {
   createAgent: CreateAgent;
-  model: Model<string>;
+  /**
+   * Effective model pool. `pool[0]` is the primary model (used by `single`/`verify`
+   * depth and as the default). `full` depth maps angles across all members and
+   * verifies with a member other than a finding's author.
+   */
+  pool: PoolMember[];
   tools: AgentTool[];
   thinkingLevel: ThinkingLevel;
-  getApiKey: () => Promise<string>;
   timeoutMs: number;
   logger: Logger;
   aggregated: AggregatedUsage;
+}
+
+/**
+ * Pick a deterministic verifier for a finding authored by `authorModelId`: the
+ * first pool member whose id differs, by pool order. With a 1-model pool (or when
+ * no other member exists) this degenerates to the author itself — today's
+ * behaviour. The author is never preferred when an alternative exists, so the
+ * verifier shares fewer blind spots with the finder.
+ */
+function pickVerifier(pool: PoolMember[], authorModelId: string): PoolMember {
+  const other = pool.find((member) => member.id !== authorModelId);
+  return other ?? pool[0];
 }
 
 /**
@@ -965,27 +1104,33 @@ async function runMultiAngleFind(
   minSeverity: GitLabReviewSeverity,
   userPrompt: string,
   deps: StageDeps,
-): Promise<{ comments: ReviewComment[]; summary: string | null }> {
-  const groups: ReviewComment[][] = REVIEW_ANGLES.map(() => []);
+): Promise<{ findings: AuthoredFinding[]; summary: string | null }> {
+  const groups: AuthoredFinding[][] = REVIEW_ANGLES.map(() => []);
   const summaries: Array<string | null> = REVIEW_ANGLES.map(() => null);
 
   const tasks = REVIEW_ANGLES.map((angle, index) => async () => {
+    // Fixed angle→model mapping: angle `i` runs on pool member `i % pool.length`.
+    // Deterministic and stable for a given (MR, commit) — no randomness.
+    const member = deps.pool[index % deps.pool.length];
     const agent = deps.createAgent({
       systemPrompt: buildAngleSystemPrompt(context, minSeverity, angle),
-      model: deps.model,
+      model: member.model,
       tools: deps.tools,
       thinkingLevel: deps.thinkingLevel,
-      getApiKey: deps.getApiKey,
+      getApiKey: member.getApiKey,
     });
     try {
       const text = await runAgentToCompletion(agent, userPrompt, {
         timeoutMs: deps.timeoutMs,
-        onAssistantMessage: (message) => accumulateUsage(deps.aggregated, message),
+        onAssistantMessage: (message) => accumulateUsage(deps.aggregated, message, member.id),
         onToolStart: (toolName, args) =>
           deps.logger.debug(`  [${angle.key}] → ${toolName}${formatToolArgs(toolName, args)}`),
       });
       const parsed = parseReviewMarkdownWithWarnings(text);
-      groups[index] = parsed.comments;
+      // Annotate each finding with the model that authored it. This is internal
+      // pipeline metadata for cross-family verification — it never reaches a
+      // posted comment, fingerprint, or the summary.
+      groups[index] = parsed.comments.map((comment) => ({ comment, authorModel: member.id }));
       summaries[index] = parsed.summary;
     } catch (error) {
       deps.logger.warn(`Find angle "${angle.key}" failed: ${(error as Error).message}; skipping.`);
@@ -995,12 +1140,12 @@ async function runMultiAngleFind(
   await runBounded(tasks, FIND_CONCURRENCY);
 
   const raw = groups.reduce((total, group) => total + group.length, 0);
-  const comments = triageFindings(groups);
+  const findings = triageFindings(groups);
   deps.logger.info(
-    `Multi-angle Find: ${REVIEW_ANGLES.length} angles → ${raw} raw finding(s), ${comments.length} after triage.`,
+    `Multi-angle Find: ${REVIEW_ANGLES.length} angles → ${raw} raw finding(s), ${findings.length} after triage.`,
   );
   const summary = summaries.find((value) => value && value.trim()) ?? null;
-  return { comments, summary };
+  return { findings, summary };
 }
 
 /**
@@ -1011,26 +1156,34 @@ async function runMultiAngleFind(
  * the precision risk and re-checking them wastes tokens.
  */
 async function verifyAndSynthesize(
-  comments: ReviewComment[],
+  findings: AuthoredFinding[],
   summary: string | null,
   diff: string,
   commitLog: string | undefined,
   deps: StageDeps,
 ): Promise<string> {
-  const severe = comments
-    .map((comment, index) => ({ comment, index }))
-    .filter(({ comment }) => comment.severity === 'critical' || comment.severity === 'warn');
+  const comments = findings.map((f) => f.comment);
+  const severe = findings
+    .map((finding, index) => ({ finding, index }))
+    .filter(
+      ({ finding }) =>
+        finding.comment.severity === 'critical' || finding.comment.severity === 'warn',
+    );
 
   const verdicts = new Map<number, Verdict>();
   if (severe.length > 0) {
     const verifySystemPrompt = buildVerifySystemPrompt();
-    const tasks = severe.map(({ comment, index }) => async () => {
+    const tasks = severe.map(({ finding, index }) => async () => {
+      const comment = finding.comment;
+      // Cross-family verifier: a pool member other than the one that authored
+      // the finding (degenerates to the author with a 1-model pool).
+      const verifierMember = pickVerifier(deps.pool, finding.authorModel);
       const verifier = deps.createAgent({
         systemPrompt: verifySystemPrompt,
-        model: deps.model,
+        model: verifierMember.model,
         tools: deps.tools,
         thinkingLevel: deps.thinkingLevel,
-        getApiKey: deps.getApiKey,
+        getApiKey: verifierMember.getApiKey,
       });
       try {
         const text = await runAgentToCompletion(
@@ -1038,7 +1191,8 @@ async function verifyAndSynthesize(
           buildVerifyUserPrompt(comment, diff, commitLog),
           {
             timeoutMs: deps.timeoutMs,
-            onAssistantMessage: (message) => accumulateUsage(deps.aggregated, message),
+            onAssistantMessage: (message) =>
+              accumulateUsage(deps.aggregated, message, verifierMember.id),
           },
         );
         verdicts.set(index, parseVerdict(text));
@@ -1078,7 +1232,14 @@ async function runVerifyStage(
     (comment) => comment.severity === 'critical' || comment.severity === 'warn',
   );
   if (!hasSevere) return finalText;
-  return verifyAndSynthesize(parsed.comments, parsed.summary, diff, commitLog, deps);
+  // `verify` depth has a single Find pass on the primary model, so all findings
+  // are authored by `pool[0]`; the verifier picks a different member when one
+  // exists, otherwise re-uses the primary (today's behaviour).
+  const findings: AuthoredFinding[] = parsed.comments.map((comment) => ({
+    comment,
+    authorModel: deps.pool[0].id,
+  }));
+  return verifyAndSynthesize(findings, parsed.summary, diff, commitLog, deps);
 }
 
 function formatToolArgs(toolName: string, args: unknown): string {
