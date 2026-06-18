@@ -418,6 +418,8 @@ export function buildJSONSystemPrompt(
     '}',
     '</output_format>',
     '',
+    'The output MUST be valid JSON: the "summary" and "body" fields carry Markdown (quotes, backticks, code, newlines), so every double quote inside a string value must be escaped as \\", every backslash as \\\\, and every newline as \\n. A single unescaped quote makes the entire review unparseable and is discarded.',
+    '',
     'Field rules:',
     '- summary: overall review written in Markdown, following <summary_skeleton>',
     '- comments: inline comments attached to specific diff lines (may be empty [])',

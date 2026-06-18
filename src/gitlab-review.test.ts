@@ -900,6 +900,15 @@ describe('buildJSONSystemPrompt — skill section', () => {
       expect(prompt).toContain('Do NOT emit "praise:" comments');
     });
 
+    it('instructs the model to escape quotes, backslashes, and newlines in JSON string values', () => {
+      const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
+
+      expect(prompt).toContain('The output MUST be valid JSON');
+      expect(prompt).toMatch(/escaped as \\"/);
+      expect(prompt).toMatch(/every backslash as \\\\/);
+      expect(prompt).toMatch(/every newline as \\n/);
+    });
+
     it('includes the standardized summary skeleton with an always-present risk line', () => {
       const prompt = buildJSONSystemPrompt(emptyContext, 'INFO');
 

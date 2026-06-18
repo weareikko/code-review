@@ -119,6 +119,8 @@ export interface DiagnosticContext {
    */
   postedBySeverity?: Partial<Record<Severity, number>>;
   warnings?: number;
+  /** Why the reviewer JSON could not be parsed, on the `review.parse` phase when it fails. */
+  malformedReason?: string;
   reviewFile?: string;
   output?: string;
   /** Number of files in the merge diff (set on the `git.get_merge_diff` phase). */

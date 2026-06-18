@@ -72,6 +72,12 @@ export class ReviewerError extends GitlabReviewError {
   }
 }
 
+export class ParseError extends GitlabReviewError {
+  constructor(message: string, options: Omit<GitlabReviewErrorOptions, 'code'> = {}) {
+    super(message, { ...options, code: 'PARSE_ERROR' });
+  }
+}
+
 export class RuntimeError extends GitlabReviewError {
   constructor(message: string, options: Omit<GitlabReviewErrorOptions, 'code'> = {}) {
     super(message, { ...options, code: 'RUNTIME_ERROR' });
