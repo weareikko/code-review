@@ -52,151 +52,138 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **GitLab API failures are now distinguishable by HTTP status in OpenTelemetry.** A 500 on `bulk_publish` (or any GitLab API error) previously collapsed to a single `error.type=GITLAB_API_ERROR` with no status, indistinguishable from a 404/401. When the OTel bridge is enabled (`GITLAB_REVIEW_OTEL=1`):
-  - `error.type` on `gitlab_review_errors_total`, the `gen_ai.client.operation.duration` metric, and the `gitlab_review.failed` log is refined to include the HTTP status for GitLab API errors (e.g. `GITLAB_API_ERROR_500`), so a 5xx rate is alertable. HTTP status codes are low-cardinality, so this is safe as a metric label.
-  - The `gitlab_review.failed` log additionally carries `http.response.status_code`.
-  - The write phases (`gitlab.post_comments`, `gitlab.upsert_summary`) now stamp the HTTP semantic-convention attributes (`http.response.status_code`, `url.full`, `server.address`) on their spans on the error path, matching the read phases. A failed `bulk_publish` span now identifies the exact endpoint and status instead of being attribute-less.
+- GitLab API errors now carry their HTTP status in OpenTelemetry (`error.type=GITLAB_API_ERROR_500`, plus HTTP attributes on the write-phase spans) so a 5xx rate is alertable (`GITLAB_REVIEW_OTEL=1`).
 
 ### Fixed
 
-- **`draft_notes/bulk_publish` no longer fails with a 500 when a comment lands on an unchanged context line.** Inline comments are anchored to the diff via a GitLab `text` position; an unchanged (context) line requires BOTH `old_line` and `new_line`, but only `new_line`/`old_line` was sent. The draft-notes API accepts the one-sided position, then `bulk_publish` returns `500 Internal Server Error` for the whole batch (GitLab skips position validation on draft creation — [gitlab-org/gitlab#579609](https://gitlab.com/gitlab-org/gitlab/-/issues/579609)), losing every queued comment and failing the CI job. The reviewer is fed ±20 lines of context, so it routinely anchors on unchanged lines. Positions are now resolved against the diff — added lines stay one-sided, removed lines stay one-sided, and context lines carry both line numbers. The diff is read with `core.quotepath=false` and the position parser tolerates git's tab-terminated headers, so comments on files with non-ASCII or space-containing paths resolve correctly instead of falling back to an invalid one-sided position. Reproduced and fix-verified against GitLab 19.0.1.
-- **Draft publishing now degrades gracefully instead of losing every comment when `bulk_publish` fails.** `bulk_publish` is one atomic batch server-side, so a single draft GitLab rejects takes down the whole set. When it fails, we now fall back to publishing each surviving draft individually (which GitLab isolates per draft), so one bad draft can no longer sink the batch or fail the job. The original error is re-thrown only when every individual publish also fails. The number of drafts that still could not be published is reported on the CLI and as the `gitlab_review.drafts.publish_failed` span attribute so silent drops are visible.
+- `draft_notes/bulk_publish` no longer 500s when a comment lands on an unchanged context line: positions are resolved against the diff so context lines carry both `old_line` and `new_line` (read with `core.quotepath=false` for non-ASCII paths) ([gitlab-org/gitlab#579609](https://gitlab.com/gitlab-org/gitlab/-/issues/579609)).
+- Draft publishing falls back to per-draft publish when `bulk_publish` fails, so one rejected draft no longer sinks the batch; the count of unpublishable drafts is reported.
+
+[0.6.2]: https://github.com/ikko-dev/gitlab-review/compare/0.6.1...0.6.2
 
 ## [0.6.1] - 2026-06-03
 
 ### Added
 
-- **Skills can now be loaded from a git remote (`git:` / `git+ssh:`), completing Phase 2 of external skill distribution.** A `--skill` (or `GITLAB_REVIEW_SKILLS`) spec such as `git:https://host/group/skills.git#v1.2.0/security` or `git+ssh://git@host/group/skill.git` shallow-clones the repo at a pinned ref (tag, branch, or commit) and loads its `SKILL.md` through the same validation path as the `npm:` / `file:` protocols. An optional `#<ref>/<subpath>` fragment points at a skill directory inside a multi-skill bundle. Clones are cached under `${XDG_CACHE_HOME:-~/.cache}/gitlab-review/skills/` keyed by URL+ref; set `GITLAB_REVIEW_REFRESH_SKILLS=1` to re-clone a moved branch ref. Following the project's SSH-over-HTTPS convention, the README recommends `git+ssh://` for private GitLab remotes; the scp-style `git@host:group/repo.git` shorthand is intentionally not accepted (its `:` collides with the `#ref` fragment). The README now documents all external skill protocols.
-- **OpenTelemetry observability gaps closed across metrics, logs, and traces.** When the OTel bridge is enabled (`GITLAB_REVIEW_OTEL=1`):
-  - **Metrics:** new `gitlab_review_runs_total` counter (one increment per run, labelled by `gitlab_review.status`) gives a reliable review-volume series; new `gitlab_review_errors_total{error.type}` counter makes the error rate computable; new `gitlab_review_llm_{input,output,cache_read,cache_creation}_tokens_total` counters expose token consumption; `gitlab_review_comments_total` is now broken down by `gitlab_review.comment.severity`; and `gitlab_review_run_duration_seconds` / `gitlab_review_total_cost_usd` now carry a `gen_ai.request.model` label. Deadline-exceeded runs (GitLab API or reviewer timeouts) are labelled `gitlab_review.status=timeout`, distinct from other errors. The per-run `run_id` is intentionally never a metric label (it would explode Prometheus/Mimir cardinality).
-  - **Logs:** a `gitlab_review.started` record is now emitted at run start (enables log-only duration and stuck-run detection), and failures emit a dedicated `gitlab_review.failed` record at ERROR severity carrying `error.type` and an `error.message` with the run's own secret values (GitLab token, provider API key) scrubbed out — in every encoding they might appear under (raw, URL/form-encoded, JSON-escaped, base64). The full `event.name` taxonomy (`started`/`completed`/`failed`/`comment`) is documented.
-  - **Traces:** GitLab API read spans now carry stable OTel HTTP semantic-convention attributes (`http.request.method`, `http.response.status_code`, `url.full`, `http.response.body.size`, `server.address`); the `git.get_merge_diff` span carries `diff.files_changed` / `diff.lines_added` / `diff.lines_removed`; and failed `execute_tool` spans now record `process.exit_code` (plus `tool.stderr` / `tool.command` under content capture).
-  - The README documents the new metrics/labels/log events and an example OTel Collector / Grafana Alloy relabeling config for promoting `gitlab_project_path` and `gitlab_review_run_id` to Loki stream labels.
-- **`GitLabClient` accepts an optional `onResponse` instrumentation hook** reporting each HTTP response (method, path, url, status, content-length). It is telemetry-agnostic and carries no secrets; the CLI uses it to populate the GitLab API span HTTP attributes above.
+- Skills can be loaded from a git remote (`git:` / `git+ssh:`), shallow-cloned at a pinned ref and cached, completing external skill distribution; `git+ssh://` is recommended for private remotes.
+- Closed OpenTelemetry gaps across metrics, logs, and traces: new run/error/token counters, severity-broken-down comment counts, a `gitlab_review.started` log, and HTTP/diff/tool span attributes (`GITLAB_REVIEW_OTEL=1`).
+- `GitLabClient` accepts an optional `onResponse` instrumentation hook (method, path, url, status, content-length); carries no secrets.
 
 ### Changed
 
-- **Internal refactors with no behaviour change.** The GitLab client's `request()` and `paginate()` now share a single private `fetchWithTimeout()` helper instead of each duplicating the `AbortController`/timeout/abort-error handling; `diagnosticChannels` is derived from `DIAGNOSTIC_CHANNEL_NAMES` via `Object.fromEntries` instead of a hand-maintained parallel table; and the parser's JSON-fence and inline-section regexes are hoisted to module scope. Public behaviour, reviewer output, and all marker formats are unchanged.
-- **Internal OTel bridge cleanup with no telemetry change.** The duplicated `gen_ai.usage.*` token-attribute and `gen_ai.system`/`gen_ai.request.model` metric-label blocks are now built by shared `setTokenUsageSpanAttributes()` / `genAiModelAttrs()` helpers; the per-turn subscriber derives the configured-model provider and metric base once instead of per turn; `applyResultAttributes()` maps its numeric fields via a table; and the review-level metrics share one base label set. The exact spans, metrics, and attributes emitted are unchanged.
+- Internal refactors with no behaviour change (shared `fetchWithTimeout`, derived `diagnosticChannels`, hoisted parser regexes).
+- Internal OTel bridge cleanup with no telemetry change (shared attribute/label helpers).
+
+[0.6.1]: https://github.com/ikko-dev/gitlab-review/compare/0.6.0...0.6.1
 
 ## [0.6.0] - 2026-06-02
 
 ### Changed
 
-- **The MR summary now uses a standardized, scannable layout.** Under the `### Code Review` heading the reviewer always emits a `**Risk: Low | Medium | High**` line (the impact of merging and how to handle it) followed by a short overview, then a `**N issues found:**` bullet list when there are inline comments and an optional `**Notes:**` block for suppressed findings and unreviewed files. This replaces the previous `### Overview` / `### Findings` / `### Notes` heading structure so every review reads the same way.
-- **Skill `SKILL.md` frontmatter is now parsed with a real YAML parser** (the `yaml` package) instead of line regexes. Quoted values are handled correctly (the old regex kept the surrounding quotes) and frontmatter that is not valid YAML is rejected — the skill is skipped with the existing warning — rather than salvaged. `yaml` is added as a runtime dependency. The bundled `code-review` skill is unaffected.
-- **The review-completed OTel log record's `gen_ai.request.model` now uses the full model ID** (everything after the first `/`), consistent with the span and metric attributes. Previously this one field used the second path segment, which differed for multi-slash model IDs such as `openrouter/anthropic/claude-3`. Single-slash IDs are unaffected.
+- The MR summary uses a standardized, scannable layout under `### Code Review`: a `**Risk: Low | Medium | High**` line, a short overview, a `**N issues found:**` list, and an optional `**Notes:**` block.
+- Skill `SKILL.md` frontmatter is parsed with a real YAML parser (`yaml`); invalid frontmatter is rejected rather than salvaged.
+- The review-completed OTel log's `gen_ai.request.model` uses the full model ID (everything after the first `/`), matching the span/metric attributes.
 
 ### Removed
 
-- **BREAKING:** dropped the deprecated `body` field from the exported `Skill` type. Prompts reference skill content via `filePath`; read the `SKILL.md` from there instead.
-- **BREAKING:** dropped all `pi-reviewer` backward compatibility. Legacy `pi-reviewer:*` markers are no longer recognised — fingerprint markers (`<!-- pi-reviewer:fingerprint-* -->`), the summary and summary-history markers, the reviewed-commit footer, and the `pi-reviewer-comment` embedded marker. Only the `gitlab-review:*` equivalents are read and written. MR threads and summary notes created by `pi-reviewer` before the rename will no longer be deduplicated, detected as prior context, or treated as already-reviewed; the first `gitlab-review` run re-establishes the renamed markers.
-- **BREAKING:** dropped severity emoji (🔴/🟡/🔵) handling from reviewer-output parsing. `normalizeSeverity` no longer maps emoji to a tier, markdown inline-comment headers no longer derive severity from a leading emoji (they now always parse as `INFO`), and `normalizeBody` no longer strips a leading emoji. The reviewer emits an explicit `severity` field in its JSON output and the prompt no longer uses emoji, so this only affected pre-rename markdown output.
+- **BREAKING:** dropped the deprecated `body` field from the exported `Skill` type; read `SKILL.md` from `filePath` instead.
+- **BREAKING:** dropped all `pi-reviewer` backward compatibility — only `gitlab-review:*` markers are read/written, so threads/notes from before the rename are no longer deduplicated.
+- **BREAKING:** dropped severity emoji (🔴/🟡/🔵) handling from reviewer-output parsing; severity comes from the explicit JSON field.
+
+[0.6.0]: https://github.com/ikko-dev/gitlab-review/compare/0.5.0...0.6.0
 
 ## [0.5.0] - 2026-06-02
 
 ### Changed
 
-- **Clean reviews now emit a short `### Overview` instead of the bare sentinel**. When a review produces zero inline comments, the MR summary now opens with a `### Overview` carrying the MR description and an explicit positive verdict (e.g. "No blocking issues found.") rather than the fixed `"No issues found in the reviewed diff."` string, so the summary always reflects what the reviewer engaged with.
-- **BREAKING:** AI API key resolution now delegates entirely to [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi-ai)'s `getEnvApiKey`. The key is read from the selected model's provider standard env var (`ANTHROPIC_API_KEY` / `ANTHROPIC_OAUTH_TOKEN`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, …) or ambient Amazon Bedrock / Google Vertex credentials, with `--api-key` taking precedence. The key is always provider-specific, so a key for one provider is never sent to another, and a model/provider mismatch fails fast with a missing-`--api-key` error instead of a misleading upstream `401`.
+- Clean reviews emit a short `### Overview` (MR description + positive verdict) instead of the bare "No issues found" sentinel.
+- **BREAKING:** AI API key resolution delegates to [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi-ai)'s `getEnvApiKey` — read from the provider's standard env var or ambient Bedrock/Vertex creds, with `--api-key` taking precedence.
 
 ### Removed
 
-- **BREAKING:** the implicit default model is removed — `--model` (or `GITLAB_REVIEW_MODEL`) is now required. Previously the model defaulted to `anthropic/claude-sonnet-4-5`; a run without a model now fails fast asking for `--model`, so the model and its provider are always explicit (and pi-ai picks no model on the project's behalf).
-- **BREAKING:** `GITLAB_REVIEW_API_KEY` is no longer read for the tool's AI key. Use the model provider's standard env var (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`) or pass `--api-key`. (The eval harness still reads `GITLAB_REVIEW_API_KEY` for its judge; that is unrelated to the CLI.)
-- **BREAKING:** the `CLAUDE_API_KEY` fallback is removed. Use `ANTHROPIC_API_KEY` (or `ANTHROPIC_OAUTH_TOKEN`) for Anthropic models.
+- **BREAKING:** the implicit default model is removed — `--model` (or `GITLAB_REVIEW_MODEL`) is now required.
+- **BREAKING:** `GITLAB_REVIEW_API_KEY` is no longer read for the AI key; use the provider's standard env var or `--api-key`.
+- **BREAKING:** the `CLAUDE_API_KEY` fallback is removed; use `ANTHROPIC_API_KEY` / `ANTHROPIC_OAUTH_TOKEN`.
 
 ### Fixed
 
-- **Parser now accepts unfenced JSON reviewer output**. When a model returns the `{ "summary": …, "comments": […] }` object as a bare top-level object or appended after prose — rather than inside a fenced ```json block — the parser now locates and parses it instead of silently resolving to zero comments and a `null` summary. Fenced output, legacy comment markers, and stray prose braces are unaffected.
+- Parser accepts unfenced JSON reviewer output (a bare top-level object or one appended after prose) instead of resolving to zero comments.
+
+[0.5.0]: https://github.com/ikko-dev/gitlab-review/compare/0.4.2...0.5.0
 
 ## [0.4.2] - 2026-06-01
 
 ### Added
 
-- **Reviewer findings now carry a `confidence` field** (`high` | `medium` | `low`) separate from `severity`. Severity tracks the impact of the defect; confidence tracks the reviewer's certainty that the code is wrong. The system prompt splits the two into `<severity_tiers>` and `<confidence_tiers>` with an explicit interaction rule: a CRITICAL finding MUST be high confidence, and a WARN finding at low confidence should be re-classified as INFO unless impact is severe.
-- **Confidence is rendered inline in every comment** as `_Confidence: <level>._` between the discussion and the commit footer, so developers can see the reviewer's certainty at a glance. The confidence value is excluded from the fingerprint hash, so a confidence revision across review runs does not produce a duplicate comment.
+- Reviewer findings carry a `confidence` field (`high` | `medium` | `low`) separate from `severity`, with an interaction rule (a CRITICAL finding must be high confidence).
+- Confidence is rendered inline in each comment (`_Confidence: <level>._`) and excluded from the fingerprint hash.
 
 ### Changed
 
-- The reviewer JSON schema gains a required `confidence` field on every comment. Output from earlier reviewer versions without the field is parsed with `confidence: 'high'` for backward compatibility.
-- **Severity rubric anchored to impact + certainty**. The reviewer is now explicitly directed to use the lowest tier that fits, demonstrate the failing path from the diff for CRITICAL findings, and prefer silence over fabrication when uncertain. Reduces severe over-flagging on uncertain-but-suspicious code.
-- **Context-suppressed findings must be echoed in the summary Notes section**. When a commit message, prior thread reply, or referenced ADR/incident justifies a pattern the reviewer would otherwise flag, the suppression must appear as a one-line bullet (file:line, pattern, suppressing context) so developers can audit which context the reviewer applied. Silent suppression is no longer acceptable.
-- **Strengthened skill-Read instruction**. The `<skills>` preamble now states explicitly that skills are mandatory rule sets, includes a worked `Read({ file_path: "..." })` tool-call example, and makes loading the SKILL.md body and matching references a MUST. Skills should now contribute their full content rather than only the one-line description.
+- The reviewer JSON schema requires `confidence` on every comment; older output without it parses as `high`.
+- Severity rubric anchored to impact + certainty (use the lowest fitting tier; demonstrate the failing path for CRITICAL).
+- Context-suppressed findings must be echoed in the summary Notes section so suppression is auditable.
+- Strengthened the skill-Read instruction (skills are mandatory rule sets; includes a worked `Read(...)` example).
+
+[0.4.2]: https://github.com/ikko-dev/gitlab-review/compare/0.4.1...0.4.2
 
 ## [0.4.1] - 2026-05-29
 
 ### Changed
 
-- **Bot comment titles are bolded** so the Conventional Comment header (`<label> [decoration]: <subject>`) stands out from the discussion that follows.
-- **Commit footer now includes the package version**: footers on inline comments and summary notes read `Reviewed by [@ikko-dev/gitlab-review](…) v<VERSION> for commit <sha>.`, making it easy to tell which reviewer version produced a given comment. Extraction of the reviewed-commit SHA stays backwards-compatible with footers from earlier versions that omit the version.
+- Bot comment titles are bolded so the Conventional Comment header stands out.
+- Commit footer includes the package version (`Reviewed by … v<VERSION> for commit <sha>.`); SHA extraction stays backwards-compatible with versionless footers.
+
+[0.4.1]: https://github.com/ikko-dev/gitlab-review/compare/0.4.0...0.4.1
 
 ## [0.4.0] - 2026-05-28
 
 ### Changed
 
-- **Reviewer output adopts [Conventional Comments](https://conventionalcomments.org/) format**. Inline comment bodies now open with a `<label> [decoration]: <subject>` header followed by the discussion, replacing the previous freeform Markdown. Severity ↔ label mapping is enforced:
-  - `CRITICAL` → `issue (blocking): ...`
-  - `WARN` → `issue: ...` (unmarked, implicitly blocking per the spec)
-  - `INFO` → `nitpick: ...` / `suggestion (non-blocking): ...` / `note: ...` / `question: ...` / `thought: ...`
-- **Summary follows a fixed skeleton**: `### Overview`, `### Findings`, `### Notes`. The Findings section restates only each comment's subject — the discussion, impact, and fix live in the inline comment itself (anti-duplication rule). When there are no findings, the summary is exactly `"No issues found in the reviewed diff."`.
-- **Severity emoji (🔴/🟡/🔵) dropped from prompt and output** to remove visual noise; the structured `severity` JSON field remains the source of truth for filtering and posting.
-- **Stricter prompt rules**: declarative-tone rule (no hedging in `issue`/`suggestion` subjects) and explicit anti-duplication rule between summary and inline comments. A worked example is included in the prompt to anchor the output shape.
+- Reviewer output adopts [Conventional Comments](https://conventionalcomments.org/) format (`<label> [decoration]: <subject>` + discussion), with an enforced severity↔label mapping (CRITICAL → `issue (blocking)`, WARN → `issue`, INFO → `nitpick`/`suggestion`/…).
+- Summary follows a fixed `### Overview` / `### Findings` / `### Notes` skeleton; Findings restates only each subject (anti-duplication).
+- Severity emoji dropped from prompt and output; the `severity` JSON field is the source of truth.
+- Stricter prompt rules (declarative tone, anti-duplication) with a worked example.
 
 ### Added
 
-- **Prior developer replies as review context**: when the MR already has bot-posted review threads with developer replies, those threads are extracted and passed to the reviewer as a `<prior_review_feedback>` section in the prompt. The reviewer can use this to avoid re-raising already-acknowledged concerns and to provide informed follow-up. Threads are filtered to files in the current diff; resolved threads are included but marked as resolved.
-- **Commit log as review context**: commit messages for all non-merge commits in the MR are passed to the reviewer as a `<commits>` section prepended to the prompt, giving the reviewer intent context alongside the code diff.
-- **Commit message justifications in code-review skill**: the built-in `code-review` skill now instructs the reviewer to treat explicit commit artefacts (ADR numbers, incident references, named sign-offs) as authoritative evidence when justifying otherwise-suspicious patterns.
-- **Format-conformance eval scenarios**: `tests/evals/review.eval.ts` adds `ConventionalCommentFormatJudge`, `SummarySkeletonJudge`, and `NoDuplicationJudge` to verify reviewer output conforms to the new format on every eval run.
-- **`README.md` — `## Review output format` section** documenting the Conventional Comments inline shape, severity-to-label mapping table, summary skeleton, and the empty-findings sentinel.
+- Prior developer replies passed to the reviewer as a `<prior_review_feedback>` section so it avoids re-raising acknowledged concerns.
+- Commit messages passed as a `<commits>` context section.
+- The `code-review` skill treats explicit commit artefacts (ADR/incident refs, sign-offs) as authoritative justification.
+- Format-conformance eval scenarios (`ConventionalCommentFormatJudge`, `SummarySkeletonJudge`, `NoDuplicationJudge`).
+- `README.md` `## Review output format` section.
+
+[0.4.0]: https://github.com/ikko-dev/gitlab-review/compare/0.3.12...0.4.0
 
 ## [0.3.12] - 2026-05-26
 
 ### Added
 
-- **Warn on invalid auto-discovered skills**: `loadAutoDiscoveredSkills` now accepts an optional `warn` callback. When a `SKILL.md` file is found during auto-discovery but is missing required frontmatter fields (`name` or `description`), the callback is invoked with a message identifying the skill directory. In `runReview`, this is wired to `logger.warn`, so malformed project skills produce a visible warning in CLI output instead of silently being dropped.
+- `loadAutoDiscoveredSkills` warns (via a `warn` callback wired to `logger.warn`) when a discovered `SKILL.md` is missing required frontmatter, instead of silently dropping it.
+
+[0.3.12]: https://github.com/ikko-dev/gitlab-review/compare/0.3.11...0.3.12
 
 ## [0.3.11] - 2026-05-26
 
 ### Added
 
-- **Commit footer on inline comments**: each inline review comment now ends with a `<sub>` footer — `Reviewed by [@ikko-dev/gitlab-review](…) for commit <sha>.` — identical in format to the summary-note footer. This lets developers see at a glance whether a comment was posted during the current review pass or an earlier one. The footer is appended to the payload body only; fingerprints continue to be computed from the original reviewer output so deduplication is unaffected by the SHA changing between runs.
+- Inline review comments end with a `<sub>` commit footer (`Reviewed by … for commit <sha>.`); fingerprints stay computed from the original output so the SHA does not affect dedup.
+
+[0.3.11]: https://github.com/ikko-dev/gitlab-review/compare/0.3.10...0.3.11
 
 ## [0.3.10] - 2026-05-25
 
 ### Changed
 
-- **Lazy skill body loading** ([#42](https://github.com/ikko-dev/gitlab-review/issues/42)): `buildSkillSection` now emits a `<skill_file>` path reference in the system prompt instead of embedding the full `SKILL.md` body inline. The agent reads each skill file on demand using its existing `Read` tool. This prevents system prompt bloat when many or large skills are loaded.
-  - `Skill.filePath` (new field): absolute path to the `SKILL.md` file, used in `<skill_file>` references in prompts.
-  - `Skill.body` remains populated for backwards compatibility, but prompt construction no longer uses it.
-  - The `<skills>` prompt block now opens with a preamble instructing the agent to read each skill file before applying it.
+- Lazy skill body loading ([#42](https://github.com/ikko-dev/gitlab-review/issues/42)): the prompt emits a `<skill_file>` path reference and the agent reads each `SKILL.md` on demand, avoiding prompt bloat. Adds `Skill.filePath`.
 
 ### Added
 
-- **`npm:` and `file:` skill spec protocols** ([#38](https://github.com/ikko-dev/gitlab-review/issues/38)): the `--skill` flag and `GITLAB_REVIEW_SKILLS` env var now accept protocol-prefixed specs alongside existing bare builtin names:
-  - `npm:my-skill` — resolves from `node_modules/my-skill` (walked up from `cwd`, supports monorepo hoisting)
-  - `npm:@scope/pkg` — scoped npm packages
-  - `npm:@scope/bundle/subpath` — named sub-directory within a multi-skill npm bundle
-  - `file:./relative/path` — local skill directory relative to `cwd`
-  - `file:/absolute/path` — absolute filesystem path
-  - Bare names (e.g. `code-review`) continue to resolve from the package-bundled `skills/` directory unchanged.
-  - Unresolvable specs now throw a `ConfigError` with an actionable hint instead of being silently skipped.
-  - `git:` / `git+ssh:` are parsed but not yet executed (reserved for Phase 2).
-- **`parseSkillSpec(spec)` export**: parses a skill spec string into a typed `SkillSpec` discriminated union (`builtin | npm | file | git`). Useful for library callers building custom skill-loading pipelines.
-- **`resolveNpmSkillDir(packageName, subpath, cwd)` export**: walks `node_modules` upward from `cwd` and returns the resolved package (or sub-directory) path, or `null` if not found.
-- **`loadNamedSkill(spec, cwd)` export**: loads a `Skill` from any supported spec; throws `ConfigError` if the spec cannot be resolved.
-- **`Skill['source']`** extended with `'npm' | 'file'` values (in addition to the existing `'builtin' | 'project'`), surfaced in diagnostics and OTel `skills` attribute.
-
-- **Multi-provider LLM support** ([#36](https://github.com/ikko-dev/gitlab-review/issues/36)): `--model` now accepts any provider registered in `@earendil-works/pi-ai` (OpenRouter, Google Gemini, Groq, Mistral, Amazon Bedrock, Google Vertex, and more). The `provider/modelId` format now splits on the first `/` only, so multi-segment IDs like `openrouter/anthropic/claude-3-opus-20240229` and `openrouter/ai21/jamba-large-1.7` are handled correctly.
-- **Built-in Ollama support**: `--model ollama/<model>` runs a local Ollama server via the OpenAI-compatible API. No API key is required. Point `OLLAMA_HOST` at the server (default: `http://localhost:11434`).
-- **Provider-specific API key auto-resolution**: when `--api-key` / `GITLAB_REVIEW_API_KEY` are not set, the CLI resolves the key from the provider-specific environment variable via `@earendil-works/pi-ai` (e.g. `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`). Providers with ambient credentials (Amazon Bedrock, Google Vertex) are also detected automatically.
-- **`--api-key` is no longer required for Ollama models**: `validateConfig` skips the `api-key` check when the provider is `ollama`.
-- **`--base-url <url>` / `GITLAB_REVIEW_BASE_URL`**: override the provider API base URL for any OpenAI-compatible endpoint (e.g. a corporate AI gateway or self-hosted vLLM instance).
-- **`--max-tokens <n>` / `GITLAB_REVIEW_MAX_TOKENS`**: override the maximum output tokens requested from the model. Applied to all providers — Ollama defaults to 4 096 when not set; registered providers keep their own default when the value is `0`.
-- **`OLLAMA_HOST`**: auto-resolved for `ollama/*` models; sets the base URL to `$OLLAMA_HOST/v1` (default: `http://localhost:11434/v1`).
-- **Ambient-credentials error hint**: when `--api-key` is missing for `amazon-bedrock` or `google-vertex`, the error message now includes setup instructions (IAM env vars / `gcloud auth application-default login`) instead of the generic "Provide CLI flags" hint.
-- **`parseModelProvider` export** from `src/config.ts`: extracts the provider prefix from a `provider/modelId` string. Useful for library callers building custom model logic.
+- `npm:` and `file:` skill spec protocols ([#38](https://github.com/ikko-dev/gitlab-review/issues/38)), with `parseSkillSpec`, `resolveNpmSkillDir`, and `loadNamedSkill` exports; unresolvable specs throw `ConfigError`. `git:` / `git+ssh:` are parsed but not yet executed.
+- Multi-provider LLM support ([#36](https://github.com/ikko-dev/gitlab-review/issues/36)): `--model` accepts any `@earendil-works/pi-ai` provider (OpenRouter, Gemini, Groq, Mistral, Bedrock, Vertex, …); `provider/modelId` splits on the first `/` only.
+- Built-in Ollama support (`--model ollama/<model>`, no API key, configurable `OLLAMA_HOST`).
+- Provider-specific API key auto-resolution from the provider's env var; ambient Bedrock/Vertex creds detected, with a setup hint when missing.
+- `--base-url` / `GITLAB_REVIEW_BASE_URL` and `--max-tokens` / `GITLAB_REVIEW_MAX_TOKENS`, plus a `parseModelProvider` export.
 
 [0.3.10]: https://github.com/ikko-dev/gitlab-review/compare/0.3.9...0.3.10
 
@@ -204,13 +191,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`GITLAB_REVIEW_OTEL_CAPTURE_CONTENT=1` opt-in for content capture** (`GITLAB_REVIEW_OTEL=1`): when set, per-turn assistant output text is attached to `gen_ai.agent.turn` spans as `gen_ai.output.messages` (Sentry Conversations-compatible JSON format), and tool arguments / results are attached to `execute_tool` spans as `gen_ai.tool.call.arguments` / `gen_ai.tool.call.result`. Content is truncated at 2 000 chars per attribute to stay within typical span size limits. Disabled by default — only enable after confirming your observability backend's data-retention and PII policies allow storing code review content. The `captureContent` field on `OtelBridgeOptions` provides the programmatic equivalent for library callers.
-- **`isContentCaptureEnabled()` export** from `src/otel.ts`: reflects the `GITLAB_REVIEW_OTEL_CAPTURE_CONTENT` opt-in check, mirroring the pattern of `isOtelEnabled()`.
+- `GITLAB_REVIEW_OTEL_CAPTURE_CONTENT=1` opt-in: attaches per-turn assistant output and tool args/results to spans (truncated at 2 000 chars), off by default. Adds `isContentCaptureEnabled()`.
 
 ### Fixed
 
-- **`gen_ai.usage.input_tokens` now reports total input** (non-cached + cached) on `gen_ai.agent.turn` spans and the `invoke_agent gitlab-review` phase span, matching the Sentry AI monitoring convention. Previously it reported only non-cached input tokens, which caused Sentry's cost calculator to produce negative cache costs. `gen_ai.usage.input_tokens.cached` is now also set as the SUBSET attribute when cache reads are non-zero. `gen_ai.usage.cache_read.input_tokens` is kept unchanged for Grafana/Tempo backward compatibility.
-- Same `gen_ai.usage.input_tokens` total fix applied to the `gitlab_review.completed` OTel log record, which now also carries `gen_ai.usage.input_tokens.cached`.
+- `gen_ai.usage.input_tokens` reports total input (non-cached + cached) on turn/phase spans and the completed log, matching Sentry's convention; adds the `.cached` subset attribute.
 
 [0.3.9]: https://github.com/ikko-dev/gitlab-review/compare/0.3.8...0.3.9
 
@@ -218,18 +203,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **OTel `gen_ai.client.cost` double-count** (`GITLAB_REVIEW_OTEL=1`): cost was previously emitted from two places — `recordGenAiMetrics` at `reviewer.run` phase close (with `gen_ai.system`) and `buildAgentSubscriber` at `message_end` (without `gen_ai.system` when the Anthropic SDK returns a bare model ID). This created two Prometheus series per review run that differed only by presence/absence of `gen_ai_system`, causing a naive `sum()` in Grafana to return 2× the real cost. `gen_ai.client.cost` is now emitted exclusively per-turn by `buildAgentSubscriber`.
-- **OTel cache token metrics absent** (`GITLAB_REVIEW_OTEL=1`): `gen_ai_client_token_usage_sum` was missing `cache_read` and `cache_creation` series entirely, even though these tokens dominate cache-heavy workloads (cache write alone can be ~86% of cost). `buildAgentSubscriber` now emits `gen_ai.token.type=cache_read` and `gen_ai.token.type=cache_creation` for each turn alongside the existing `input` and `output` observations, completing the four-type picture required by the OTel GenAI semantic conventions.
-- **`gen_ai.system` missing from per-turn metrics** when the Anthropic SDK emits bare model IDs (e.g. `claude-sonnet-4-5` without the `anthropic/` prefix): `buildAgentSubscriber` now receives the configured model string (e.g. `anthropic/claude-sonnet-4-5`) from `RunMeta` via `createAgentTelemetry` and falls back to it when `msg.model` has no slash. All four token type metrics and the cost metric now carry a consistent, complete label set including `gen_ai.system`.
-- **`gen_ai.client.token.usage` potential double-count** from the same root cause as cost: token metrics are now also emitted exclusively by `buildAgentSubscriber` to avoid a parallel two-series problem. `gen_ai.client.operation.duration` remains the sole metric emitted by `recordGenAiMetrics` (aggregate reviewer-phase duration is not per-turn).
-- **Model string split bug** in `applyGenAiAttributes` and `recordGenAiMetrics`: the previous `model.split('/')[0]` pattern incorrectly set `gen_ai.system` to the full model string (e.g. `claude-sonnet-4-5`) when no slash was present. All three parse sites now use `indexOf('/')` so they produce `undefined` (attribute omitted) rather than a garbage provider value when the model ID contains no prefix.
-- **Log records not correlated to traces**: `logger.emit()` calls for `gitlab_review.completed` and `gitlab_review.comment` events did not carry a span context, so the OTel logger SDK could not stamp `traceId`/`spanId` on those log records. The root span's context is now captured when the `invoke_workflow gitlab-review` span opens and passed as the `context:` field to every `logger.emit()` call, enabling backend log-trace linking.
-- **`gen_ai.client.cost` not broken down by token type**: cost was previously recorded as a single observation per turn with no `gen_ai.token.type` dimension. It is now split into up to four observations per turn (`input`, `output`, `cache_read`, `cache_creation`), matching the token-usage metric structure and enabling cost attribution by token class.
-- **`gen_ai.usage.cost.cache_write_usd` span attribute renamed** to `gen_ai.usage.cost.cache_creation_usd` to match the OTel GenAI semantic convention term `cache_creation` used everywhere else (token type label, token usage attribute names).
-- **`gen_ai.response.model` removed from metric data-point labels**: this attribute belongs on spans (traces) only; including it as a metric label doubled cardinality without benefit since the request model is already present via `gen_ai.request.model`. Both `buildAgentSubscriber` and `recordGenAiMetrics` no longer add it to metric attribute sets.
-- **Cost histogram unit** corrected from `'usd'` to `'{usd}'` on both `gen_ai.client.cost` and `gitlab_review_total_cost_usd` instruments to conform to the OTel unit annotation syntax for non-SI units.
-- **Spurious zero-value `gitlab_review_comments_total` increments**: the counter was unconditionally incremented even when `posted` was 0 (skipped or dry-run runs), polluting Grafana rate queries. The increment is now guarded by `if (posted > 0)`.
-- **`CI_JOB_ID` and `CI_PIPELINE_ID` missing from spans and logs**: these high-cardinality CI identifiers are now captured by a new `buildCiSpanAttrs()` helper and attached to all phase spans and log records as `gitlab.ci_job_id` / `gitlab.ci_pipeline_id`. They are intentionally excluded from metric data-point labels to avoid cardinality explosion in Prometheus/Mimir.
+- OTel metric correctness (`GITLAB_REVIEW_OTEL=1`): `gen_ai.client.cost` and token usage are emitted exclusively per-turn (no double-count), cache_read/cache_creation token series are added, and `gen_ai.system` is set consistently (falling back to the configured model for bare model IDs).
+- Further OTel fixes: correct the model-string provider split (`indexOf('/')`), correlate log records to traces, split cost by token type, rename `cache_write_usd` → `cache_creation_usd`, drop `gen_ai.response.model` from metric labels, fix the cost histogram unit to `{usd}`, guard zero-value comment increments, and add `gitlab.ci_job_id` / `gitlab.ci_pipeline_id` to spans and logs.
 
 [0.3.8]: https://github.com/ikko-dev/gitlab-review/compare/0.3.7...0.3.8
 
@@ -237,13 +212,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **OTel metric data quality** (`GITLAB_REVIEW_OTEL=1`): several label gaps in the metrics and log records emitted by the OTel bridge have been closed.
-  - `service.name="@ikko-dev/gitlab-review"` is now included as an explicit data-point attribute on every `gitlab_review_*` and `gen_ai.*` metric observation. The SDK-level `service.name` resource attribute only populates `target_info` in Prometheus/Mimir; without it on each data point these metrics were invisible to provider-scoped queries and Grafana GenAI dashboards.
-  - `gen_ai.system` replaces the non-standard `gen_ai.provider.name` attribute on the aggregate `invoke_agent gitlab-review` span and on all `gen_ai.client.*` metric observations emitted by `recordGenAiMetrics`. `gen_ai.system` is the required attribute in the OTel GenAI semantic conventions.
-  - `gen_ai.system` is now also set on per-turn `gen_ai.agent.turn` spans and per-turn `gen_ai.client.token.usage`, `gen_ai.client.cost`, and `gen_ai.client.time_to_first_token` metric observations. Previously the provider portion of the model string was extracted but discarded.
-  - `gen_ai.agent.name="gitlab-review"` is now set on per-turn `gen_ai.agent.turn` spans (it was already set on the parent `invoke_agent` span).
-  - `gitlab_review.warnings`, `gitlab_review.drafts.abandoned`, and `gitlab_review.drafts.deleted_pre_publish` span attributes are now emitted from `applyResultAttributes`. These three `DiagnosticContext` fields were populated by the posting phases but never written to OTel spans.
-  - `service.name="@ikko-dev/gitlab-review"` is now included as an explicit attribute on `gitlab_review.comment` and `gitlab_review.completed` log records for consistent label presence alongside metrics.
+- Closed OTel metric/log label gaps (`GITLAB_REVIEW_OTEL=1`): `service.name` on every data point, `gen_ai.system` replacing `gen_ai.provider.name` on spans/metrics (and added to per-turn observations), `gen_ai.agent.name` on turn spans, and the warnings/drafts span attributes.
 
 [0.3.7]: https://github.com/ikko-dev/gitlab-review/compare/0.3.6...0.3.7
 
@@ -251,8 +220,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`gen_ai.conversation.id` OTel attribute**: every span emitted by the OTel bridge (all phase spans and per-turn `gen_ai.agent.turn` spans) now carries `gen_ai.conversation.id` set to the run UUID. This follows the OpenTelemetry GenAI semantic conventions and unlocks the Sentry Conversations view as well as cross-span querying by conversation in any OTel-compatible backend.
-- **Run ID footnote in MR summary notes**: when `postSummary` is enabled, the posted summary note now includes a `<sub>Run ID: \`<uuid>\`</sub>` footnote so the trace can be located in Sentry (or any OTel backend) directly from the MR.
+- `gen_ai.conversation.id` (the run UUID) on every OTel span, enabling the Sentry Conversations view.
+- Run ID footnote in MR summary notes so the trace is locatable from the MR.
 
 [0.3.6]: https://github.com/ikko-dev/gitlab-review/compare/0.3.5...0.3.6
 
@@ -260,23 +229,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Review-level OTel metrics** (`GITLAB_REVIEW_OTEL=1`): five new Prometheus-compatible instruments emitted once per complete run (success, error, or timeout) at the close of the `invoke_workflow gitlab-review` root span ([#37]).
-  - `gitlab_review_run_duration_seconds` (Histogram, boundaries 5–600 s) — overall run duration, labelled with `gitlab.project_path`, `gitlab.pipeline_source`, `gitlab_review.dry_run`, and `gitlab_review.status`.
-  - `gitlab_review_total_cost_usd` (Histogram, boundaries 0.001–1.0 USD) — total LLM spend for the run, summed across all turns.
-  - `gitlab_review_comments_total` (Counter) — number of MR comments posted.
-  - `gitlab_review_drafts_published_total` (Counter) — number of draft notes bulk-published.
-  - `gitlab_review_phase_duration_seconds` (Histogram, boundaries 1–300 s) — per-phase latency with a `gitlab_review.phase` label, covering every diagnostic phase including the root run.
-  - `gitlab_review.status` is `success`, `error`, or `timeout`; `AbortError`/`ETIMEDOUT` are classified as `timeout` so Grafana alerts can treat deadline-exceeded runs separately from hard failures.
-  - `gitlab.mr_iid` is intentionally excluded from all metric labels (high cardinality); it remains available on spans only.
-  - The existing `gen_ai.client.*` per-turn metrics are unchanged.
+- Five review-level OTel metrics emitted once per run (`GITLAB_REVIEW_OTEL=1`) ([#37]): `gitlab_review_run_duration_seconds`, `gitlab_review_total_cost_usd`, `gitlab_review_comments_total`, `gitlab_review_drafts_published_total`, and `gitlab_review_phase_duration_seconds`, labelled with status (`success`/`error`/`timeout`); `gitlab.mr_iid` is excluded as high-cardinality.
 
 [0.3.5]: https://github.com/ikko-dev/gitlab-review/compare/0.3.4...0.3.5
+[#37]: https://github.com/ikko-dev/gitlab-review/pull/37
 
 ## [0.3.4] - 2026-05-21
 
 ### Added
 
-- **GitLab CI project attributes on OTel metrics, spans, and logs**: when running inside a GitLab CI pipeline, four CI environment variables are now automatically included as attributes on every metric data point, span, and log record emitted by the OTel bridge. `gitlab.project_path` (`CI_PROJECT_PATH`, e.g. `group/my-project`), `gitlab.project_namespace` (`CI_PROJECT_NAMESPACE`), `gitlab.mr_target_branch` (`CI_MERGE_REQUEST_TARGET_BRANCH_NAME`), and `gitlab.pipeline_source` (`CI_PIPELINE_SOURCE`) are captured once at bridge startup and spread into all emission sites — run-level histograms, per-turn metrics, phase spans, comment logs, and the `gitlab_review.completed` log record. Attributes are omitted gracefully when the vars are not set (local runs). Enables Prometheus/Mimir queries like `sum by (gitlab_project_path) (increase(gen_ai_client_cost_sum[7d]))` to compare token spend and cost across projects.
+- GitLab CI project attributes (`gitlab.project_path`, `gitlab.project_namespace`, `gitlab.mr_target_branch`, `gitlab.pipeline_source`) on every OTel metric, span, and log when running in CI; omitted gracefully on local runs.
 
 [0.3.4]: https://github.com/ikko-dev/gitlab-review/compare/0.3.3...0.3.4
 
@@ -284,8 +246,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Richer OTel agent telemetry** (`GITLAB_REVIEW_OTEL=1`): per-turn `gen_ai.agent.turn` spans and per-call `execute_tool <name>` grandchild spans now appear under `invoke_agent gitlab-review` in Tempo, giving a full tool-use timeline. Per-turn `gen_ai.client.token.usage`, `gen_ai.client.cost`, and `gen_ai.client.time_to_first_token` metrics break down spend and latency by turn ([#35]).
-- **OTel structured log records**: one `gitlab_review.comment` log record per generated comment (file, line, severity, duplicate flag, body) and one `gitlab_review.completed` record per run (cost, tokens, model, comment counts) sent to Loki/the configured log backend. Requires the `Logs Publisher` scope on the Grafana Cloud access policy token alongside `Traces Publisher` and `Metrics Publisher` ([#35]).
+- Richer OTel agent telemetry ([#35]): per-turn `gen_ai.agent.turn` spans and per-call `execute_tool` spans, with per-turn token/cost/TTFT metrics.
+- OTel structured log records ([#35]): one `gitlab_review.comment` per comment and one `gitlab_review.completed` per run (requires the Logs Publisher scope).
 
 [0.3.3]: https://github.com/ikko-dev/gitlab-review/compare/0.3.2...0.3.3
 [#35]: https://github.com/ikko-dev/gitlab-review/pull/35
@@ -294,8 +256,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Structured logger**: a `Logger` interface (`debug`/`info`/`warn`/`error` levels) with a `createLogger(minLevel)` factory and a `noopLogger` no-op for library consumers. All log output goes to stderr (169c470, #33).
-- **`--verbose` flag** (or `GITLAB_REVIEW_VERBOSE=true` env var): enables `debug`-level logging. Without it, only `info`-level phase lines are printed. Debug output includes loaded skills and convention files, agent turn numbers, and individual tool calls with argument previews (e.g. `→ Read src/auth.ts`, `→ Bash grep -n …`) (169c470, #33).
+- Structured `Logger` (`debug`/`info`/`warn`/`error`) with `createLogger` and `noopLogger`; all output to stderr (169c470, #33).
+- `--verbose` (or `GITLAB_REVIEW_VERBOSE=true`) enables debug logging — loaded skills/conventions, agent turn numbers, and individual tool calls (169c470, #33).
 
 [0.3.2]: https://github.com/ikko-dev/gitlab-review/compare/0.3.1...0.3.2
 
@@ -303,7 +265,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Draft mode: remap `body` → `note` when posting inline comments to the draft notes API. The discussions endpoint uses `body` for comment text; the draft notes endpoint uses `note`. The same payload was passed unchanged to both, causing every draft inline comment to be rejected with 400 "note is missing" ([#32]).
+- Draft mode: remap `body` → `note` for the draft notes API, which previously rejected every draft inline comment with 400 "note is missing" ([#32]).
 
 [0.3.1]: https://github.com/ikko-dev/gitlab-review/compare/0.3.0...0.3.1
 [#32]: https://github.com/ikko-dev/gitlab-review/pull/32
@@ -312,26 +274,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Skills**: domain-specific review modules that sharpen the agent's focus. Load built-in skills with `--skill <name>` (repeatable) or `GITLAB_REVIEW_SKILLS` (comma-separated). Project skills are auto-discovered from `.agents/skills/<name>/SKILL.md` and `.claude/skills/<name>/SKILL.md`, walking from the git root to `cwd`; a skill closer to `cwd` overrides one of the same name higher up; project skills override built-ins. Each skill injects a focused instruction block and optional `references/` files into the system prompt — reference files are made available by path so the agent can read them on demand ([#31]).
-- **Built-in `code-review` skill**: adversarial correctness reviewer that reports only real, demonstrable bugs with a concrete proof path (specific input → failure → observable symptom). Includes per-language reference files for JavaScript/TypeScript and PHP/Laravel covering async/promise pitfalls, type coercion traps, React hook gotchas, Eloquent N+1, non-atomic Laravel writes, and more ([#31]).
-- Active skill names appear in the MR summary note footer (`Skills: \`code-review\``) after the cost line, and in `review-usage.json`under`skills` ([#31]).
-- `runReview` now accepts a `timeoutMs` option (default 10 min); the agent run is raced against a `ReviewerError` timeout promise so hung LLM calls do not block the CI job indefinitely.
-- New `dist/review.js` Vite build entry exposes the public library API (`runReview`, context helpers, etc.) separately from the CLI bundle; the `"."` package export now points to `review.js` / `review.d.ts` instead of the CLI entry.
-- `typecheck:tests` script (`tsgo -p tsconfig.test.json --noEmit`) and matching `tsconfig.test.json` extend type-checking to the `tests/` directory, catching incomplete `Config` objects and other test-fixture type errors.
+- Skills: domain-specific review modules loaded with `--skill <name>` / `GITLAB_REVIEW_SKILLS`, auto-discovered from `.agents/skills/` and `.claude/skills/` (closer and project skills override) ([#31]).
+- Built-in `code-review` skill: adversarial correctness reviewer with per-language reference files (JS/TS, PHP/Laravel) ([#31]).
+- Active skill names shown in the summary footer and `review-usage.json` ([#31]).
+- `runReview` accepts a `timeoutMs` option (default 10 min) so hung LLM calls cannot block CI.
+- New `dist/review.js` library build entry; the `"."` package export points to it.
+- `typecheck:tests` script and `tsconfig.test.json` extend type-checking to `tests/`.
 
 ### Changed
 
-- Switch license from MIT to FSL-1.1-ALv2 (Functional Source License). Internal use, education, research, and professional services remain freely permitted; the restriction covers commercial products or services that compete with gitlab-review. The license converts to Apache 2.0 two years after each release.
-- The summary comment now always opens with a `## Code Review` level-2 heading, making the bot's note easy to identify in busy MR discussions ([#28]).
-- `--skill` flag is now handled natively by `parseArgs` as a multi-value flag (`MULTI_FLAGS`), replacing the separate `parseSkills` pass over `argv`; both `--skill foo --skill bar` and `--skill=foo` forms are supported and accumulate correctly.
-- `UpsertSummaryOptions` no longer re-declares `skillsFooter`; it now inherits the field cleanly from `SummaryBodyOptions`.
+- Switch license from MIT to FSL-1.1-ALv2 (converts to Apache 2.0 two years after each release).
+- The summary comment opens with a `## Code Review` heading ([#28]).
+- `--skill` is handled natively by `parseArgs` as a multi-value flag.
+- `UpsertSummaryOptions` inherits `skillsFooter` instead of re-declaring it.
 
 ### Fixed
 
-- Inject today's date into the reviewer system prompt and add a rule banning claims about external state (dates, library versions, deprecation status, API availability) that cannot be verified from the diff, preventing a class of hallucinations where the reviewer flags correct information as wrong based on stale world knowledge ([#29]).
-- `GitLabClient.request()` no longer unconditionally sets `Content-Type: application/json`; the header is now only added when `init.body` is present, avoiding a spurious content-type on GET and DELETE requests.
-- `GitLabClient.paginate()` now wraps each page fetch in an `AbortController` timeout (same `requestTimeout` used by `request()`), so long-running paginated calls are bounded by the same timeout as single requests.
-- Eval helper function renamed from `hasApiKey` to `missingApiKey` to match its actual semantics (returns `true` when the key is absent).
+- Inject today's date into the prompt and ban claims about unverifiable external state (dates, library versions, deprecation) to prevent stale-knowledge hallucinations ([#29]).
+- `GitLabClient.request()` only sets `Content-Type: application/json` when a body is present.
+- `GitLabClient.paginate()` wraps each page fetch in the same `AbortController` timeout as `request()`.
+- Eval helper renamed `hasApiKey` → `missingApiKey` to match its semantics.
 
 [0.3.0]: https://github.com/ikko-dev/gitlab-review/compare/0.2.0...0.3.0
 [#28]: https://github.com/ikko-dev/gitlab-review/pull/28
@@ -342,11 +304,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Skip reviewer execution when the current MR head commit already appears in the summary note's reviewed-commit footer, avoiding duplicate reviews for the same diff. Add the reviewed-commit footer to summary notes, link it to the `gitlab-review` GitHub repository, and provide a `--force-review` / `GITLAB_REVIEW_FORCE_REVIEW` override for intentional re-runs ([#25], [#26]).
+- Skip the reviewer when the MR head commit already appears in the summary note's reviewed-commit footer; `--force-review` / `GITLAB_REVIEW_FORCE_REVIEW` overrides ([#25], [#26]).
 
 ### Changed
 
-- Align project naming to `gitlab-review` across code, docs, tests, generated markers, OpenTelemetry agent/span naming, the default review artifact (`gitlab-review.md`), and project-specific `GITLAB_REVIEW_*` environment variables. Existing legacy hidden MR markers remain readable to avoid duplicate comments and summaries during migration ([#27]).
+- Align project naming to `gitlab-review` across code, markers, OTel naming, the default artifact, and `GITLAB_REVIEW_*` env vars; legacy hidden markers stay readable for migration ([#27]).
 
 [0.2.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.2.0
 [#25]: https://github.com/ikko-dev/gitlab-review/pull/25
@@ -357,7 +319,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Preserve previous MR-level summary runs in a collapsed `Previous review runs` history section when updating the summary note, instead of erasing them; the latest summary remains at the top and history retention is bounded to 10 previous runs ([#24]).
+- Preserve previous summary runs in a collapsed `Previous review runs` history section (bounded to 10) instead of erasing them ([#24]).
 
 [0.1.11]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.11
 [#24]: https://github.com/ikko-dev/gitlab-review/pull/24
@@ -366,11 +328,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- The MR-level summary note now includes a cost footer (token counts and USD total, the same line printed to the CI log) appended after a horizontal rule, so reviewers can see the run cost directly on the MR ([#22]).
+- The summary note includes a cost footer (token counts + USD total) after a horizontal rule ([#22]).
 
 ### Changed
 
-- The summary note is now upserted **before** inline comments are posted, so it appears at the top of the MR activity feed rather than after the inline threads ([#22]).
+- The summary note is upserted before inline comments so it appears at the top of the MR activity feed ([#22]).
 
 [0.1.10]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.10
 [#22]: https://github.com/ikko-dev/gitlab-review/pull/22
@@ -379,18 +341,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Post the reviewer's overall `summary` as a non-positional merge request note — the same shape a human reviewer creates from the MR comment box. The note carries a hidden `<!-- gitlab-review:summary -->` marker so subsequent runs find the existing note and update it in place via `PUT /merge_requests/:iid/notes/:id` instead of piling up duplicates. Default-on; disable with `--no-summary` or `GITLAB_REVIEW_POST_SUMMARY=false`. Skipped under `--dry-run` / `--no-post`. Runs in both `direct` and `draft` posting modes (always via the regular notes endpoints) ([#19]).
+- Post the reviewer's `summary` as a non-positional MR note, upserted in place via a hidden `<!-- gitlab-review:summary -->` marker; default-on (`--no-summary` disables), skipped under dry-run/no-post ([#19]).
 - New `GitLabClient` methods: `createMergeRequestNote`, `updateMergeRequestNote` ([#19]).
-- New `gitlab.upsert_summary` diagnostics channel and OTel attributes (`gitlab_review.summary.action`, `gitlab_review.summary.note_id`) exposing whether the summary note was created or updated and its resolved id ([#19]).
-- Emit OpenTelemetry GenAI client metrics (`gen_ai.client.operation.duration`, `gen_ai.client.token.usage`) alongside spans so Grafana Application Observability / AI Observability surfaces — and any OTel-compliant LLM observability consumer driven off these metric names — discover the service from its metrics without dashboard import.
+- New `gitlab.upsert_summary` diagnostics channel and OTel attributes ([#19]).
+- Emit OTel GenAI client metrics (`gen_ai.client.operation.duration`, `gen_ai.client.token.usage`) alongside spans.
 
 ### Changed
 
-- **Breaking (library callers only).** Dropped the structural OTel typing shim and adopted the canonical `@opentelemetry/api` provider-injection pattern. Callers passing a `runtime:` to `startOtelBridge` now provide `tracerProvider` + `meterProvider` instead of the full `api` namespace. The opt-in CLI flag (`GITLAB_REVIEW_OTEL=1`) and the bundled-runtime path are unchanged — only the library-DI shape moved. See the README snippet for the new form.
+- **Breaking (library callers only):** `startOtelBridge`'s `runtime:` now takes `tracerProvider` + `meterProvider` instead of the full `api` namespace; the CLI opt-in is unchanged.
 
 ### Fixed
 
-- OTel `service.version` resource attribute is now inlined at build time from `package.json` via Vite's `define`, so it reads the real package version under `npx` / standalone bin invocations instead of falling back to `'0.0.0'` (the previous `process.env.npm_package_version` lookup was only populated by `npm run`).
+- OTel `service.version` is inlined at build time from `package.json`, so it reads the real version under `npx`/standalone instead of `0.0.0`.
 
 [0.1.9]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.9
 [#19]: https://github.com/ikko-dev/gitlab-review/pull/19
@@ -399,7 +361,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- OpenTelemetry bridge boot crash with `resources.Resource is not a constructor`. The bootstrap now uses the `@opentelemetry/resources` v2 factory API (`resourceFromAttributes` merged onto `defaultResource()`) instead of the removed v1 `new Resource(...)` constructor, so opt-in runs (`GITLAB_REVIEW_OTEL=1`) start cleanly again ([#18]).
+- OTel bridge boot crash (`resources.Resource is not a constructor`): use the `@opentelemetry/resources` v2 factory API ([#18]).
 
 [0.1.8]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.8
 [#18]: https://github.com/ikko-dev/gitlab-review/pull/18
@@ -408,7 +370,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Opt-in OpenTelemetry bridge: set `GITLAB_REVIEW_OTEL=1` to emit spans tagged with the OpenTelemetry GenAI semantic conventions (`gen_ai.*`), including per-run token usage and USD cost on the `invoke_agent gitlab-review` span. Exporter selection follows the standard `OTEL_*` env vars, so the same run reports into Tempo, Datadog, Honeycomb, SigNoz, or Grafana Cloud AI Observability (Sigil) ([#17]).
+- Opt-in OpenTelemetry bridge (`GITLAB_REVIEW_OTEL=1`) emitting GenAI-convention spans with per-run tokens/cost; exporter selection follows the standard `OTEL_*` env vars ([#17]).
 
 [0.1.7]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.7
 [#17]: https://github.com/ikko-dev/gitlab-review/pull/17
@@ -417,11 +379,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Parse JSON review fences whose comment bodies contain nested fenced code blocks by only treating backticks at the beginning of a line as the closing fence ([#15]).
+- Parse JSON review fences whose comment bodies contain nested fenced code blocks (only treat line-start backticks as the closing fence) ([#15]).
 
 ### Changed
 
-- Use Codecov OIDC authentication for coverage and test-result uploads in CI ([#15]).
+- Use Codecov OIDC authentication for CI uploads ([#15]).
 
 [0.1.6]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.6
 [#15]: https://github.com/ikko-dev/gitlab-review/pull/15
@@ -430,13 +392,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `--posting-mode draft` (env: `GITLAB_REVIEW_POSTING_MODE`) creates GitLab draft notes for every fresh comment and publishes them atomically via `POST /draft_notes/bulk_publish` so the MR never shows a half-posted review. Hardened with orphan cleanup at run start, bounded-concurrency (cap 10) draft creation, a pre-publish fingerprint re-check that drops drafts colliding with discussions posted between dedupe and publish, and same-run self-heal that sweeps partial drafts if a creation fails mid-flight. Default stays `direct` for one release ([#14]).
-- New `GitLabClient` methods: `getCurrentUser`, `listDraftNotes`, `createDraftNote`, `deleteDraftNote`, `bulkPublishDraftNotes` ([#14]).
-- `gitlab.post_comments` diagnostic payload now exposes `draftsAbandoned`, `draftsCreated`, `draftsDeletedPrePublish`, and `draftsPublished` when draft mode is used ([#14]).
+- `--posting-mode draft` (`GITLAB_REVIEW_POSTING_MODE`) creates draft notes and publishes them atomically via `bulk_publish`, with orphan cleanup, bounded concurrency, a pre-publish fingerprint re-check, and same-run self-heal; default stays `direct` ([#14]).
+- New `GitLabClient` draft methods (`getCurrentUser`, `listDraftNotes`, `createDraftNote`, `deleteDraftNote`, `bulkPublishDraftNotes`) ([#14]).
+- `gitlab.post_comments` diagnostics expose draft counts ([#14]).
 
 ### Changed
 
-- Post-run log reports drafts dropped by the pre-publish re-check separately from duplicates instead of conflating them in the `(N duplicates skipped)` count ([#14]).
+- Drafts dropped by the pre-publish re-check are reported separately from duplicates ([#14]).
 
 [0.1.5]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.5
 [#14]: https://github.com/ikko-dev/gitlab-review/pull/14
@@ -445,7 +407,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Make the review agent's `thinkingLevel` configurable. New `--thinking <level>` flag and `GITLAB_REVIEW_THINKING_LEVEL` env var accept `off`, `minimal`, `low`, `medium`, `high`, or `xhigh` (default: `off`). Thinking tokens are billed at the model output rate and are reflected in the `Review usage:` line and `review-usage.json` ([#13]).
+- Configurable agent `thinkingLevel` via `--thinking <level>` / `GITLAB_REVIEW_THINKING_LEVEL` (`off`…`xhigh`, default `off`); thinking tokens are billed and reported ([#13]).
 
 [0.1.4]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.4
 [#13]: https://github.com/ikko-dev/gitlab-review/pull/13
@@ -454,7 +416,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `formatUsageLine` now reports billable input as `input + cacheRead + cacheWrite` instead of the uncached delta alone, so the `Review usage:` line agrees with the cost figure when Anthropic prompt caching is active. Adds a `(N cached)` hint when `cacheRead > 0` ([#12]).
+- `formatUsageLine` reports billable input as `input + cacheRead + cacheWrite` so the usage line agrees with the cost when prompt caching is active; adds a `(N cached)` hint ([#12]).
 
 [0.1.3]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.3
 [#12]: https://github.com/ikko-dev/gitlab-review/pull/12
@@ -463,11 +425,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Own the review pipeline: drive `@earendil-works/pi-agent-core` directly so token usage and cost are captured per run. Surface a `Review usage: ... in / ... out tokens — $... (model)` line at the end of the CLI run and write a sibling `review-usage.json` artifact with input/output/cacheRead/cacheWrite token and cost breakdowns ([#11]).
+- Own the review pipeline: drive `@earendil-works/pi-agent-core` directly to capture per-run token usage and cost; print a `Review usage:` line and write `review-usage.json` ([#11]).
 
 ### Changed
 
-- Replace the bundled `gitlab-review` dependency with direct pinned dependencies on `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and `@earendil-works/pi-coding-agent`. Conventions loading (`AGENTS.md` / `CLAUDE.md` / `REVIEW.md`), prompt building, and diff noise filtering now live in this package ([#11]).
+- Replace the bundled `gitlab-review` dependency with direct pinned deps on `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and `@earendil-works/pi-coding-agent`; conventions loading, prompt building, and noise filtering now live here ([#11]).
 
 [0.1.2]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.2
 [#11]: https://github.com/ikko-dev/gitlab-review/pull/11
