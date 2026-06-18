@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.1...HEAD
+
 ## [0.7.1] - 2026-06-18
 
 ### Fixed
@@ -17,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Warn and skip (exit 0) instead of failing the pipeline when the model provider is out of credits/quota (e.g. HTTP 402); transient 429 rate limits still fail ([#87]).
 - Split the README into a lean landing page plus dedicated `docs/` reference pages ([#85]).
+
+[0.7.1]: https://github.com/ikko-dev/gitlab-review/compare/0.7.0...0.7.1
+[#85]: https://github.com/ikko-dev/gitlab-review/pull/85
+[#86]: https://github.com/ikko-dev/gitlab-review/pull/86
+[#87]: https://github.com/ikko-dev/gitlab-review/pull/87
 
 ## [0.7.0] - 2026-06-17
 
@@ -32,6 +39,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `full`-depth Triage dedup is now fuzzy and deterministic (proximity + token-set similarity, order-independent, higher severity wins) ([#83]).
+
+[0.7.0]: https://github.com/ikko-dev/gitlab-review/compare/0.6.2...0.7.0
+[#69]: https://github.com/ikko-dev/gitlab-review/pull/69
+[#79]: https://github.com/ikko-dev/gitlab-review/pull/79
+[#80]: https://github.com/ikko-dev/gitlab-review/pull/80
+[#81]: https://github.com/ikko-dev/gitlab-review/pull/81
+[#82]: https://github.com/ikko-dev/gitlab-review/pull/82
+[#83]: https://github.com/ikko-dev/gitlab-review/pull/83
 
 ## [0.6.2] - 2026-06-08
 
@@ -183,6 +198,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Ambient-credentials error hint**: when `--api-key` is missing for `amazon-bedrock` or `google-vertex`, the error message now includes setup instructions (IAM env vars / `gcloud auth application-default login`) instead of the generic "Provide CLI flags" hint.
 - **`parseModelProvider` export** from `src/config.ts`: extracts the provider prefix from a `provider/modelId` string. Useful for library callers building custom model logic.
 
+[0.3.10]: https://github.com/ikko-dev/gitlab-review/compare/0.3.9...0.3.10
+
 ## [0.3.9] - 2026-05-22
 
 ### Added
@@ -194,6 +211,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`gen_ai.usage.input_tokens` now reports total input** (non-cached + cached) on `gen_ai.agent.turn` spans and the `invoke_agent gitlab-review` phase span, matching the Sentry AI monitoring convention. Previously it reported only non-cached input tokens, which caused Sentry's cost calculator to produce negative cache costs. `gen_ai.usage.input_tokens.cached` is now also set as the SUBSET attribute when cache reads are non-zero. `gen_ai.usage.cache_read.input_tokens` is kept unchanged for Grafana/Tempo backward compatibility.
 - Same `gen_ai.usage.input_tokens` total fix applied to the `gitlab_review.completed` OTel log record, which now also carries `gen_ai.usage.input_tokens.cached`.
+
+[0.3.9]: https://github.com/ikko-dev/gitlab-review/compare/0.3.8...0.3.9
 
 ## [0.3.8] - 2026-05-21
 
@@ -212,6 +231,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Spurious zero-value `gitlab_review_comments_total` increments**: the counter was unconditionally incremented even when `posted` was 0 (skipped or dry-run runs), polluting Grafana rate queries. The increment is now guarded by `if (posted > 0)`.
 - **`CI_JOB_ID` and `CI_PIPELINE_ID` missing from spans and logs**: these high-cardinality CI identifiers are now captured by a new `buildCiSpanAttrs()` helper and attached to all phase spans and log records as `gitlab.ci_job_id` / `gitlab.ci_pipeline_id`. They are intentionally excluded from metric data-point labels to avoid cardinality explosion in Prometheus/Mimir.
 
+[0.3.8]: https://github.com/ikko-dev/gitlab-review/compare/0.3.7...0.3.8
+
 ## [0.3.7] - 2026-05-21
 
 ### Fixed
@@ -224,12 +245,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `gitlab_review.warnings`, `gitlab_review.drafts.abandoned`, and `gitlab_review.drafts.deleted_pre_publish` span attributes are now emitted from `applyResultAttributes`. These three `DiagnosticContext` fields were populated by the posting phases but never written to OTel spans.
   - `service.name="@ikko-dev/gitlab-review"` is now included as an explicit attribute on `gitlab_review.comment` and `gitlab_review.completed` log records for consistent label presence alongside metrics.
 
+[0.3.7]: https://github.com/ikko-dev/gitlab-review/compare/0.3.6...0.3.7
+
 ## [0.3.6] - 2026-05-21
 
 ### Added
 
 - **`gen_ai.conversation.id` OTel attribute**: every span emitted by the OTel bridge (all phase spans and per-turn `gen_ai.agent.turn` spans) now carries `gen_ai.conversation.id` set to the run UUID. This follows the OpenTelemetry GenAI semantic conventions and unlocks the Sentry Conversations view as well as cross-span querying by conversation in any OTel-compatible backend.
 - **Run ID footnote in MR summary notes**: when `postSummary` is enabled, the posted summary note now includes a `<sub>Run ID: \`<uuid>\`</sub>` footnote so the trace can be located in Sentry (or any OTel backend) directly from the MR.
+
+[0.3.6]: https://github.com/ikko-dev/gitlab-review/compare/0.3.5...0.3.6
 
 ## [0.3.5] - 2026-05-21
 
@@ -245,11 +270,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `gitlab.mr_iid` is intentionally excluded from all metric labels (high cardinality); it remains available on spans only.
   - The existing `gen_ai.client.*` per-turn metrics are unchanged.
 
+[0.3.5]: https://github.com/ikko-dev/gitlab-review/compare/0.3.4...0.3.5
+
 ## [0.3.4] - 2026-05-21
 
 ### Added
 
 - **GitLab CI project attributes on OTel metrics, spans, and logs**: when running inside a GitLab CI pipeline, four CI environment variables are now automatically included as attributes on every metric data point, span, and log record emitted by the OTel bridge. `gitlab.project_path` (`CI_PROJECT_PATH`, e.g. `group/my-project`), `gitlab.project_namespace` (`CI_PROJECT_NAMESPACE`), `gitlab.mr_target_branch` (`CI_MERGE_REQUEST_TARGET_BRANCH_NAME`), and `gitlab.pipeline_source` (`CI_PIPELINE_SOURCE`) are captured once at bridge startup and spread into all emission sites — run-level histograms, per-turn metrics, phase spans, comment logs, and the `gitlab_review.completed` log record. Attributes are omitted gracefully when the vars are not set (local runs). Enables Prometheus/Mimir queries like `sum by (gitlab_project_path) (increase(gen_ai_client_cost_sum[7d]))` to compare token spend and cost across projects.
+
+[0.3.4]: https://github.com/ikko-dev/gitlab-review/compare/0.3.3...0.3.4
 
 ## [0.3.3] - 2026-05-21
 
@@ -258,6 +287,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Richer OTel agent telemetry** (`GITLAB_REVIEW_OTEL=1`): per-turn `gen_ai.agent.turn` spans and per-call `execute_tool <name>` grandchild spans now appear under `invoke_agent gitlab-review` in Tempo, giving a full tool-use timeline. Per-turn `gen_ai.client.token.usage`, `gen_ai.client.cost`, and `gen_ai.client.time_to_first_token` metrics break down spend and latency by turn ([#35]).
 - **OTel structured log records**: one `gitlab_review.comment` log record per generated comment (file, line, severity, duplicate flag, body) and one `gitlab_review.completed` record per run (cost, tokens, model, comment counts) sent to Loki/the configured log backend. Requires the `Logs Publisher` scope on the Grafana Cloud access policy token alongside `Traces Publisher` and `Metrics Publisher` ([#35]).
 
+[0.3.3]: https://github.com/ikko-dev/gitlab-review/compare/0.3.2...0.3.3
+[#35]: https://github.com/ikko-dev/gitlab-review/pull/35
+
 ## [0.3.2] - 2026-05-20
 
 ### Added
@@ -265,11 +297,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Structured logger**: a `Logger` interface (`debug`/`info`/`warn`/`error` levels) with a `createLogger(minLevel)` factory and a `noopLogger` no-op for library consumers. All log output goes to stderr (169c470, #33).
 - **`--verbose` flag** (or `GITLAB_REVIEW_VERBOSE=true` env var): enables `debug`-level logging. Without it, only `info`-level phase lines are printed. Debug output includes loaded skills and convention files, agent turn numbers, and individual tool calls with argument previews (e.g. `→ Read src/auth.ts`, `→ Bash grep -n …`) (169c470, #33).
 
+[0.3.2]: https://github.com/ikko-dev/gitlab-review/compare/0.3.1...0.3.2
+
 ## [0.3.1] - 2026-05-20
 
 ### Fixed
 
 - Draft mode: remap `body` → `note` when posting inline comments to the draft notes API. The discussions endpoint uses `body` for comment text; the draft notes endpoint uses `note`. The same payload was passed unchanged to both, causing every draft inline comment to be rejected with 400 "note is missing" ([#32]).
+
+[0.3.1]: https://github.com/ikko-dev/gitlab-review/compare/0.3.0...0.3.1
+[#32]: https://github.com/ikko-dev/gitlab-review/pull/32
 
 ## [0.3.0] - 2026-05-19
 
@@ -296,6 +333,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GitLabClient.paginate()` now wraps each page fetch in an `AbortController` timeout (same `requestTimeout` used by `request()`), so long-running paginated calls are bounded by the same timeout as single requests.
 - Eval helper function renamed from `hasApiKey` to `missingApiKey` to match its actual semantics (returns `true` when the key is absent).
 
+[0.3.0]: https://github.com/ikko-dev/gitlab-review/compare/0.2.0...0.3.0
+[#28]: https://github.com/ikko-dev/gitlab-review/pull/28
+[#29]: https://github.com/ikko-dev/gitlab-review/pull/29
+[#31]: https://github.com/ikko-dev/gitlab-review/pull/31
+
 ## [0.2.0] - 2026-05-19
 
 ### Added
@@ -306,11 +348,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Align project naming to `gitlab-review` across code, docs, tests, generated markers, OpenTelemetry agent/span naming, the default review artifact (`gitlab-review.md`), and project-specific `GITLAB_REVIEW_*` environment variables. Existing legacy hidden MR markers remain readable to avoid duplicate comments and summaries during migration ([#27]).
 
+[0.2.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.2.0
+[#25]: https://github.com/ikko-dev/gitlab-review/pull/25
+[#26]: https://github.com/ikko-dev/gitlab-review/pull/26
+[#27]: https://github.com/ikko-dev/gitlab-review/pull/27
+
 ## [0.1.11] - 2026-05-19
 
 ### Changed
 
 - Preserve previous MR-level summary runs in a collapsed `Previous review runs` history section when updating the summary note, instead of erasing them; the latest summary remains at the top and history retention is bounded to 10 previous runs ([#24]).
+
+[0.1.11]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.11
+[#24]: https://github.com/ikko-dev/gitlab-review/pull/24
 
 ## [0.1.10] - 2026-05-19
 
@@ -321,6 +371,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The summary note is now upserted **before** inline comments are posted, so it appears at the top of the MR activity feed rather than after the inline threads ([#22]).
+
+[0.1.10]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.10
+[#22]: https://github.com/ikko-dev/gitlab-review/pull/22
 
 ## [0.1.9] - 2026-05-19
 
@@ -339,17 +392,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - OTel `service.version` resource attribute is now inlined at build time from `package.json` via Vite's `define`, so it reads the real package version under `npx` / standalone bin invocations instead of falling back to `'0.0.0'` (the previous `process.env.npm_package_version` lookup was only populated by `npm run`).
 
+[0.1.9]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.9
+[#19]: https://github.com/ikko-dev/gitlab-review/pull/19
+
 ## [0.1.8] - 2026-05-19
 
 ### Fixed
 
 - OpenTelemetry bridge boot crash with `resources.Resource is not a constructor`. The bootstrap now uses the `@opentelemetry/resources` v2 factory API (`resourceFromAttributes` merged onto `defaultResource()`) instead of the removed v1 `new Resource(...)` constructor, so opt-in runs (`GITLAB_REVIEW_OTEL=1`) start cleanly again ([#18]).
 
+[0.1.8]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.8
+[#18]: https://github.com/ikko-dev/gitlab-review/pull/18
+
 ## [0.1.7] - 2026-05-19
 
 ### Added
 
 - Opt-in OpenTelemetry bridge: set `GITLAB_REVIEW_OTEL=1` to emit spans tagged with the OpenTelemetry GenAI semantic conventions (`gen_ai.*`), including per-run token usage and USD cost on the `invoke_agent gitlab-review` span. Exporter selection follows the standard `OTEL_*` env vars, so the same run reports into Tempo, Datadog, Honeycomb, SigNoz, or Grafana Cloud AI Observability (Sigil) ([#17]).
+
+[0.1.7]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.7
+[#17]: https://github.com/ikko-dev/gitlab-review/pull/17
 
 ## [0.1.6] - 2026-05-19
 
@@ -360,6 +422,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Use Codecov OIDC authentication for coverage and test-result uploads in CI ([#15]).
+
+[0.1.6]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.6
+[#15]: https://github.com/ikko-dev/gitlab-review/pull/15
 
 ## [0.1.5] - 2026-05-19
 
@@ -373,17 +438,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Post-run log reports drafts dropped by the pre-publish re-check separately from duplicates instead of conflating them in the `(N duplicates skipped)` count ([#14]).
 
+[0.1.5]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.5
+[#14]: https://github.com/ikko-dev/gitlab-review/pull/14
+
 ## [0.1.4] - 2026-05-18
 
 ### Added
 
 - Make the review agent's `thinkingLevel` configurable. New `--thinking <level>` flag and `GITLAB_REVIEW_THINKING_LEVEL` env var accept `off`, `minimal`, `low`, `medium`, `high`, or `xhigh` (default: `off`). Thinking tokens are billed at the model output rate and are reflected in the `Review usage:` line and `review-usage.json` ([#13]).
 
+[0.1.4]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.4
+[#13]: https://github.com/ikko-dev/gitlab-review/pull/13
+
 ## [0.1.3] - 2026-05-18
 
 ### Fixed
 
 - `formatUsageLine` now reports billable input as `input + cacheRead + cacheWrite` instead of the uncached delta alone, so the `Review usage:` line agrees with the cost figure when Anthropic prompt caching is active. Adds a `(N cached)` hint when `cacheRead > 0` ([#12]).
+
+[0.1.3]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.3
+[#12]: https://github.com/ikko-dev/gitlab-review/pull/12
 
 ## [0.1.2] - 2026-05-18
 
@@ -395,11 +469,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Replace the bundled `gitlab-review` dependency with direct pinned dependencies on `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and `@earendil-works/pi-coding-agent`. Conventions loading (`AGENTS.md` / `CLAUDE.md` / `REVIEW.md`), prompt building, and diff noise filtering now live in this package ([#11]).
 
+[0.1.2]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.2
+[#11]: https://github.com/ikko-dev/gitlab-review/pull/11
+
 ## [0.1.1] - 2026-05-18
 
 ### Fixed
 
 - Forward shell-quoted Git diff arguments to `gitlab-review` instead of raw diff content.
+
+[0.1.1]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.1
 
 ## [0.1.0] - 2026-05-18
 
@@ -426,59 +505,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.1...HEAD
-[0.7.1]: https://github.com/ikko-dev/gitlab-review/compare/0.7.0...0.7.1
-[0.7.0]: https://github.com/ikko-dev/gitlab-review/compare/0.6.2...0.7.0
-[0.3.10]: https://github.com/ikko-dev/gitlab-review/compare/0.3.9...0.3.10
-[0.3.9]: https://github.com/ikko-dev/gitlab-review/compare/0.3.8...0.3.9
-[0.3.8]: https://github.com/ikko-dev/gitlab-review/compare/0.3.7...0.3.8
-[0.3.7]: https://github.com/ikko-dev/gitlab-review/compare/0.3.6...0.3.7
-[0.3.6]: https://github.com/ikko-dev/gitlab-review/compare/0.3.5...0.3.6
-[0.3.5]: https://github.com/ikko-dev/gitlab-review/compare/0.3.4...0.3.5
-[0.3.4]: https://github.com/ikko-dev/gitlab-review/compare/0.3.3...0.3.4
-[0.3.3]: https://github.com/ikko-dev/gitlab-review/compare/0.3.2...0.3.3
-[0.3.2]: https://github.com/ikko-dev/gitlab-review/compare/0.3.1...0.3.2
-[0.3.1]: https://github.com/ikko-dev/gitlab-review/compare/0.3.0...0.3.1
-[0.3.0]: https://github.com/ikko-dev/gitlab-review/compare/0.2.0...0.3.0
-[0.2.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.2.0
-[0.1.11]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.11
-[0.1.10]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.10
-[0.1.9]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.9
-[0.1.8]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.8
-[0.1.7]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.7
-[0.1.6]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.6
-[0.1.5]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.5
-[0.1.4]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.4
-[0.1.3]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.3
-[0.1.2]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.2
-[0.1.1]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.1
-[#11]: https://github.com/ikko-dev/gitlab-review/pull/11
-[#12]: https://github.com/ikko-dev/gitlab-review/pull/12
-[#13]: https://github.com/ikko-dev/gitlab-review/pull/13
-[#14]: https://github.com/ikko-dev/gitlab-review/pull/14
-[#15]: https://github.com/ikko-dev/gitlab-review/pull/15
-[#17]: https://github.com/ikko-dev/gitlab-review/pull/17
-[#18]: https://github.com/ikko-dev/gitlab-review/pull/18
-[#19]: https://github.com/ikko-dev/gitlab-review/pull/19
-[#22]: https://github.com/ikko-dev/gitlab-review/pull/22
-[#24]: https://github.com/ikko-dev/gitlab-review/pull/24
-[#25]: https://github.com/ikko-dev/gitlab-review/pull/25
-[#26]: https://github.com/ikko-dev/gitlab-review/pull/26
-[#27]: https://github.com/ikko-dev/gitlab-review/pull/27
-[#28]: https://github.com/ikko-dev/gitlab-review/pull/28
-[#29]: https://github.com/ikko-dev/gitlab-review/pull/29
-[#31]: https://github.com/ikko-dev/gitlab-review/pull/31
-[#32]: https://github.com/ikko-dev/gitlab-review/pull/32
-[#35]: https://github.com/ikko-dev/gitlab-review/pull/35
-[#69]: https://github.com/ikko-dev/gitlab-review/pull/69
-[#79]: https://github.com/ikko-dev/gitlab-review/pull/79
-[#80]: https://github.com/ikko-dev/gitlab-review/pull/80
-[#81]: https://github.com/ikko-dev/gitlab-review/pull/81
-[#82]: https://github.com/ikko-dev/gitlab-review/pull/82
-[#83]: https://github.com/ikko-dev/gitlab-review/pull/83
-[#85]: https://github.com/ikko-dev/gitlab-review/pull/85
-[#86]: https://github.com/ikko-dev/gitlab-review/pull/86
-[#87]: https://github.com/ikko-dev/gitlab-review/pull/87
 [0.1.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.0
 [a6166f5]: https://github.com/ikko-dev/gitlab-review/commit/a6166f5
 [310dccf]: https://github.com/ikko-dev/gitlab-review/commit/310dccf
