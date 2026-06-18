@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-06-18
+
 ### Fixed
 
 - **Fail loudly when the reviewer's JSON output cannot be parsed.** When the model emitted a `{ summary, comments }` block with invalid JSON (most often an unescaped `"`, `\`, or newline inside a string value), the parser silently recovered nothing — the job posted an empty review yet exited successfully, masking the failure. The parser now reports a structured `malformed` failure (a `{ reason, preview }` value, or `null` when well-formed) and the CLI throws a `ParseError` (exit code 1) carrying the reason (`fence_unparseable` / `object_unparseable`) and a short preview of the offending block, so the job fails visibly instead, while still writing the raw `gitlab-review.md` artifact for debugging. The failure is only fatal when nothing usable was recovered: a review delivered via the legacy `== Inline Comments ==` markdown or `<!-- gitlab-review-comment -->` markers is preserved (the JSON failure downgrades to a warning), an unrelated/non-reviewer-shaped JSON fence never masks a malformed reviewer object, and an empty fence or a legitimately empty review is not flagged.
