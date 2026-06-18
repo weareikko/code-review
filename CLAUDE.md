@@ -63,7 +63,7 @@
 ## Release and repository notes
 
 - Commit messages in history use Conventional Commits (`feat:`, `fix:`, `chore:`).
-- Keep `CHANGELOG.md` in Keep a Changelog style under `[Unreleased]`.
+- Keep `CHANGELOG.md` in Keep a Changelog style under `[Unreleased]`. Entries are terse — ideally one line per change — and end with a reference to the PR/issue/commit (`([#NN])`) where the detail lives; add the matching link-reference definition at the bottom of the file. Don't restate rationale, internals, or edge cases that the linked PR already covers.
 - Release tags are plain semver (`0.3.1`), not `v0.3.1`; the pre-push hook rejects `v*` tags.
 - Published package files are limited by `package.json#files`; remember `dist/`, `bin/`, `skills/`, `LICENSE`, and `README.md`.
 - Do not edit generated `dist/`, `coverage/`, `node_modules/`, or test result artifacts.

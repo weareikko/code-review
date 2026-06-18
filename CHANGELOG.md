@@ -11,45 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Fail loudly when the reviewer's JSON output cannot be parsed.** When the model emitted a `{ summary, comments }` block with invalid JSON (most often an unescaped `"`, `\`, or newline inside a string value), the parser silently recovered nothing — the job posted an empty review yet exited successfully, masking the failure. The parser now reports a structured `malformed` failure (a `{ reason, preview }` value, or `null` when well-formed) and the CLI throws a `ParseError` (exit code 1) carrying the reason (`fence_unparseable` / `object_unparseable`) and a short preview of the offending block, so the job fails visibly instead, while still writing the raw `gitlab-review.md` artifact for debugging. The failure is only fatal when nothing usable was recovered: a review delivered via the legacy `== Inline Comments ==` markdown or `<!-- gitlab-review-comment -->` markers is preserved (the JSON failure downgrades to a warning), an unrelated/non-reviewer-shaped JSON fence never masks a malformed reviewer object, and an empty fence or a legitimately empty review is not flagged.
+- Fail loudly (`ParseError`, exit 1, with a reason and preview) when the reviewer's JSON output is unparseable, instead of silently posting an empty review. Adds `jsonrepair` recovery of lightly malformed output, anchored unfenced-object extraction, and a hardened JSON-escaping prompt rule; stays non-fatal when usable comments were recovered from the legacy markdown/marker formats ([#86]).
 
 ### Changed
 
-- **Warn instead of failing when the model provider is out of credits/quota.** A provider credit/quota-exhaustion error (e.g. HTTP 402, "insufficient credits", "credit balance is too low", "insufficient_quota") means the review could not run for reasons outside the MR's control. The CLI now treats it as a non-fatal skip — it writes the empty artifacts, logs a warning, and exits 0 — rather than failing the pipeline and blocking every MR on a billing dead-end. Transient rate limits (429) are not treated as quota exhaustion. All other reviewer errors still fail the job.
-- **Best-effort recovery of lightly malformed reviewer JSON.** The parser now runs a `jsonrepair` fallback when strict `JSON.parse` fails, recovering common LLM serialization defects (trailing commas, lightly mis-escaped strings) and emitting a warning when it does. Unrecoverable output still triggers the `malformed`/`ParseError` path above.
-- **Anchored JSON extraction.** The unfenced-object fallback now anchors on the reviewer key (`{"summary"` / `{"comments"`) instead of scanning from the first `{`, so braces in prose and code spans (e.g. `` `{ entries }` ``) are no longer mistaken for the start of the object; it falls back to a full brace scan so a reviewer object whose first key is something else is still recovered. (Inspired by Sentry's Warden.)
-- **Hardened the reviewer prompt** with an explicit JSON-escaping rule, reminding the model to escape every `"`, `\`, and newline inside the Markdown-bearing `summary` and `body` string fields so a single unescaped quote can no longer discard the whole review.
-- Split the bloated README into a lean landing page plus dedicated reference pages under `docs/` (configuration, providers, skills, observability, output format). Docs-only reorganization with no behavior change; `docs/` stays out of the published npm artifact, so the README remains self-sufficient for getting started.
+- Warn and skip (exit 0) instead of failing the pipeline when the model provider is out of credits/quota (e.g. HTTP 402); transient 429 rate limits still fail ([#87]).
+- Split the README into a lean landing page plus dedicated `docs/` reference pages ([#85]).
 
 ## [0.7.0] - 2026-06-17
 
 ### Added
 
-- **Heterogeneous `full`-depth review via a model pool (`--model-pool`, env `GITLAB_REVIEW_MODEL_POOL`).** Multi-agent review derives most of its value from _model_ diversity, not just prompt diversity — but until now every agent in the `full` pipeline ran the same `--model`, so the multi-angle finders were one reviewer with a larger invoice and the adversarial verifier shared the finder's blind spots. You can now pass a comma-separated `provider/modelId` pool (e.g. `--model-pool anthropic/claude-sonnet-4-5,google/gemini-2.5-pro`):
-  - **Fixed angle→model mapping.** Angle `i` runs on pool member `i % pool.length` — deterministic and stable for a given (MR, commit), no randomness or round-robin.
-  - **Cross-family verifier.** Each severe finding is verified by a pool member _other than_ the model that authored it (deterministic tie-break by pool order when 3+ members; with one model it degenerates to today's behaviour). The author-model annotation is internal pipeline metadata only — it never reaches a posted comment, fingerprint, or the summary.
-  - **Per-stage key resolution + graceful degradation.** Each member resolves _its own_ provider key (so a key for one provider is never sent to another); a member whose key is missing/empty is dropped with a warning rather than failing the run, and if every member is unusable the pipeline falls back to `--model`.
-  - **Per-model usage breakdown.** `ReviewUsage` now carries an optional `byModel` array (tokens + cost per pool member, keyed by `provider/modelId`); the CLI prints a per-model breakdown and the usage artifact records it when more than one distinct model ran. Top-level `model`/`tokens`/`cost` stay the main model and the totals.
-
-  Empty pool (the default) means the effective pool is just `[--model]`, reproducing single-model behaviour byte-for-byte.
-
-- **Multi-stage review via `--review-depth` (env `GITLAB_REVIEW_DEPTH`), default `single`.** The reviewer can now run as a staged pipeline instead of a single pass. Three depths:
-  - `single` (default) — one Find pass; output written verbatim, byte-identical to previous behaviour.
-  - `verify` — Find → **Verify** → Synthesize. Each **severe** (CRITICAL/WARN) finding is handed to a separate adversarial agent prompted to _refute_ it; only survivors are kept, an overstated finding is downgraded one tier, and the surviving set is re-synthesized into the same `{ summary, comments }` contract — risk line and issues block regenerated from survivors, every drop/downgrade recorded in the summary **Notes** section so suppression stays auditable. INFO findings are not re-checked.
-  - `full` — **multi-angle Find** (one finder per angle: correctness; state/async/data; failure/security — run concurrently, each with the same diff, skills, and read-only repo tools but a system prompt narrowed to its lane) → **Triage** (dedup by file+line+subject, higher severity wins) → Verify → Synthesize. Trades ~3× tokens for materially higher recall; intended as a selective/opt-in tier for high-stakes or large MRs.
-
-  Verifier and angle-finder token usage are folded into the reported review cost. See `docs/multi-stage-review.md` for the design and the deferred work (LLM-based Synthesize, Sweep, and chunked Find to remove the 100k diff cap).
-
-- **Oversized diffs are now surfaced as a decompose signal instead of being silently trimmed.** When the diff exceeds the char budget, the reviewer used to drop whole files and mention them only as a footnote buried in the summary — easy to miss that part of the change went unreviewed. Size-skips (budget overflow) are now tracked separately from quiet noise-skips (lockfiles/generated/build output) and surfaced as a prominent callout at the top of the MR summary: how many files were dropped, their paths and sizes, and an explicit recommendation to split the MR. Two new knobs control this:
-  - `--max-diff-chars` / `GITLAB_REVIEW_MAX_DIFF_CHARS` (default `100000`) makes the diff char budget configurable so teams can tune the review/skip boundary.
-  - `--decompose-hint-lines` / `GITLAB_REVIEW_DECOMPOSE_HINT_LINES` (default `0` = off) adds an MR-level size check independent of the char budget: when the reviewed diff changes more lines than the threshold, the summary gets a "consider decomposing this MR into atomic changes" note — even when nothing was skipped. The bot stays a sensor: it never fails the pipeline on size, and dry-run/no-post still only writes artifacts.
-- **New built-in `test-integrity` skill catches silent test tampering.** The most common agent failure mode in review is bending a failing test to fit a regression instead of fixing the code — CI goes green, but the green is meaningless. This skill instructs the reviewer to read the test diff with more scrutiny than the production diff and to flag weakened, deleted, disabled, or blindly rewritten assertions (`toEqual` → `toBeDefined`/`toBeTruthy`, removed cases, `.skip`/`.only`/`xit`/`xdescribe`, commented-out tests, snapshot deletions/blind updates, lowered coverage thresholds) across Vitest/Jest and PHPUnit. For each suspicious edit it must establish whether the change tracks a genuine spec change (paired production change + commit context) or masks a behavior change, reporting only when there is a plausible "this hides a regression" path. Test-weakening that plausibly hides a behavior change maps to `critical`; cosmetic test refactors are not reported. It honours the same Commit Context suppression rules as `code-review`. Enable it with `--skill test-integrity` (or `GITLAB_REVIEW_SKILLS=test-integrity`).
-- **Provider and infra environment variables can now be optionally namespaced under `GITLAB_REVIEW_`.** In shared GitLab CI, the credentials and infra vars the AI SDK reads use generic, provider-standard names (`ANTHROPIC_API_KEY`, `CLOUDFLARE_API_KEY`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_GATEWAY_ID`, `OLLAMA_HOST`, ambient AWS/Vertex creds, …) — which can collide with unrelated jobs and give no signal about which variables belong to gitlab-review. A startup shim now exposes each `GITLAB_REVIEW_<NAME>` variable as `<NAME>` (e.g. `GITLAB_REVIEW_CLOUDFLARE_API_KEY` → `CLOUDFLARE_API_KEY`), except the tool's own reserved `GITLAB_REVIEW_*` settings (`MODEL`, `BASE_URL`, `OTEL`, …). This covers everything the AI SDK reads — including the values it resolves at request time, like the Cloudflare account/gateway placeholders — without enumerating its provider list. The shim is purely additive (unprefixed variables keep working), and when both `GITLAB_REVIEW_<NAME>` and a plain `<NAME>` are set the prefixed value wins, so a scoped value overrides an unrelated CI-wide one. Double-prefixed names (e.g. `GITLAB_REVIEW_GITLAB_REVIEW_MODEL`) are skipped so a de-prefixed suffix can never clobber the tool's own reserved `GITLAB_REVIEW_*` settings. The README documents the convention.
-- **The reviewer now reads the MR title and description as declared intent.** Previously the agent judged the diff without ever seeing _why_ the change was made — the `MergeRequest` fetch only captured the source/target branches, so the author's reasoning was discarded and the reviewer had to reconstruct intent that was never written down. The MR title and description are now fetched and injected into the prompt as a dedicated, clearly-delimited `<intent>` block (separate from the diff), and the reviewer checks the diff against the stated intent and flags **code/intent mismatches** as a first-class finding class (the change does something the description never claimed, or omits something it promised). A missing or empty description degrades gracefully — review proceeds with no intent block — and the description is trimmed and length-capped to bound token cost.
+- Heterogeneous `full`-depth review via a model pool (`--model-pool` / `GITLAB_REVIEW_MODEL_POOL`): deterministic per-angle model mapping, a cross-family verifier, per-model usage breakdown, and graceful degradation when a provider key is missing ([#83]).
+- Multi-stage review via `--review-depth single|verify|full` (`GITLAB_REVIEW_DEPTH`, default `single`): adversarial Verify and multi-angle Find → Triage → Synthesize. See `docs/multi-stage-review.md` ([#69]).
+- Oversized diffs surfaced as a decompose signal — a prominent summary callout of skipped files — with `--max-diff-chars` and `--decompose-hint-lines`, instead of being silently trimmed ([#81]).
+- Built-in `test-integrity` skill that flags silent test tampering (weakened/deleted/disabled/blindly-rewritten assertions) ([#82]).
+- Optional `GITLAB_REVIEW_` namespace for provider/infra env vars in shared CI ([#79]).
+- Reviewer reads the MR title/description as declared intent and flags code/intent mismatches ([#80]).
 
 ### Changed
 
-- **`full`-depth Triage dedup is now fuzzy and deterministic.** Triage previously merged angle findings only on an exact `file:line:normalizedSubject` match — fine for a single model, but heterogeneous pool models phrase the same defect differently and may anchor it a line or two apart, so true duplicates slipped through as separate findings. Triage now also merges findings that share a file, sit within a few lines of each other, and have a sufficiently similar normalized subject (token-set Jaccard), while still refusing to over-merge genuinely distinct findings on adjacent lines. The merge is order-independent: findings are sorted by a stable key (file, line, severity desc, confidence desc, body) before clustering, so the same inputs always produce the same merged output regardless of the order angles complete in. Higher severity still wins (ties → higher confidence), and the surviving copy's author model is carried forward for cross-family verification. Each cluster's proximity anchor line stays frozen at its first (sort-stable) line even when a higher-ranked copy is swapped in for severity/body/author, so the anchor cannot drift and transitively pull a third, out-of-range finding into the cluster — distinct findings on nearby-but-not-adjacent lines are no longer silently swallowed.
+- `full`-depth Triage dedup is now fuzzy and deterministic (proximity + token-set similarity, order-independent, higher severity wins) ([#83]).
 
 ## [0.6.2] - 2026-06-08
 
@@ -444,7 +426,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.3.10...HEAD
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.1...HEAD
+[0.7.1]: https://github.com/ikko-dev/gitlab-review/compare/0.7.0...0.7.1
+[0.7.0]: https://github.com/ikko-dev/gitlab-review/compare/0.6.2...0.7.0
 [0.3.10]: https://github.com/ikko-dev/gitlab-review/compare/0.3.9...0.3.10
 [0.3.9]: https://github.com/ikko-dev/gitlab-review/compare/0.3.8...0.3.9
 [0.3.8]: https://github.com/ikko-dev/gitlab-review/compare/0.3.7...0.3.8
@@ -486,6 +470,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#31]: https://github.com/ikko-dev/gitlab-review/pull/31
 [#32]: https://github.com/ikko-dev/gitlab-review/pull/32
 [#35]: https://github.com/ikko-dev/gitlab-review/pull/35
+[#69]: https://github.com/ikko-dev/gitlab-review/pull/69
+[#79]: https://github.com/ikko-dev/gitlab-review/pull/79
+[#80]: https://github.com/ikko-dev/gitlab-review/pull/80
+[#81]: https://github.com/ikko-dev/gitlab-review/pull/81
+[#82]: https://github.com/ikko-dev/gitlab-review/pull/82
+[#83]: https://github.com/ikko-dev/gitlab-review/pull/83
+[#85]: https://github.com/ikko-dev/gitlab-review/pull/85
+[#86]: https://github.com/ikko-dev/gitlab-review/pull/86
+[#87]: https://github.com/ikko-dev/gitlab-review/pull/87
 [0.1.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.0
 [a6166f5]: https://github.com/ikko-dev/gitlab-review/commit/a6166f5
 [310dccf]: https://github.com/ikko-dev/gitlab-review/commit/310dccf
