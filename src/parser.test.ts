@@ -291,6 +291,17 @@ describe('gitlab-review parsing', () => {
     expect(result.warnings.some((w) => /best-effort repair/.test(w))).toBe(true);
   });
 
+  it('repairs a recoverable unfenced reviewer object before failing loudly', () => {
+    // No fence; trailing comma makes strict parsing fail but repair recovers it.
+    const markdown =
+      'Here is my review:\n\n{"summary":"ok","comments":[{"file":"src/a.ts","line":3,"side":"RIGHT","body":"Fix this"},]}';
+    const result = parseReviewMarkdownWithWarnings(markdown);
+    expect(result.malformed).toBe(false);
+    expect(result.comments).toHaveLength(1);
+    expect(result.summary).toBe('ok');
+    expect(result.warnings.some((w) => /best-effort repair/.test(w))).toBe(true);
+  });
+
   it('does not run the unfenced fallback when a JSON fence parsed successfully', () => {
     const markdown = [
       '```json',

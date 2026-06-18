@@ -75,9 +75,11 @@ function isReviewerShaped(parsed: unknown): parsed is Record<string, unknown> {
  * Locate the first top-level, reviewer-shaped JSON object embedded anywhere in
  * `markdown` (bare, or surrounded by prose). Walks the string with a
  * brace-matching scanner that skips over string literals so braces inside JSON
- * string values do not break the balance count. Never throws on bad input.
+ * string values do not break the balance count. Each candidate is run through
+ * the strict-then-repair parser, so a lightly malformed unfenced object is
+ * recovered rather than dropped. Never throws on bad input.
  */
-function extractFirstJsonObject(markdown: string): Record<string, unknown> | null {
+function extractFirstJsonObject(markdown: string): JsonParseOutcome | null {
   for (let start = markdown.indexOf('{'); start !== -1; start = markdown.indexOf('{', start + 1)) {
     let depth = 0;
     let inString = false;
@@ -102,12 +104,9 @@ function extractFirstJsonObject(markdown: string): Record<string, unknown> | nul
         depth -= 1;
         if (depth === 0) {
           const candidate = markdown.slice(start, i + 1);
-          try {
-            const parsed: unknown = JSON.parse(candidate);
-            if (isReviewerShaped(parsed)) return parsed;
-          } catch {
-            // Not valid JSON or not reviewer-shaped; keep scanning from the next '{'.
-          }
+          const outcome = tryParseJson(candidate);
+          if (outcome && isReviewerShaped(outcome.value)) return outcome;
+          // Not reviewer-shaped (even after repair); keep scanning from next '{'.
           break;
         }
       }
@@ -175,9 +174,11 @@ function parseJsonComments(
   // is not silently dropped.
   let recoveredBare = false;
   if (!parsedFencedJson) {
-    const parsed = extractFirstJsonObject(markdown);
-    if (parsed) {
+    const outcome = extractFirstJsonObject(markdown);
+    if (outcome) {
       recoveredBare = true;
+      if (outcome.repaired) usedRepair = true;
+      const parsed = outcome.value as Record<string, unknown>;
       const list = Array.isArray(parsed.comments) ? parsed.comments : [];
       for (const item of list) addJsonComment(out, item);
       if (summary === null) summary = normalizeSummary(parsed.summary);
