@@ -1,3 +1,4 @@
+import { jsonrepair } from 'jsonrepair';
 import { FINGERPRINT_MARKER_PATTERN } from './fingerprints.js';
 import { normalizeConfidence, normalizeSeverity, type ReviewComment, type Side } from './types.js';
 
@@ -5,7 +6,17 @@ export interface ParseResult {
   comments: ReviewComment[];
   summary: string | null;
   warnings: string[];
+  /**
+   * True when the reviewer clearly intended to emit the `{ summary, comments }`
+   * JSON object but it could not be parsed (even after a best-effort repair),
+   * and nothing usable was recovered. The CLI fails loudly on this rather than
+   * marking the job successful with an empty review.
+   */
+  malformed: boolean;
 }
+
+/** Detects an attempted reviewer JSON object (`{ ... "summary"/"comments": }`). */
+const REVIEWER_OBJECT_RE = /(?:^|[\r\n])\s*\{[\s\S]{0,80}?"(?:summary|comments)"\s*:/;
 
 const HEADER_RE = /^\s*(?<file>.+):(?<line>\d+)\s+\((?<side>LEFT|RIGHT)\)\s*$/u;
 const GITHUB_STYLE_HEADER_RE =
@@ -105,33 +116,68 @@ function extractFirstJsonObject(markdown: string): Record<string, unknown> | nul
   return null;
 }
 
-function parseJsonComments(markdown: string, out: ReviewComment[]): string | null {
+interface JsonParseOutcome {
+  value: unknown;
+  /** True when strict `JSON.parse` failed and the value came from a repair pass. */
+  repaired: boolean;
+}
+
+/**
+ * Parse `text` as JSON, falling back to a best-effort repair pass that fixes
+ * the common LLM serialization defects (trailing commas, lightly mis-escaped
+ * quotes/newlines in string values). Returns null when neither strict parsing
+ * nor repair yields valid JSON. Never throws.
+ */
+function tryParseJson(text: string): JsonParseOutcome | null {
+  try {
+    return { value: JSON.parse(text), repaired: false };
+  } catch {
+    // Strict parsing failed; attempt a best-effort repair below.
+  }
+  try {
+    return { value: JSON.parse(jsonrepair(text)), repaired: true };
+  } catch {
+    return null;
+  }
+}
+
+function parseJsonComments(
+  markdown: string,
+  out: ReviewComment[],
+  warnings: string[],
+): { summary: string | null; malformed: boolean } {
   let summary: string | null = null;
   let parsedFencedJson = false;
+  let fenceFailed = false;
+  let usedRepair = false;
   for (const match of markdown.matchAll(JSON_FENCE_RE)) {
-    try {
-      const parsed = JSON.parse(match[1] ?? '');
-      if (parsed && typeof parsed === 'object') parsedFencedJson = true;
-      const list = Array.isArray(parsed)
-        ? parsed
-        : Array.isArray(parsed?.comments)
-          ? parsed.comments
-          : [];
-      for (const item of list) addJsonComment(out, item);
-      if (summary === null && parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        summary = normalizeSummary((parsed as Record<string, unknown>).summary);
-      }
-    } catch {
-      // Ignore unrelated JSON fences; terminal parsing below will still run.
+    const outcome = tryParseJson(match[1] ?? '');
+    if (!outcome) {
+      fenceFailed = true;
+      continue;
+    }
+    const parsed = outcome.value;
+    if (parsed && typeof parsed === 'object') parsedFencedJson = true;
+    if (outcome.repaired) usedRepair = true;
+    const list = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray((parsed as Record<string, unknown> | null)?.comments)
+        ? (parsed as { comments: unknown[] }).comments
+        : [];
+    for (const item of list) addJsonComment(out, item);
+    if (summary === null && parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      summary = normalizeSummary((parsed as Record<string, unknown>).summary);
     }
   }
 
   // Fallback: only when no fenced JSON parsed, accept an unfenced top-level
   // reviewer object (bare, or appended after prose) so unfenced model output
   // is not silently dropped.
+  let recoveredBare = false;
   if (!parsedFencedJson) {
     const parsed = extractFirstJsonObject(markdown);
     if (parsed) {
+      recoveredBare = true;
       const list = Array.isArray(parsed.comments) ? parsed.comments : [];
       for (const item of list) addJsonComment(out, item);
       if (summary === null) summary = normalizeSummary(parsed.summary);
@@ -139,14 +185,22 @@ function parseJsonComments(markdown: string, out: ReviewComment[]): string | nul
   }
 
   for (const match of markdown.matchAll(JSON_COMMENT_MARKER_RE)) {
-    try {
-      addJsonComment(out, JSON.parse(match[1] ?? ''));
-    } catch {
-      // Ignore malformed legacy comment markers.
-    }
+    const outcome = tryParseJson(match[1] ?? '');
+    if (outcome) addJsonComment(out, outcome.value);
   }
 
-  return summary;
+  if (usedRepair) {
+    warnings.push('Recovered a malformed reviewer JSON block via best-effort repair.');
+  }
+
+  // The reviewer clearly attempted a JSON object but nothing usable came out of
+  // it — either a ```json fence failed to parse, or an unfenced reviewer object
+  // is present yet unparseable. Flag it so the CLI can fail rather than post an
+  // empty review.
+  const recovered = parsedFencedJson || recoveredBare;
+  const attemptedJson = fenceFailed || REVIEWER_OBJECT_RE.test(markdown);
+  const malformed = attemptedJson && !recovered;
+  return { summary, malformed };
 }
 
 function matchHeader(line: string): { file: string; line: number; side: Side } | null {
@@ -218,10 +272,10 @@ function parseInlineSection(markdown: string, out: ReviewComment[], warnings: st
 export function parseReviewMarkdownWithWarnings(markdown: string): ParseResult {
   const comments: ReviewComment[] = [];
   const warnings: string[] = [];
-  const summary = parseJsonComments(markdown, comments);
+  const { summary, malformed } = parseJsonComments(markdown, comments, warnings);
   parseInlineSection(markdown, comments, warnings);
 
-  return { comments, summary, warnings };
+  return { comments, summary, warnings, malformed };
 }
 
 export function parseReviewMarkdown(markdown: string): ReviewComment[] {

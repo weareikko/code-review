@@ -9,7 +9,7 @@ import {
   type DiagnosticContext,
   type DiagnosticPhase,
 } from './diagnostics.js';
-import { formatError, RuntimeError } from './errors.js';
+import { formatError, ParseError, RuntimeError } from './errors.js';
 import { extractExistingFingerprints } from './fingerprints.js';
 import { getMergeCommitLog, getMergeDiff, prepareGitHistory, summarizeDiff } from './git.js';
 import type { ReviewUsage } from './gitlab-review.js';
@@ -285,6 +285,14 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
         const result = parseReviewMarkdownWithWarnings(review);
         context.generated = result.comments.length;
         context.warnings = result.warnings.length;
+        if (result.malformed) {
+          throw new ParseError(
+            `The reviewer output in ${config.reviewFile} contains a JSON block that could not be parsed (commonly an unescaped quote, backslash, or newline inside a string value).`,
+            {
+              hint: `Inspect the ${config.reviewFile} artifact for invalid JSON and re-run the review. Failing here avoids marking the job successful with an empty review.`,
+            },
+          );
+        }
         return { parsed: result };
       },
     );

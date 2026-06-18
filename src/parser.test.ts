@@ -246,7 +246,49 @@ describe('gitlab-review parsing', () => {
 
   it('resolves gracefully for malformed, non-JSON prose without throwing', () => {
     const result = parseReviewMarkdownWithWarnings('this is just prose { not json');
-    expect(result).toEqual({ comments: [], summary: null, warnings: [] });
+    expect(result).toEqual({ comments: [], summary: null, warnings: [], malformed: false });
+  });
+
+  it('flags malformed when a ```json fence cannot be parsed or repaired', () => {
+    const markdown = [
+      'Here is the review:',
+      '```json',
+      // Backtick code spans with braces plus later unescaped double quotes — the
+      // real-world failure mode that defeats both strict parsing and repair.
+      '{"summary":"`computeDiff` returns `{ a, b }`. Two commits ("foo" and "bar") not in diff.","comments":[]}',
+      '```',
+    ].join('\n');
+    const result = parseReviewMarkdownWithWarnings(markdown);
+    expect(result.malformed).toBe(true);
+    expect(result.comments).toEqual([]);
+    expect(result.summary).toBeNull();
+  });
+
+  it('flags malformed for an unfenced reviewer object that cannot be parsed', () => {
+    const markdown =
+      '{\n  "summary": "`fn` returns `{ x }`. Renamed ("foo" and "bar").",\n  "comments": []\n}';
+    const result = parseReviewMarkdownWithWarnings(markdown);
+    expect(result.malformed).toBe(true);
+  });
+
+  it('does not flag malformed for the legacy inline-comment markdown format', () => {
+    const markdown = ['== Inline Comments ==', 'src/a.ts:3 (RIGHT)', 'Fix this'].join('\n');
+    const result = parseReviewMarkdownWithWarnings(markdown);
+    expect(result.malformed).toBe(false);
+    expect(result.comments).toHaveLength(1);
+  });
+
+  it('repairs a recoverable JSON defect (trailing comma) and warns', () => {
+    const markdown = [
+      '```json',
+      '{"summary":"ok","comments":[{"file":"src/a.ts","line":3,"side":"RIGHT","body":"Fix this"},]}',
+      '```',
+    ].join('\n');
+    const result = parseReviewMarkdownWithWarnings(markdown);
+    expect(result.malformed).toBe(false);
+    expect(result.comments).toHaveLength(1);
+    expect(result.summary).toBe('ok');
+    expect(result.warnings.some((w) => /best-effort repair/.test(w))).toBe(true);
   });
 
   it('does not run the unfenced fallback when a JSON fence parsed successfully', () => {
