@@ -2,21 +2,44 @@ import { jsonrepair } from 'jsonrepair';
 import { FINGERPRINT_MARKER_PATTERN } from './fingerprints.js';
 import { normalizeConfidence, normalizeSeverity, type ReviewComment, type Side } from './types.js';
 
+/** Why the reviewer's JSON could not be recovered. Surfaced for diagnostics. */
+export type ParseFailureReason =
+  /** A ```json fence was present but its contents could not be parsed or repaired. */
+  | 'fence_unparseable'
+  /** An unfenced reviewer-shaped object was present but could not be parsed or repaired. */
+  | 'object_unparseable';
+
+export interface ParseFailure {
+  reason: ParseFailureReason;
+  /** Whitespace-collapsed first ~200 chars of the offending block, for logs/OTel. */
+  preview: string;
+}
+
 export interface ParseResult {
   comments: ReviewComment[];
   summary: string | null;
   warnings: string[];
   /**
-   * True when the reviewer clearly intended to emit the `{ summary, comments }`
+   * Set when the reviewer clearly intended to emit the `{ summary, comments }`
    * JSON object but it could not be parsed (even after a best-effort repair),
-   * and nothing usable was recovered. The CLI fails loudly on this rather than
-   * marking the job successful with an empty review.
+   * and nothing usable was recovered; `null` otherwise. The CLI fails loudly on
+   * a non-null value rather than marking the job successful with an empty review.
    */
-  malformed: boolean;
+  malformed: ParseFailure | null;
 }
 
-/** Detects an attempted reviewer JSON object (`{ ... "summary"/"comments": }`). */
-const REVIEWER_OBJECT_RE = /(?:^|[\r\n])\s*\{[\s\S]{0,80}?"(?:summary|comments)"\s*:/;
+/**
+ * Anchors a reviewer JSON object on its first key (`{"summary"` / `{"comments"`).
+ * Anchoring on the key — rather than scanning from every `{` — skips braces in
+ * prose and in code spans (e.g. `` `{ entries }` ``) that would otherwise be
+ * mistaken for the start of the object. Global so all anchors can be scanned.
+ */
+const REVIEWER_OBJECT_ANCHOR_RE = /\{\s*"(?:summary|comments)"\s*:/g;
+
+/** Collapse whitespace and clip to a short, log-friendly preview. */
+function toPreview(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, 200);
+}
 
 const HEADER_RE = /^\s*(?<file>.+):(?<line>\d+)\s+\((?<side>LEFT|RIGHT)\)\s*$/u;
 const GITHUB_STYLE_HEADER_RE =
@@ -72,45 +95,56 @@ function isReviewerShaped(parsed: unknown): parsed is Record<string, unknown> {
 }
 
 /**
- * Locate the first top-level, reviewer-shaped JSON object embedded anywhere in
- * `markdown` (bare, or surrounded by prose). Walks the string with a
- * brace-matching scanner that skips over string literals so braces inside JSON
- * string values do not break the balance count. Each candidate is run through
- * the strict-then-repair parser, so a lightly malformed unfenced object is
- * recovered rather than dropped. Never throws on bad input.
+ * Return the index of the `}` that balances the `{` at `start`, or -1 if the
+ * braces never balance. Skips over string literals so braces inside JSON string
+ * values do not break the balance count.
  */
-function extractFirstJsonObject(markdown: string): JsonParseOutcome | null {
-  for (let start = markdown.indexOf('{'); start !== -1; start = markdown.indexOf('{', start + 1)) {
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    for (let i = start; i < markdown.length; i += 1) {
-      const char = markdown[i];
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-        } else if (char === '\\') {
-          escaped = true;
-        } else if (char === '"') {
-          inString = false;
-        }
-        continue;
+function findBalancedEnd(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i += 1) {
+    const char = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
       }
-      if (char === '"') {
-        inString = true;
-      } else if (char === '{') {
-        depth += 1;
-      } else if (char === '}') {
-        depth -= 1;
-        if (depth === 0) {
-          const candidate = markdown.slice(start, i + 1);
-          const outcome = tryParseJson(candidate);
-          if (outcome && isReviewerShaped(outcome.value)) return outcome;
-          // Not reviewer-shaped (even after repair); keep scanning from next '{'.
-          break;
-        }
-      }
+      continue;
     }
+    if (char === '"') {
+      inString = true;
+    } else if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Locate a reviewer-shaped JSON object embedded anywhere in `markdown` (bare, or
+ * surrounded by prose). Candidates are anchored on the reviewer key
+ * (`{"summary"` / `{"comments"`) so braces in prose and code spans are skipped,
+ * then balanced and run through the strict-then-repair parser — so a lightly
+ * malformed unfenced object is recovered rather than dropped. Never throws.
+ */
+function extractReviewerJsonObject(markdown: string): JsonParseOutcome | null {
+  REVIEWER_OBJECT_ANCHOR_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = REVIEWER_OBJECT_ANCHOR_RE.exec(markdown)) !== null) {
+    const start = match.index;
+    const end = findBalancedEnd(markdown, start);
+    if (end !== -1) {
+      const outcome = tryParseJson(markdown.slice(start, end + 1));
+      if (outcome && isReviewerShaped(outcome.value)) return outcome;
+    }
+    // Not parseable/reviewer-shaped from this anchor; try the next one.
   }
   return null;
 }
@@ -144,15 +178,16 @@ function parseJsonComments(
   markdown: string,
   out: ReviewComment[],
   warnings: string[],
-): { summary: string | null; malformed: boolean } {
+): { summary: string | null; malformed: ParseFailure | null } {
   let summary: string | null = null;
   let parsedFencedJson = false;
-  let fenceFailed = false;
+  let fenceFailurePreview: string | null = null;
   let usedRepair = false;
   for (const match of markdown.matchAll(JSON_FENCE_RE)) {
-    const outcome = tryParseJson(match[1] ?? '');
+    const fenceBody = match[1] ?? '';
+    const outcome = tryParseJson(fenceBody);
     if (!outcome) {
-      fenceFailed = true;
+      if (fenceFailurePreview === null) fenceFailurePreview = toPreview(fenceBody);
       continue;
     }
     const parsed = outcome.value;
@@ -174,7 +209,7 @@ function parseJsonComments(
   // is not silently dropped.
   let recoveredBare = false;
   if (!parsedFencedJson) {
-    const outcome = extractFirstJsonObject(markdown);
+    const outcome = extractReviewerJsonObject(markdown);
     if (outcome) {
       recoveredBare = true;
       if (outcome.repaired) usedRepair = true;
@@ -196,12 +231,28 @@ function parseJsonComments(
 
   // The reviewer clearly attempted a JSON object but nothing usable came out of
   // it — either a ```json fence failed to parse, or an unfenced reviewer object
-  // is present yet unparseable. Flag it so the CLI can fail rather than post an
-  // empty review.
+  // is present yet unparseable. Report the failure (with a reason + preview) so
+  // the CLI can fail rather than post an empty review.
   const recovered = parsedFencedJson || recoveredBare;
-  const attemptedJson = fenceFailed || REVIEWER_OBJECT_RE.test(markdown);
-  const malformed = attemptedJson && !recovered;
-  return { summary, malformed };
+  return { summary, malformed: recovered ? null : detectFailure(markdown, fenceFailurePreview) };
+}
+
+/**
+ * Classify why nothing was recovered. A failed ```json fence takes priority
+ * (the model emitted a fenced object); otherwise look for an unfenced
+ * reviewer-shaped anchor. Returns null when there was no JSON attempt at all
+ * (a legitimately empty/prose-only review).
+ */
+function detectFailure(markdown: string, fenceFailurePreview: string | null): ParseFailure | null {
+  if (fenceFailurePreview !== null) {
+    return { reason: 'fence_unparseable', preview: fenceFailurePreview };
+  }
+  REVIEWER_OBJECT_ANCHOR_RE.lastIndex = 0;
+  const anchor = REVIEWER_OBJECT_ANCHOR_RE.exec(markdown);
+  if (anchor) {
+    return { reason: 'object_unparseable', preview: toPreview(markdown.slice(anchor.index)) };
+  }
+  return null;
 }
 
 function matchHeader(line: string): { file: string; line: number; side: Side } | null {

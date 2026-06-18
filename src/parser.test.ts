@@ -246,7 +246,7 @@ describe('gitlab-review parsing', () => {
 
   it('resolves gracefully for malformed, non-JSON prose without throwing', () => {
     const result = parseReviewMarkdownWithWarnings('this is just prose { not json');
-    expect(result).toEqual({ comments: [], summary: null, warnings: [], malformed: false });
+    expect(result).toEqual({ comments: [], summary: null, warnings: [], malformed: null });
   });
 
   it('flags malformed when a ```json fence cannot be parsed or repaired', () => {
@@ -259,7 +259,8 @@ describe('gitlab-review parsing', () => {
       '```',
     ].join('\n');
     const result = parseReviewMarkdownWithWarnings(markdown);
-    expect(result.malformed).toBe(true);
+    expect(result.malformed?.reason).toBe('fence_unparseable');
+    expect(result.malformed?.preview).toContain('computeDiff');
     expect(result.comments).toEqual([]);
     expect(result.summary).toBeNull();
   });
@@ -268,13 +269,27 @@ describe('gitlab-review parsing', () => {
     const markdown =
       '{\n  "summary": "`fn` returns `{ x }`. Renamed ("foo" and "bar").",\n  "comments": []\n}';
     const result = parseReviewMarkdownWithWarnings(markdown);
-    expect(result.malformed).toBe(true);
+    expect(result.malformed?.reason).toBe('object_unparseable');
   });
 
   it('does not flag malformed for the legacy inline-comment markdown format', () => {
     const markdown = ['== Inline Comments ==', 'src/a.ts:3 (RIGHT)', 'Fix this'].join('\n');
     const result = parseReviewMarkdownWithWarnings(markdown);
-    expect(result.malformed).toBe(false);
+    expect(result.malformed).toBeNull();
+    expect(result.comments).toHaveLength(1);
+  });
+
+  it('anchors extraction on the reviewer key, ignoring code-span braces in prose', () => {
+    // A brace-laden prose object precedes the real reviewer object; anchoring on
+    // the `{"summary"` key must skip the decoy and recover the real review.
+    const markdown = [
+      'The function returns { entries, slotReplacements } now.',
+      '',
+      '{"summary":"ok","comments":[{"file":"src/a.ts","line":3,"side":"RIGHT","body":"Fix this"}]}',
+    ].join('\n');
+    const result = parseReviewMarkdownWithWarnings(markdown);
+    expect(result.malformed).toBeNull();
+    expect(result.summary).toBe('ok');
     expect(result.comments).toHaveLength(1);
   });
 
@@ -285,7 +300,7 @@ describe('gitlab-review parsing', () => {
       '```',
     ].join('\n');
     const result = parseReviewMarkdownWithWarnings(markdown);
-    expect(result.malformed).toBe(false);
+    expect(result.malformed).toBeNull();
     expect(result.comments).toHaveLength(1);
     expect(result.summary).toBe('ok');
     expect(result.warnings.some((w) => /best-effort repair/.test(w))).toBe(true);
@@ -296,7 +311,7 @@ describe('gitlab-review parsing', () => {
     const markdown =
       'Here is my review:\n\n{"summary":"ok","comments":[{"file":"src/a.ts","line":3,"side":"RIGHT","body":"Fix this"},]}';
     const result = parseReviewMarkdownWithWarnings(markdown);
-    expect(result.malformed).toBe(false);
+    expect(result.malformed).toBeNull();
     expect(result.comments).toHaveLength(1);
     expect(result.summary).toBe('ok');
     expect(result.warnings.some((w) => /best-effort repair/.test(w))).toBe(true);

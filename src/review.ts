@@ -45,6 +45,8 @@ export { normalizeSeverity, toGitLabReviewSeverity } from './types.js';
 export {
   parseReviewMarkdown,
   parseReviewMarkdownWithWarnings,
+  type ParseFailure,
+  type ParseFailureReason,
   type ParseResult,
 } from './parser.js';
 export {

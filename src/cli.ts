@@ -286,8 +286,9 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
         context.generated = result.comments.length;
         context.warnings = result.warnings.length;
         if (result.malformed) {
+          context.malformedReason = result.malformed.reason;
           throw new ParseError(
-            `The reviewer output in ${config.reviewFile} contains a JSON block that could not be parsed (commonly an unescaped quote, backslash, or newline inside a string value).`,
+            `The reviewer output in ${config.reviewFile} contains a JSON block that could not be parsed [${result.malformed.reason}] (commonly an unescaped quote, backslash, or newline inside a string value). Preview: ${result.malformed.preview}`,
             {
               hint: `Inspect the ${config.reviewFile} artifact for invalid JSON and re-run the review. Failing here avoids marking the job successful with an empty review.`,
             },

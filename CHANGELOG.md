@@ -9,11 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Fail loudly when the reviewer's JSON output cannot be parsed.** When the model emitted a `{ summary, comments }` block with invalid JSON (most often an unescaped `"`, `\`, or newline inside a string value), the parser silently recovered nothing — the job posted an empty review yet exited successfully, masking the failure. The parser now reports a `malformed` flag and the CLI throws a `ParseError` (exit code 1) so the job fails visibly instead, while still writing the raw `gitlab-review.md` artifact for debugging. Legitimately empty reviews and the legacy inline-comment markdown format are unaffected.
+- **Fail loudly when the reviewer's JSON output cannot be parsed.** When the model emitted a `{ summary, comments }` block with invalid JSON (most often an unescaped `"`, `\`, or newline inside a string value), the parser silently recovered nothing — the job posted an empty review yet exited successfully, masking the failure. The parser now reports a structured `malformed` failure (a `{ reason, preview }` value, or `null` when well-formed) and the CLI throws a `ParseError` (exit code 1) carrying the reason (`fence_unparseable` / `object_unparseable`) and a short preview of the offending block, so the job fails visibly instead, while still writing the raw `gitlab-review.md` artifact for debugging. Legitimately empty reviews and the legacy inline-comment markdown format are unaffected.
 
 ### Changed
 
 - **Best-effort recovery of lightly malformed reviewer JSON.** The parser now runs a `jsonrepair` fallback when strict `JSON.parse` fails, recovering common LLM serialization defects (trailing commas, lightly mis-escaped strings) and emitting a warning when it does. Unrecoverable output still triggers the `malformed`/`ParseError` path above.
+- **Anchored JSON extraction.** The unfenced-object fallback now anchors on the reviewer key (`{"summary"` / `{"comments"`) instead of scanning from the first `{`, so braces in prose and code spans (e.g. `` `{ entries }` ``) are no longer mistaken for the start of the object. (Inspired by Sentry's Warden.)
 - **Hardened the reviewer prompt** with an explicit JSON-escaping rule, reminding the model to escape every `"`, `\`, and newline inside the Markdown-bearing `summary` and `body` string fields so a single unescaped quote can no longer discard the whole review.
 - Split the bloated README into a lean landing page plus dedicated reference pages under `docs/` (configuration, providers, skills, observability, output format). Docs-only reorganization with no behavior change; `docs/` stays out of the published npm artifact, so the README remains self-sufficient for getting started.
 
