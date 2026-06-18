@@ -9,7 +9,7 @@ import {
   type DiagnosticContext,
   type DiagnosticPhase,
 } from './diagnostics.js';
-import { formatError, ParseError, RuntimeError } from './errors.js';
+import { formatError, isQuotaExceededError, ParseError, RuntimeError } from './errors.js';
 import { extractExistingFingerprints } from './fingerprints.js';
 import { getMergeCommitLog, getMergeDiff, prepareGitHistory, summarizeDiff } from './git.js';
 import type { ReviewUsage } from './gitlab-review.js';
@@ -146,6 +146,27 @@ export interface RunBridges {
   otel?: OtelBridge;
 }
 
+/**
+ * Write the empty/skip artifacts (comment JSON, usage, and a one-line review
+ * note) for a run that produced no review — a re-reviewed commit or a provider
+ * credit/quota skip. Keeps the dry-run/no-post contract: artifacts only, no
+ * posting.
+ */
+async function writeSkipArtifacts(
+  config: Config,
+  usage: ReviewUsage,
+  reviewNote: string,
+): Promise<void> {
+  const outputPath = resolve(config.cwd, config.output);
+  const usagePath = resolve(config.cwd, 'review-usage.json');
+  const reviewPath = resolve(config.cwd, config.reviewFile);
+  await mkdir(dirname(outputPath), { recursive: true });
+  await mkdir(dirname(reviewPath), { recursive: true });
+  await writeFile(outputPath, JSON.stringify([], null, 2), 'utf8');
+  await writeFile(usagePath, JSON.stringify(usage, null, 2), 'utf8');
+  await writeFile(reviewPath, reviewNote, 'utf8');
+}
+
 export async function run(config: Config, bridges?: RunBridges): Promise<RunResult> {
   validateConfig(config);
 
@@ -205,17 +226,10 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
       runContext.summaryAction = 'skipped';
 
       await traceDiagnosticPhase('artifact.write_output', config, runId, async (context) => {
-        const outputPath = resolve(config.cwd, config.output);
-        const usagePath = resolve(config.cwd, 'review-usage.json');
-        const reviewPath = resolve(config.cwd, config.reviewFile);
-        await mkdir(dirname(outputPath), { recursive: true });
-        await mkdir(dirname(reviewPath), { recursive: true });
-        await writeFile(outputPath, JSON.stringify([], null, 2), 'utf8');
-        await writeFile(usagePath, JSON.stringify(usage, null, 2), 'utf8');
-        await writeFile(
-          reviewPath,
+        await writeSkipArtifacts(
+          config,
+          usage,
           `Skipped review: commit ${version.head_commit_sha} was already reviewed.\n`,
-          'utf8',
         );
         context.generated = 0;
         context.newComments = 0;
@@ -258,21 +272,53 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
     }
 
     logger.info('Running review...');
-    const usage = await traceDiagnosticPhase('reviewer.run', config, runId, async (context) => {
-      const result = await runReview(config, {
-        cwd: config.cwd,
-        diff,
-        commitLog,
-        priorThreads,
-        intent: { title: mr.title, description: mr.description },
-        logger,
-        // Subscribe the OTel bridge to the agent's event stream so per-turn
-        // and per-tool-call spans/metrics fire in real time.
-        attachTelemetry: bridges?.otel?.createAgentTelemetry(runId),
+    let usage: ReviewUsage;
+    try {
+      usage = await traceDiagnosticPhase('reviewer.run', config, runId, async (context) => {
+        const result = await runReview(config, {
+          cwd: config.cwd,
+          diff,
+          commitLog,
+          priorThreads,
+          intent: { title: mr.title, description: mr.description },
+          logger,
+          // Subscribe the OTel bridge to the agent's event stream so per-turn
+          // and per-tool-call spans/metrics fire in real time.
+          attachTelemetry: bridges?.otel?.createAgentTelemetry(runId),
+        });
+        context.usage = result;
+        return result;
       });
-      context.usage = result;
-      return result;
-    });
+    } catch (error) {
+      // A provider credit/quota exhaustion (e.g. HTTP 402) means the review
+      // could not run for reasons outside the MR's control. Warn and skip
+      // rather than failing the pipeline, so a billing dead-end does not block
+      // every MR. Any other error still propagates and fails the job.
+      if (!isQuotaExceededError(error)) throw error;
+      const skipUsage = zeroReviewUsage(config.model);
+      runContext.usage = skipUsage;
+      runContext.generated = 0;
+      runContext.newComments = 0;
+      runContext.duplicateComments = 0;
+      runContext.posted = 0;
+      runContext.summaryAction = 'skipped';
+      await traceDiagnosticPhase('artifact.write_output', config, runId, async (context) => {
+        await writeSkipArtifacts(
+          config,
+          skipUsage,
+          'Skipped review: model provider out of credits/quota.\n',
+        );
+        context.generated = 0;
+        context.newComments = 0;
+        context.duplicateComments = 0;
+        context.posted = 0;
+      });
+      const detail = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[gitlab-review] Skipping review: model provider out of credits/quota — not failing the pipeline. (${detail})`,
+      );
+      return { generated: [], posted: 0, usage: skipUsage, summary: null, skipped: true };
+    }
     runContext.usage = usage;
 
     const reviewPath = resolve(config.cwd, config.reviewFile);

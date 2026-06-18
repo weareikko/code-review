@@ -9,7 +9,7 @@ import { getModel } from '@earendil-works/pi-ai';
 import { createReadOnlyTools } from '@earendil-works/pi-coding-agent';
 import type { Config } from './config.js';
 import { resolveProviderApiKey } from './config.js';
-import { ReviewerError } from './errors.js';
+import { isQuotaExceededMessage, ReviewerError } from './errors.js';
 import type { Logger } from './logger.js';
 import { noopLogger } from './logger.js';
 import { parseReviewMarkdownWithWarnings } from './parser.js';
@@ -1016,7 +1016,16 @@ async function runAgentToCompletion(
         );
         const last = messages[messages.length - 1];
         if (last?.stopReason === 'error' || last?.errorMessage) {
-          rejectPromise(new ReviewerError(`Agent failed: ${last.errorMessage ?? 'unknown error'}`));
+          const message = last.errorMessage ?? 'unknown error';
+          const quotaExceeded = isQuotaExceededMessage(message);
+          rejectPromise(
+            new ReviewerError(`Agent failed: ${message}`, {
+              quotaExceeded,
+              hint: quotaExceeded
+                ? 'The model provider reported exhausted credits/quota. Top up the provider account or switch --model.'
+                : undefined,
+            }),
+          );
           return;
         }
         finalText = extractLastAssistantText(collected.length > 0 ? collected : messages);
