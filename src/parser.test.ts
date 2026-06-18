@@ -293,6 +293,57 @@ describe('gitlab-review parsing', () => {
     expect(result.comments).toHaveLength(1);
   });
 
+  it('recovers an unfenced reviewer object whose first key is not summary/comments', () => {
+    // Anchored extraction must not drop a valid reviewer object that simply
+    // leads with another key; the full-scan fallback recovers it.
+    const markdown =
+      '{"version":1,"summary":"S","comments":[{"file":"src/a.ts","line":3,"side":"RIGHT","body":"Fix"}]}';
+    const result = parseReviewMarkdownWithWarnings(markdown);
+    expect(result.malformed).toBeNull();
+    expect(result.summary).toBe('S');
+    expect(result.comments).toHaveLength(1);
+  });
+
+  it('keeps a legacy inline review when an unparseable ```json fence coexists', () => {
+    // A stray unrepairable fenced block must not discard a usable review carried
+    // in the legacy inline-comment section; the failure downgrades to a warning.
+    const markdown = [
+      '```json',
+      '{"summary":"`fn` returns `{ a, b }`. Commits ("foo" and "bar").","comments":[]}',
+      '```',
+      '',
+      '== Inline Comments ==',
+      'src/a.ts:3 (RIGHT)',
+      'A real, valid inline finding',
+    ].join('\n');
+    const result = parseReviewMarkdownWithWarnings(markdown);
+    expect(result.malformed).toBeNull();
+    expect(result.comments).toHaveLength(1);
+    expect(result.warnings.some((w) => /recovered from other sections/.test(w))).toBe(true);
+  });
+
+  it('does not let an unrelated valid ```json fence mask a malformed reviewer object', () => {
+    // A parseable but non-reviewer-shaped fence must not suppress the failure of
+    // a genuinely unparseable reviewer object elsewhere.
+    const markdown = [
+      '```json',
+      '{"config":true}',
+      '```',
+      '',
+      '{"summary":"`fn` returns `{ a, b }`. ("foo" and "bar")","comments":[]}',
+    ].join('\n');
+    const result = parseReviewMarkdownWithWarnings(markdown);
+    expect(result.malformed?.reason).toBe('object_unparseable');
+    expect(result.malformed?.preview).toContain('summary');
+  });
+
+  it('does not flag malformed for an empty ```json fence', () => {
+    const markdown = ['```json', '', '```'].join('\n');
+    const result = parseReviewMarkdownWithWarnings(markdown);
+    expect(result.malformed).toBeNull();
+    expect(result.comments).toEqual([]);
+  });
+
   it('repairs a recoverable JSON defect (trailing comma) and warns', () => {
     const markdown = [
       '```json',

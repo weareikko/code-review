@@ -95,6 +95,28 @@ function isReviewerShaped(parsed: unknown): parsed is Record<string, unknown> {
 }
 
 /**
+ * Pull comments and the summary out of a parsed reviewer value into `out`.
+ * Accepts a `{ summary?, comments? }` object or a bare array of comments.
+ * Returns `contributed: false` for anything else (e.g. an unrelated JSON object)
+ * so callers can tell a real reviewer payload apart from incidental JSON.
+ */
+function absorbReviewerValue(
+  value: unknown,
+  out: ReviewComment[],
+): { contributed: boolean; summary: string | null } {
+  if (Array.isArray(value)) {
+    for (const item of value) addJsonComment(out, item);
+    return { contributed: true, summary: null };
+  }
+  if (isReviewerShaped(value)) {
+    const list = Array.isArray(value.comments) ? value.comments : [];
+    for (const item of list) addJsonComment(out, item);
+    return { contributed: true, summary: normalizeSummary(value.summary) };
+  }
+  return { contributed: false, summary: null };
+}
+
+/**
  * Return the index of the `}` that balances the `{` at `start`, or -1 if the
  * braces never balance. Skips over string literals so braces inside JSON string
  * values do not break the balance count.
@@ -135,18 +157,32 @@ function findBalancedEnd(text: string, start: number): number {
  * malformed unfenced object is recovered rather than dropped. Never throws.
  */
 function extractReviewerJsonObject(markdown: string): JsonParseOutcome | null {
+  // Fast path: anchor on the reviewer key so braces in prose and code spans are
+  // skipped outright.
   REVIEWER_OBJECT_ANCHOR_RE.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = REVIEWER_OBJECT_ANCHOR_RE.exec(markdown)) !== null) {
-    const start = match.index;
-    const end = findBalancedEnd(markdown, start);
-    if (end !== -1) {
-      const outcome = tryParseJson(markdown.slice(start, end + 1));
-      if (outcome && isReviewerShaped(outcome.value)) return outcome;
-    }
+    const outcome = tryReviewerObjectAt(markdown, match.index);
+    if (outcome) return outcome;
     // Not parseable/reviewer-shaped from this anchor; try the next one.
   }
+  // Fallback: scan from every `{` so a reviewer object whose first key is not
+  // `summary`/`comments` (rare, but valid) is recovered rather than dropped.
+  // Non-reviewer-shaped candidates (prose, code spans) fail the shape check and
+  // are skipped, exactly as the anchored pass would have.
+  for (let start = markdown.indexOf('{'); start !== -1; start = markdown.indexOf('{', start + 1)) {
+    const outcome = tryReviewerObjectAt(markdown, start);
+    if (outcome) return outcome;
+  }
   return null;
+}
+
+/** Balance, parse (with repair), and shape-check a candidate object at `start`. */
+function tryReviewerObjectAt(markdown: string, start: number): JsonParseOutcome | null {
+  const end = findBalancedEnd(markdown, start);
+  if (end === -1) return null;
+  const outcome = tryParseJson(markdown.slice(start, end + 1));
+  return outcome && isReviewerShaped(outcome.value) ? outcome : null;
 }
 
 interface JsonParseOutcome {
@@ -180,43 +216,38 @@ function parseJsonComments(
   warnings: string[],
 ): { summary: string | null; malformed: ParseFailure | null } {
   let summary: string | null = null;
-  let parsedFencedJson = false;
+  let recoveredReviewerJson = false;
   let fenceFailurePreview: string | null = null;
   let usedRepair = false;
   for (const match of markdown.matchAll(JSON_FENCE_RE)) {
     const fenceBody = match[1] ?? '';
+    // An empty/whitespace fence carries nothing to parse — not a failure.
+    if (fenceBody.trim().length === 0) continue;
     const outcome = tryParseJson(fenceBody);
     if (!outcome) {
       if (fenceFailurePreview === null) fenceFailurePreview = toPreview(fenceBody);
       continue;
     }
-    const parsed = outcome.value;
-    if (parsed && typeof parsed === 'object') parsedFencedJson = true;
+    const result = absorbReviewerValue(outcome.value, out);
+    // A fence that parses to unrelated (non-reviewer-shaped) JSON must neither
+    // count as a recovered review nor mask a malformed reviewer object below.
+    if (!result.contributed) continue;
+    recoveredReviewerJson = true;
     if (outcome.repaired) usedRepair = true;
-    const list = Array.isArray(parsed)
-      ? parsed
-      : Array.isArray((parsed as Record<string, unknown> | null)?.comments)
-        ? (parsed as { comments: unknown[] }).comments
-        : [];
-    for (const item of list) addJsonComment(out, item);
-    if (summary === null && parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      summary = normalizeSummary((parsed as Record<string, unknown>).summary);
-    }
+    if (summary === null) summary = result.summary;
   }
 
-  // Fallback: only when no fenced JSON parsed, accept an unfenced top-level
-  // reviewer object (bare, or appended after prose) so unfenced model output
-  // is not silently dropped.
+  // Fallback: only when no reviewer-shaped fenced JSON was recovered, accept an
+  // unfenced top-level reviewer object (bare, or appended after prose) so
+  // unfenced model output is not silently dropped.
   let recoveredBare = false;
-  if (!parsedFencedJson) {
+  if (!recoveredReviewerJson) {
     const outcome = extractReviewerJsonObject(markdown);
     if (outcome) {
       recoveredBare = true;
       if (outcome.repaired) usedRepair = true;
-      const parsed = outcome.value as Record<string, unknown>;
-      const list = Array.isArray(parsed.comments) ? parsed.comments : [];
-      for (const item of list) addJsonComment(out, item);
-      if (summary === null) summary = normalizeSummary(parsed.summary);
+      const result = absorbReviewerValue(outcome.value, out);
+      if (summary === null) summary = result.summary;
     }
   }
 
@@ -233,7 +264,7 @@ function parseJsonComments(
   // it — either a ```json fence failed to parse, or an unfenced reviewer object
   // is present yet unparseable. Report the failure (with a reason + preview) so
   // the CLI can fail rather than post an empty review.
-  const recovered = parsedFencedJson || recoveredBare;
+  const recovered = recoveredReviewerJson || recoveredBare;
   return { summary, malformed: recovered ? null : detectFailure(markdown, fenceFailurePreview) };
 }
 
@@ -250,7 +281,11 @@ function detectFailure(markdown: string, fenceFailurePreview: string | null): Pa
   REVIEWER_OBJECT_ANCHOR_RE.lastIndex = 0;
   const anchor = REVIEWER_OBJECT_ANCHOR_RE.exec(markdown);
   if (anchor) {
-    return { reason: 'object_unparseable', preview: toPreview(markdown.slice(anchor.index)) };
+    // Clip the preview to the balanced object when possible so it points at the
+    // offending JSON rather than spilling into unrelated trailing prose.
+    const end = findBalancedEnd(markdown, anchor.index);
+    const slice = markdown.slice(anchor.index, end === -1 ? undefined : end + 1);
+    return { reason: 'object_unparseable', preview: toPreview(slice) };
   }
   return null;
 }
@@ -326,6 +361,18 @@ export function parseReviewMarkdownWithWarnings(markdown: string): ParseResult {
   const warnings: string[] = [];
   const { summary, malformed } = parseJsonComments(markdown, comments, warnings);
   parseInlineSection(markdown, comments, warnings);
+
+  // A JSON block was unparseable, but other sections (legacy `== Inline
+  // Comments ==` markdown or `<!-- gitlab-review-comment -->` markers) still
+  // yielded a usable review. Keep it and downgrade the failure to a warning
+  // rather than discarding a good review — backwards-compatibility with the
+  // legacy reviewer formats takes priority over the strict JSON path.
+  if (malformed && comments.length > 0) {
+    warnings.push(
+      `A reviewer JSON block was unparseable (${malformed.reason}), but ${comments.length} comment(s) were recovered from other sections; continuing.`,
+    );
+    return { comments, summary, warnings, malformed: null };
+  }
 
   return { comments, summary, warnings, malformed };
 }
