@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-06-18
+
 ### Fixed
 
 - **Fail loudly when the reviewer's JSON output cannot be parsed.** When the model emitted a `{ summary, comments }` block with invalid JSON (most often an unescaped `"`, `\`, or newline inside a string value), the parser silently recovered nothing — the job posted an empty review yet exited successfully, masking the failure. The parser now reports a structured `malformed` failure (a `{ reason, preview }` value, or `null` when well-formed) and the CLI throws a `ParseError` (exit code 1) carrying the reason (`fence_unparseable` / `object_unparseable`) and a short preview of the offending block, so the job fails visibly instead, while still writing the raw `gitlab-review.md` artifact for debugging. The failure is only fatal when nothing usable was recovered: a review delivered via the legacy `== Inline Comments ==` markdown or `<!-- gitlab-review-comment -->` markers is preserved (the JSON failure downgrades to a warning), an unrelated/non-reviewer-shaped JSON fence never masks a malformed reviewer object, and an empty fence or a legitimately empty review is not flagged.
 
 ### Changed
 
+- **Warn instead of failing when the model provider is out of credits/quota.** A provider credit/quota-exhaustion error (e.g. HTTP 402, "insufficient credits", "credit balance is too low", "insufficient_quota") means the review could not run for reasons outside the MR's control. The CLI now treats it as a non-fatal skip — it writes the empty artifacts, logs a warning, and exits 0 — rather than failing the pipeline and blocking every MR on a billing dead-end. Transient rate limits (429) are not treated as quota exhaustion. All other reviewer errors still fail the job.
 - **Best-effort recovery of lightly malformed reviewer JSON.** The parser now runs a `jsonrepair` fallback when strict `JSON.parse` fails, recovering common LLM serialization defects (trailing commas, lightly mis-escaped strings) and emitting a warning when it does. Unrecoverable output still triggers the `malformed`/`ParseError` path above.
 - **Anchored JSON extraction.** The unfenced-object fallback now anchors on the reviewer key (`{"summary"` / `{"comments"`) instead of scanning from the first `{`, so braces in prose and code spans (e.g. `` `{ entries }` ``) are no longer mistaken for the start of the object; it falls back to a full brace scan so a reviewer object whose first key is something else is still recovered. (Inspired by Sentry's Warden.)
 - **Hardened the reviewer prompt** with an explicit JSON-escaping rule, reminding the model to escape every `"`, `\`, and newline inside the Markdown-bearing `summary` and `body` string fields so a single unescaped quote can no longer discard the whole review.
