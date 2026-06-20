@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { ReviewComment } from './types.js';
 import {
   applyVerdicts,
+  buildVerifySystemPrompt,
+  buildVerifyUserPrompt,
   parseVerdict,
   rebuildSummary,
   relabelBodyHeader,
@@ -21,6 +23,37 @@ function comment(overrides: Partial<ReviewComment> = {}): ReviewComment {
     ...overrides,
   };
 }
+
+describe('verify prompt layout (cache alignment)', () => {
+  const diff = 'diff --git a/x.ts b/x.ts\n@@ -1 +1 @@\n-old\n+new';
+
+  it('puts the diff (and commits) in the system prompt so the cacheable prefix carries them', () => {
+    const system = buildVerifySystemPrompt(diff, 'feat: do the thing');
+    expect(system).toContain('<diff>');
+    expect(system).toContain(diff);
+    expect(system).toContain('<commits>');
+    expect(system).toContain('feat: do the thing');
+  });
+
+  it('omits the commits block when no commit log is given', () => {
+    const system = buildVerifySystemPrompt(diff);
+    expect(system).not.toContain('<commits>');
+  });
+
+  it('builds a system prompt independent of the finding, so it is byte-identical across verifiers in a run', () => {
+    const a = buildVerifySystemPrompt(diff, 'log');
+    const b = buildVerifySystemPrompt(diff, 'log');
+    expect(a).toBe(b);
+  });
+
+  it('keeps the per-finding user prompt free of the diff, so it is not re-sent for every finding', () => {
+    const user = buildVerifyUserPrompt(comment());
+    expect(user).toContain('<finding>');
+    expect(user).toContain('Off-by-one in retry loop');
+    expect(user).not.toContain('<diff>');
+    expect(user).not.toContain(diff);
+  });
+});
 
 describe('parseVerdict', () => {
   it('parses a bare JSON verdict', () => {

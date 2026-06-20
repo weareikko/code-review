@@ -38,11 +38,11 @@ export interface SynthesisResult {
 
 // --- Prompts --------------------------------------------------------------
 
-export function buildVerifySystemPrompt(): string {
-  return [
+export function buildVerifySystemPrompt(diff: string, commitLog?: string): string {
+  const parts: string[] = [
     'You are a strict, adversarial verifier of a SINGLE code-review finding. Your job is to REFUTE the finding, not to agree with it.',
     '',
-    'You are given one proposed finding (file, line, severity, confidence, and body) and the diff it was raised against. You may read referenced files to confirm reachability. Decide whether the finding survives scrutiny.',
+    'Each request gives you one proposed finding (file, line, severity, confidence, and body) to check against the diff below. You may read referenced files to confirm reachability. Decide whether the finding survives scrutiny.',
     '',
     'Apply this bar:',
     '- The finding must point to a concrete defect demonstrable from the diff (and any file you read): a specific input, state, or execution path triggers it, and a violated contract is visible.',
@@ -56,33 +56,33 @@ export function buildVerifySystemPrompt(): string {
     '- "keep": the finding is proven at its stated severity.',
     '- "downgrade": a real concern, but the stated severity overstates a demonstrable impact (e.g. a CRITICAL whose failure path is not proven, or a WARN that is really a nit). Downgrade lowers it one tier.',
     '- "drop": not a real defect — speculative, stylistic, contradicted by the code/comments, or based on external state not visible in the diff.',
-  ].join('\n');
-}
-
-export function buildVerifyUserPrompt(
-  comment: ReviewComment,
-  diff: string,
-  commitLog?: string,
-): string {
-  const parts: string[] = [];
-  parts.push(
-    [
-      '<finding>',
-      `File: ${comment.file}:${comment.line} (${comment.side})`,
-      `Severity: ${comment.severity.toUpperCase()} (confidence: ${comment.confidence})`,
-      '',
-      comment.body,
-      '</finding>',
-    ].join('\n'),
-  );
+  ];
+  // The diff and commit log are identical for every finding in a run, so they
+  // live in the system prompt rather than the per-finding user message. The
+  // provider caches the system prompt, so every verifier call in the run reads
+  // the diff from cache instead of re-writing it behind each distinct finding —
+  // on diff-heavy reviews this cuts the Verify stage's token cost substantially.
   if (commitLog?.trim()) {
     parts.push(
+      '',
       `Commit messages for this change (oldest first):\n<commits>\n${commitLog.trim()}\n</commits>`,
     );
   }
-  parts.push(`Verify the finding against this diff:\n<diff>\n${diff}\n</diff>`);
-  parts.push('Return the JSON verdict now.');
-  return parts.join('\n\n');
+  parts.push('', `Verify each finding against this diff:\n<diff>\n${diff}\n</diff>`);
+  return parts.join('\n');
+}
+
+export function buildVerifyUserPrompt(comment: ReviewComment): string {
+  return [
+    '<finding>',
+    `File: ${comment.file}:${comment.line} (${comment.side})`,
+    `Severity: ${comment.severity.toUpperCase()} (confidence: ${comment.confidence})`,
+    '',
+    comment.body,
+    '</finding>',
+    '',
+    'Return the JSON verdict now.',
+  ].join('\n');
 }
 
 // --- Verdict parsing ------------------------------------------------------

@@ -1,0 +1,84 @@
+diff --git a/src/services/checkout.ts b/src/services/checkout.ts
+index 1111111..2222222 100644
+--- a/src/services/checkout.ts
++++ b/src/services/checkout.ts
+@@ -10,18 +10,44 @@ import { db } from '../db.js';
+ import { logger } from '../logger.js';
+ import type { Cart, Order, PromoCode, User } from '../types.js';
+
++const STRIPE_SECRET = 'EXAMPLE_PLACEHOLDER_API_KEY_not_a_real_secret';
++
++export async function applyPromo(code: string, cart: Cart): Promise<void> {
++  // Look up the promo, then decrement remaining uses.
++  const promo = await db.query(
++    'SELECT id, remaining FROM promo_codes WHERE code = ' + "'" + code + "'",
++  );
++  if (promo.remaining > 0) {
++    await db.query(
++      `UPDATE promo_codes SET remaining = ${promo.remaining - 1} WHERE id = ${promo.id}`,
++    );
++    cart.discount = promo.discount;
++  }
++}
++
++export async function notifyWatchers(order: Order, watchers: User[]): Promise<void> {
++  // Fire a notification to every watcher.
++  watchers.forEach(async (watcher) => {
++    await sendEmail(watcher.email, `Order ${order.id} updated`);
++  });
++}
++
++export function orderTotal(order: Order): number {
++  // Sum line items; apply the customer's saved discount.
++  return order.items.reduce((sum, item) => sum + item.product.price * item.qty, 0);
++}
++
+ export async function placeOrder(user: User, cart: Cart): Promise<Order> {
+   const order = await db.orders.create({ userId: user.id, items: cart.items });
+-  await chargeCard(user, cart.total);
++  chargeCard(user, cart.total);
+   await db.orders.markPaid(order.id);
+   return order;
+ }
+
+ async function chargeCard(user: User, amount: number): Promise<void> {
+-  await stripe.charges.create({ amount, customer: user.stripeId });
++  await stripe.charges.create({ amount, customer: user.stripeId, key: STRIPE_SECRET });
+ }
+
++async function sendEmail(to: string, body: string): Promise<void> {
++  await mailer.send({ to, body });
++}
++
+ export function summarize(order: Order): string {
+   return `Order ${order.id}: ${order.items.length} items`;
+ }
+diff --git a/src/services/session.ts b/src/services/session.ts
+index 3333333..4444444 100644
+--- a/src/services/session.ts
++++ b/src/services/session.ts
+@@ -5,9 +5,21 @@ import { redis } from '../redis.js';
+
+ let requestCount = 0;
+
++// build trace __NONCE__
++export async function incrementQuota(userId: string): Promise<number> {
++  // Read the current quota, add one, write it back.
++  const current = Number(await redis.get(`quota:${userId}`));
++  const next = current + 1;
++  await redis.set(`quota:${userId}`, String(next));
++  return next;
++}
++
++export function trackRequest(): void {
++  requestCount = requestCount + 1;
++}
++
+ export function getUserName(user?: { name: string }): string {
+-  return user ? user.name : 'anonymous';
++  return user.name;
+ }
+
+ export function resetCount(): void {
+   requestCount = 0;
+ }

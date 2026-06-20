@@ -1073,7 +1073,7 @@ async function runBounded(tasks: Array<() => Promise<void>>, limit: number): Pro
   await Promise.all(workers);
 }
 
-const VERIFY_CONCURRENCY = 4;
+const VERIFY_CONCURRENCY = Number(process.env.GITLAB_REVIEW_VERIFY_CONCURRENCY) || 4;
 const FIND_CONCURRENCY = 3;
 
 interface StageDeps {
@@ -1183,7 +1183,7 @@ async function verifyAndSynthesize(
 
   const verdicts = new Map<number, Verdict>();
   if (severe.length > 0) {
-    const verifySystemPrompt = buildVerifySystemPrompt();
+    const verifySystemPrompt = buildVerifySystemPrompt(diff, commitLog);
     const tasks = severe.map(({ finding, index }) => async () => {
       const comment = finding.comment;
       // Cross-family verifier: a pool member other than the one that authored
@@ -1197,15 +1197,11 @@ async function verifyAndSynthesize(
         getApiKey: verifierMember.getApiKey,
       });
       try {
-        const text = await runAgentToCompletion(
-          verifier,
-          buildVerifyUserPrompt(comment, diff, commitLog),
-          {
-            timeoutMs: deps.timeoutMs,
-            onAssistantMessage: (message) =>
-              accumulateUsage(deps.aggregated, message, verifierMember.id),
-          },
-        );
+        const text = await runAgentToCompletion(verifier, buildVerifyUserPrompt(comment), {
+          timeoutMs: deps.timeoutMs,
+          onAssistantMessage: (message) =>
+            accumulateUsage(deps.aggregated, message, verifierMember.id),
+        });
         verdicts.set(index, parseVerdict(text));
       } catch (error) {
         deps.logger.warn(

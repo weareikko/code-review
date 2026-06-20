@@ -35,6 +35,7 @@ The CLI auto-resolves values from CI variables and common token/key names.
 | `GITLAB_REVIEW_SKILLS`                        | Comma-separated list of skill specs to enable. Bare names are built-in skills (e.g. `code-review`); `npm:`, `file:`, and `git:` / `git+ssh:` specs load external skills (see [Skills](./skills.md)).                                   |
 | `GITLAB_REVIEW_REFRESH_SKILLS`                | Set to `true`/`1` to re-clone `git:` / `git+ssh:` skills instead of reusing the on-disk cache                                                                                                                                          |
 | `GITLAB_REVIEW_OTEL`                          | Set to `1` to enable the OpenTelemetry bridge (generic OTLP spans + metrics)                                                                                                                                                           |
+| `GITLAB_REVIEW_VERIFY_CONCURRENCY`            | Advanced: number of Verify-stage adversarial agents to run concurrently at `verify`/`full` depth. Default `4`. Lower values trade latency for higher provider prompt-cache hit rates on the shared diff.                               |
 
 ### Namespacing provider/infra variables with `GITLAB_REVIEW_`
 

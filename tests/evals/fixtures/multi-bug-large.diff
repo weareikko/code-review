@@ -1,0 +1,1367 @@
+diff --git a/src/services/orders.ts b/src/services/orders.ts
+index 1111111..2222222 100644
+--- a/src/services/orders.ts
++++ b/src/services/orders.ts
+@@ -1,0 +1,900 @@
++import { db } from '../db.js';
++import { logger } from '../logger.js';
++import { stripe } from '../stripe.js';
++import { mailer } from '../mailer.js';
++import type { Cart, Order, PromoCode, User, LineItem } from '../types.js';
++// build trace __NONCE__
++
++const STRIPE_SECRET = 'EXAMPLE_PLACEHOLDER_API_KEY_not_a_real_secret';
++
++export function computeTier0(user: User, spend: number): string {
++  // Tier rule 0: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier0 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier1(user: User, spend: number): string {
++  // Tier rule 1: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier1 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier2(user: User, spend: number): string {
++  // Tier rule 2: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier2 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier3(user: User, spend: number): string {
++  // Tier rule 3: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier3 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier4(user: User, spend: number): string {
++  // Tier rule 4: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier4 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier5(user: User, spend: number): string {
++  // Tier rule 5: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier5 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier6(user: User, spend: number): string {
++  // Tier rule 6: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier6 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier7(user: User, spend: number): string {
++  // Tier rule 7: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier7 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier8(user: User, spend: number): string {
++  // Tier rule 8: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier8 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier9(user: User, spend: number): string {
++  // Tier rule 9: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier9 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier10(user: User, spend: number): string {
++  // Tier rule 10: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier10 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier11(user: User, spend: number): string {
++  // Tier rule 11: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier11 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier12(user: User, spend: number): string {
++  // Tier rule 12: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier12 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier13(user: User, spend: number): string {
++  // Tier rule 13: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier13 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier14(user: User, spend: number): string {
++  // Tier rule 14: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier14 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier15(user: User, spend: number): string {
++  // Tier rule 15: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier15 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier16(user: User, spend: number): string {
++  // Tier rule 16: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier16 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier17(user: User, spend: number): string {
++  // Tier rule 17: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier17 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier18(user: User, spend: number): string {
++  // Tier rule 18: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier18 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier19(user: User, spend: number): string {
++  // Tier rule 19: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier19 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier20(user: User, spend: number): string {
++  // Tier rule 20: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier20 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier21(user: User, spend: number): string {
++  // Tier rule 21: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier21 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier22(user: User, spend: number): string {
++  // Tier rule 22: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier22 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier23(user: User, spend: number): string {
++  // Tier rule 23: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier23 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier24(user: User, spend: number): string {
++  // Tier rule 24: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier24 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier25(user: User, spend: number): string {
++  // Tier rule 25: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier25 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier26(user: User, spend: number): string {
++  // Tier rule 26: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier26 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier27(user: User, spend: number): string {
++  // Tier rule 27: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier27 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier28(user: User, spend: number): string {
++  // Tier rule 28: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier28 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier29(user: User, spend: number): string {
++  // Tier rule 29: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier29 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier30(user: User, spend: number): string {
++  // Tier rule 30: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier30 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier31(user: User, spend: number): string {
++  // Tier rule 31: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier31 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier32(user: User, spend: number): string {
++  // Tier rule 32: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier32 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier33(user: User, spend: number): string {
++  // Tier rule 33: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier33 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier34(user: User, spend: number): string {
++  // Tier rule 34: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier34 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier35(user: User, spend: number): string {
++  // Tier rule 35: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier35 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier36(user: User, spend: number): string {
++  // Tier rule 36: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier36 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier37(user: User, spend: number): string {
++  // Tier rule 37: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier37 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier38(user: User, spend: number): string {
++  // Tier rule 38: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier38 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier39(user: User, spend: number): string {
++  // Tier rule 39: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier39 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier40(user: User, spend: number): string {
++  // Tier rule 40: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier40 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier41(user: User, spend: number): string {
++  // Tier rule 41: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier41 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier42(user: User, spend: number): string {
++  // Tier rule 42: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier42 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier43(user: User, spend: number): string {
++  // Tier rule 43: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier43 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier44(user: User, spend: number): string {
++  // Tier rule 44: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier44 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier45(user: User, spend: number): string {
++  // Tier rule 45: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier45 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier46(user: User, spend: number): string {
++  // Tier rule 46: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier46 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier47(user: User, spend: number): string {
++  // Tier rule 47: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier47 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier48(user: User, spend: number): string {
++  // Tier rule 48: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier48 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier49(user: User, spend: number): string {
++  // Tier rule 49: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier49 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier50(user: User, spend: number): string {
++  // Tier rule 50: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier50 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier51(user: User, spend: number): string {
++  // Tier rule 51: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier51 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier52(user: User, spend: number): string {
++  // Tier rule 52: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier52 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier53(user: User, spend: number): string {
++  // Tier rule 53: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier53 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier54(user: User, spend: number): string {
++  // Tier rule 54: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier54 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier55(user: User, spend: number): string {
++  // Tier rule 55: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier55 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier56(user: User, spend: number): string {
++  // Tier rule 56: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier56 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier57(user: User, spend: number): string {
++  // Tier rule 57: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier57 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier58(user: User, spend: number): string {
++  // Tier rule 58: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier58 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export function computeTier59(user: User, spend: number): string {
++  // Tier rule 59: bands derived from rolling 90-day spend.
++  if (spend > 10000) return 'platinum';
++  if (spend > 5000) return 'gold';
++  if (spend > 1000) return 'silver';
++  logger.debug('tier59 computed', { userId: user.id, spend });
++  return 'bronze';
++}
++
++export async function applyPromo(code: string, cart: Cart): Promise<void> {
++  // Look up the promo, then decrement remaining uses.
++  const promo = await db.query(
++    'SELECT id, remaining, discount FROM promo_codes WHERE code = ' + "'" + code + "'",
++  );
++  if (promo.remaining > 0) {
++    await db.query(
++      `UPDATE promo_codes SET remaining = ${promo.remaining - 1} WHERE id = ${promo.id}`,
++    );
++    cart.discount = promo.discount;
++  }
++}
++
++export function formatInvoiceLine0(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine1(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine2(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine3(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine4(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine5(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine6(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine7(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine8(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine9(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine10(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine11(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine12(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine13(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine14(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine15(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine16(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine17(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine18(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine19(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine20(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine21(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine22(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine23(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine24(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine25(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine26(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine27(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine28(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine29(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine30(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine31(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine32(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine33(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine34(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine35(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine36(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine37(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine38(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine39(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine40(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine41(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine42(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine43(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine44(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine45(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine46(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine47(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine48(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine49(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine50(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine51(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine52(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine53(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine54(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine55(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine56(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine57(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine58(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function formatInvoiceLine59(item: LineItem): string {
++  const label = item.sku.padEnd(12, ' ');
++  const qty = String(item.qty).padStart(4, ' ');
++  const price = (item.product.price / 100).toFixed(2);
++  return `${label} x${qty} @ ${price}`;
++}
++
++export function getUserName(user?: { name: string }): string {
++  return user.name;
++}
++
++export async function notifyWatchers(order: Order, watchers: User[]): Promise<void> {
++  watchers.forEach(async (watcher) => {
++    await mailer.send({ to: watcher.email, body: `Order ${order.id} updated` });
++  });
++}
++
++export function validateAddress0(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress1(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress2(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress3(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress4(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress5(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress6(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress7(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress8(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress9(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress10(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress11(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress12(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress13(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress14(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress15(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress16(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress17(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress18(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress19(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress20(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress21(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress22(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress23(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress24(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress25(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress26(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress27(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress28(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress29(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress30(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress31(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress32(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress33(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress34(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress35(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress36(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress37(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress38(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress39(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress40(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress41(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress42(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress43(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress44(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress45(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress46(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress47(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress48(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress49(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress50(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress51(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress52(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress53(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress54(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress55(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress56(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress57(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress58(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export function validateAddress59(addr: { zip: string; country: string }): boolean {
++  if (!addr.zip || addr.zip.length < 3) return false;
++  if (addr.country !== 'US' && addr.country !== 'CA') return false;
++  return /^[0-9]{5}$/.test(addr.zip) || addr.country === 'CA';
++}
++
++export async function placeOrder(user: User, cart: Cart): Promise<Order> {
++  const order = await db.orders.create({ userId: user.id, items: cart.items });
++  chargeCard(user, cart.total);
++  await db.orders.markPaid(order.id);
++  return order;
++}
++
++async function chargeCard(user: User, amount: number): Promise<void> {
++  await stripe.charges.create({ amount, customer: user.stripeId, key: STRIPE_SECRET });
++}
