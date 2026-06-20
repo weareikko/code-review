@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Move the diff and commit log into the shared Verify system prompt so the provider caches them once per run instead of re-writing them behind each finding; cuts Verify-stage cost on diff-heavy reviews (~24% at the default concurrency, more when serial). Adds a `GITLAB_REVIEW_VERIFY_CONCURRENCY` knob ([#89]).
+
 [Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.1...HEAD
+[#89]: https://github.com/ikko-dev/gitlab-review/pull/89
 
 ## [0.7.1] - 2026-06-18
 
