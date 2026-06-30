@@ -1258,3 +1258,59 @@ describeEval(
     });
   },
 );
+
+// =============================================================================
+// Code smell baseline — Fowler design smells surfaced as judgment calls
+//
+// The code-review skill now carries a fixed Fowler smell baseline (Refactoring,
+// ch. 3) as a secondary, non-blocking dimension. The design-smells fixture
+// introduces two clear smells and NO correctness bug: validateUser/validateAdmin
+// are near-identical (Duplicated Code) and shippingLine reaches repeatedly into
+// order.customer.address (Feature Envy / Message Chains).
+//
+// Two things must hold: (1) the reviewer surfaces at least one of these design
+// smells, and (2) it never escalates a smell to CRITICAL (a smell is never
+// blocking). Recording-only — LLM behaviour varies, and the baseline improves
+// coverage rather than reliability, so it graduates to an enforcing threshold
+// only after real-world validation.
+// =============================================================================
+
+const DesignSmellSurfacedJudge = createLlmJudge<EvalInput, EvalOutput>(
+  'DesignSmellSurfacedJudge',
+  'The review must surface at least one Fowler design smell introduced by this diff: the duplicated validation logic (validateUser and validateAdmin are near-identical and should be extracted), or the feature envy / message chains in shippingLine (it reaches repeatedly into order.customer.address instead of asking that object to format itself). Naming the smell or describing it as a maintainability/duplication/refactor concern both count, at any severity. A review that only discusses correctness, or finds nothing, does NOT pass.',
+);
+
+// No design smell may be reported as CRITICAL — a smell is never blocking.
+const NoCriticalSmellJudge = createJudge(
+  'NoCriticalSmellJudge',
+  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
+    const critical = output.comments.filter((c) => c.severity === 'critical');
+    return {
+      score: critical.length === 0 ? 1 : 0,
+      metadata: {
+        rationale:
+          critical.length === 0
+            ? 'No finding escalated to CRITICAL on smell-only code'
+            : `Produced ${critical.length} CRITICAL finding(s) on smell-only code (smells must never be CRITICAL)`,
+        criticalComments: critical.map((c) => ({ file: c.file, body: c.body.slice(0, 120) })),
+      },
+    };
+  },
+);
+
+describeEval(
+  'code smell baseline — surfaces Fowler smells without blocking',
+  {
+    harness: reviewHarness,
+    judges: [DesignSmellSurfacedJudge, NoCriticalSmellJudge],
+    judgeThreshold: null,
+    skipIf: missingApiKey,
+  },
+  (it) => {
+    it('surfaces duplicated code / feature envy as non-blocking findings', async ({ run }) => {
+      const diff = await readFile(join(FIXTURES, 'design-smells.diff'), 'utf8');
+      const result = await run({ diff, skills: ['code-review'] });
+      expect(result.output).toBeDefined();
+    });
+  },
+);
