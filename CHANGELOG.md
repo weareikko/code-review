@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The built-in `code-review` skill now carries a fixed Fowler code-smell baseline (duplication, feature envy, primitive obsession, data clumps, etc.) as a secondary, non-blocking dimension: repo standards override it, every smell is a judgment call, and smells cap at WARN (never CRITICAL) ([#90]).
+
 [Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.1...HEAD
+[#90]: https://github.com/ikko-dev/gitlab-review/pull/90
 
 ## [0.7.1] - 2026-06-18
 
