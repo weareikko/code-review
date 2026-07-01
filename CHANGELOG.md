@@ -11,7 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The built-in `code-review` skill now carries a fixed Fowler code-smell baseline (duplication, feature envy, primitive obsession, data clumps, etc.) as a secondary, non-blocking dimension: repo standards override it, every smell is a judgment call, and smells cap at WARN (never CRITICAL) ([#90]).
 
+### Changed
+
+- Move the diff and commit log into the shared Verify system prompt so the provider caches them once per run instead of re-writing them behind each finding; cuts Verify-stage cost on diff-heavy reviews (~24% at the default concurrency, more when serial). Adds a `GITLAB_REVIEW_VERIFY_CONCURRENCY` knob ([#89]).
+
 [Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.1...HEAD
+[#89]: https://github.com/ikko-dev/gitlab-review/pull/89
 [#90]: https://github.com/ikko-dev/gitlab-review/pull/90
 
 ## [0.7.1] - 2026-06-18
