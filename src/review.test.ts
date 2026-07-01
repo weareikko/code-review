@@ -73,7 +73,7 @@ describe('fingerprints and duplicate detection', () => {
     );
   });
 
-  it('changes fingerprints when hunk context changes', () => {
+  it('shifts the primary but keeps the secondary stable when hunk context changes', () => {
     const comment = {
       file: 'src/a.ts',
       line: 2,
@@ -84,8 +84,11 @@ describe('fingerprints and duplicate detection', () => {
     const fpA = fingerprints(comment, 'hunk-a');
     const fpB = fingerprints(comment, 'hunk-b');
 
+    // Primary is the exact match and includes the hunk, so it shifts.
     expect(fpA.primary).not.toBe(fpB.primary);
-    expect(fpA.secondary).not.toBe(fpB.secondary);
+    // Secondary is the edit-stable fallback (no hunk, no line): unchanged when
+    // only the surrounding hunk moves, so nearby edits don't re-post (#91).
+    expect(fpA.secondary).toBe(fpB.secondary);
   });
 
   it('extracts existing markers and marks generated duplicates', () => {

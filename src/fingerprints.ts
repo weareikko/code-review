@@ -105,8 +105,16 @@ export function fingerprints(comment: ReviewComment, hunkContext: string): Finge
   const bodyHash = sha256(normalizeBody(comment.body));
   const hunkHash = sha256(hunkContext);
   return {
+    // Primary: exact match — same file/side/line, same body, same surrounding
+    // hunk. It shifts when the author edits the hunk, which is why the secondary
+    // exists as the edit-stable fallback.
     primary: sha256([comment.file, comment.side, comment.line, bodyHash, hunkHash].join('|')),
-    secondary: sha256([comment.file, comment.side, bodyHash, hunkHash].join('|')),
+    // Secondary: edit-stable. Deliberately excludes both the line number and the
+    // hunk context, so the same finding on the same file/side stays deduplicated
+    // when the author edits nearby lines (which grow/shift the hunk). Folding the
+    // hunk in here defeated that fallback and re-posted findings on every nearby
+    // edit (#91).
+    secondary: sha256([comment.file, comment.side, bodyHash].join('|')),
   };
 }
 
