@@ -7,17 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.2...HEAD
+
+## [0.7.2] - 2026-07-01
+
 ### Added
 
 - The built-in `code-review` skill now carries a fixed Fowler code-smell baseline (duplication, feature envy, primitive obsession, data clumps, etc.) as a secondary, non-blocking dimension: repo standards override it, every smell is a judgment call, and smells cap at WARN (never CRITICAL) ([#90]).
+- `--verify-model` / `GITLAB_REVIEW_VERIFY_MODEL`: route the Verify stage (`verify`/`full` depth) to its own model, pairing a cheap high-recall finder with a strong high-precision verifier; warns when the verify model looks cheaper than the find model. Opt-in; default keeps the pool-based verifier ([#95]).
 
 ### Changed
 
 - Move the diff and commit log into the shared Verify system prompt so the provider caches them once per run instead of re-writing them behind each finding; cuts Verify-stage cost on diff-heavy reviews (~24% at the default concurrency, more when serial). Adds a `GITLAB_REVIEW_VERIFY_CONCURRENCY` knob ([#89]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.1...HEAD
+### Fixed
+
+- Inline findings no longer re-post when the author edits nearby lines: the duplicate-prevention secondary fingerprint dropped the diff hunk and now keys on file + side + body only, restoring the edit-stable fallback ([#96]).
+
+[0.7.2]: https://github.com/ikko-dev/gitlab-review/compare/0.7.1...0.7.2
 [#89]: https://github.com/ikko-dev/gitlab-review/pull/89
 [#90]: https://github.com/ikko-dev/gitlab-review/pull/90
+[#95]: https://github.com/ikko-dev/gitlab-review/pull/95
+[#96]: https://github.com/ikko-dev/gitlab-review/pull/96
 
 ## [0.7.1] - 2026-06-18
 
