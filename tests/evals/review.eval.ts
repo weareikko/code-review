@@ -1279,9 +1279,8 @@ describeEval(
 // Two things must hold: (1) the reviewer surfaces at least one of these design
 // smells, and (2) it never escalates any finding to CRITICAL — the code is
 // bug-free, so a CRITICAL here is either a fabricated bug or a smell wrongly
-// treated as blocking. Recording-only — LLM behaviour varies, and the baseline
-// improves coverage rather than reliability, so it graduates to an enforcing
-// threshold only after real-world validation.
+// treated as blocking. Enforcing (judgeThreshold: 1) after repeated green runs —
+// see the note on the describeEval block below.
 // =============================================================================
 
 const DesignSmellSurfacedJudge = createLlmJudge<EvalInput, EvalOutput>(
@@ -1312,7 +1311,12 @@ describeEval(
   {
     harness: reviewHarness,
     judges: [DesignSmellSurfacedJudge, NoCriticalSmellJudge],
-    judgeThreshold: null,
+    // Enforcing. Both judges scored 1.00 across repeated sonnet runs on the
+    // airtight fixture: the triple-identical slug functions make the smell
+    // unmistakable (recall is robust), and the fixture is bug-free so a CRITICAL
+    // is a clear violation. Evals run only via `npm run test:evals`, never in the
+    // default CI test job, so an enforcing threshold here cannot flake PR CI.
+    judgeThreshold: 1,
     skipIf: missingApiKey,
   },
   (it) => {
