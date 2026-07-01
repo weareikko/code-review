@@ -123,6 +123,29 @@ describe('formatUsageLine', () => {
       'Review usage: 600 in / 25 out tokens — $0.0533 (anthropic/claude-sonnet-4-5)',
     );
   });
+
+  it('labels the total with the model count (not one model) when several ran', () => {
+    // The cost is the run total across both models; attributing it to a single
+    // model name reads as if the other model was free (find + --verify-model).
+    const usage: ReviewUsage = {
+      ...makeUsage({ input: 200, output: 50, total: 250 }),
+      byModel: [
+        {
+          model: 'cloudflare-ai-gateway/gpt-4o-mini',
+          tokens: { input: 150, output: 30, cacheRead: 0, cacheWrite: 0, total: 180 },
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.0013 },
+        },
+        {
+          model: 'cloudflare-ai-gateway/gpt-5.4',
+          tokens: { input: 50, output: 20, cacheRead: 0, cacheWrite: 0, total: 70 },
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.004 },
+        },
+      ],
+    };
+    expect(formatUsageLine(usage)).toBe(
+      'Review usage: 200 in / 50 out tokens — $0.0533 (2 models)',
+    );
+  });
 });
 
 function zeroBreakdown() {

@@ -411,7 +411,9 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
               parsed.summary as string,
               discussions,
               {
-                costFooter: formatUsageLine(usage),
+                costFooter: [formatUsageLine(usage), formatPerModelUsage(usage)]
+                  .filter(Boolean)
+                  .join('\n\n'),
                 skillsFooter: formatSkillsFooter(usage.skills),
                 reviewedCommitSha: version.head_commit_sha,
                 runId,
@@ -508,7 +510,14 @@ export function formatUsageLine(usage: ReviewUsage): string {
       : `${formatter.format(billableInput)} in`;
   const output = formatter.format(usage.tokens.output);
   const cost = usage.cost.total.toFixed(4);
-  return `Review usage: ${inputLabel} / ${output} out tokens — $${cost} (${usage.model})`;
+  // The cost/token figures are run totals across every model that ran. Label
+  // them with the single model only when one model ran; with a heterogeneous
+  // pool (e.g. a cheap finder + a strong `--verify-model`), attributing the
+  // total to `usage.model` reads as if the other models were free. Show the
+  // count instead and let the per-model breakdown carry the split.
+  const modelLabel =
+    usage.byModel && usage.byModel.length >= 2 ? `${usage.byModel.length} models` : usage.model;
+  return `Review usage: ${inputLabel} / ${output} out tokens — $${cost} (${modelLabel})`;
 }
 
 /**
