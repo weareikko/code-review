@@ -57,6 +57,7 @@ function makeConfig(overrides: Partial<Config>): Config {
     gitlabToken: 'test',
     gitlabAuthHeader: 'PRIVATE-TOKEN',
     model: process.env.GITLAB_REVIEW_EVAL_MODEL ?? 'anthropic/claude-sonnet-4-5',
+    modelPool: [],
     minSeverity: 'info',
     thinkingLevel: 'off',
     postingMode: 'direct',
@@ -64,14 +65,18 @@ function makeConfig(overrides: Partial<Config>): Config {
     apiKey,
     baseUrl: process.env.GITLAB_REVIEW_BASE_URL ?? '',
     maxTokens: Number(process.env.GITLAB_REVIEW_MAX_TOKENS ?? 0),
+    maxDiffChars: 100_000,
+    decomposeHintLines: 0,
     reviewFile: 'gitlab-review.md',
     output: 'review-comments.json',
     dryRun: true,
     noPost: true,
     postSummary: false,
     forceReview: false,
+    verbose: false,
     cwd: process.cwd(),
     skills: [],
+    refreshGitSkills: false,
     ...overrides,
   };
 }
@@ -1255,6 +1260,70 @@ describeEval(
       const diff = await readFile(join(FIXTURES, 'async-foreach-bug.diff'), 'utf8');
       const result = await run({ diff, skills: ['code-review'], reviewDepth: 'verify' });
       expect(result.output.comments.length).toBeGreaterThan(0);
+    });
+  },
+);
+
+// =============================================================================
+// Code smell baseline — Fowler design smells surfaced as judgment calls
+//
+// The code-review skill now carries a fixed Fowler smell baseline (Refactoring,
+// ch. 3) as a secondary, non-blocking dimension. The design-smells fixture is
+// deliberately airtight on correctness — every value is a typed, non-optional
+// primitive or a field of an inline non-optional type, so there is no null-deref
+// or edge case to legitimately flag. What it DOES contain is clear design smells:
+// slugifyProduct/slugifyCategory/slugifyBrand are byte-identical (Duplicated
+// Code) and formatPrice reaches into Money's internals to format it (Feature
+// Envy).
+//
+// Two things must hold: (1) the reviewer surfaces at least one of these design
+// smells, and (2) it never escalates any finding to CRITICAL — the code is
+// bug-free, so a CRITICAL here is either a fabricated bug or a smell wrongly
+// treated as blocking. Enforcing (judgeThreshold: 1) after repeated green runs —
+// see the note on the describeEval block below.
+// =============================================================================
+
+const DesignSmellSurfacedJudge = createLlmJudge<EvalInput, EvalOutput>(
+  'DesignSmellSurfacedJudge',
+  'The review must surface at least one Fowler design smell introduced by this diff: the duplicated slug logic (slugifyProduct, slugifyCategory, and slugifyBrand are byte-identical and should be extracted), or the feature envy in formatPrice (it reaches into Money.cents/Money.currency to format a value that Money should format itself). Naming the smell or describing it as a maintainability/duplication/refactor concern both count, at any severity. A review that only discusses correctness, or finds nothing, does NOT pass.',
+);
+
+// No design smell may be reported as CRITICAL — a smell is never blocking.
+const NoCriticalSmellJudge = createJudge(
+  'NoCriticalSmellJudge',
+  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
+    const critical = output.comments.filter((c) => c.severity === 'critical');
+    return {
+      score: critical.length === 0 ? 1 : 0,
+      metadata: {
+        rationale:
+          critical.length === 0
+            ? 'No finding escalated to CRITICAL on smell-only code'
+            : `Produced ${critical.length} CRITICAL finding(s) on smell-only code (smells must never be CRITICAL)`,
+        criticalComments: critical.map((c) => ({ file: c.file, body: c.body.slice(0, 120) })),
+      },
+    };
+  },
+);
+
+describeEval(
+  'code smell baseline — surfaces Fowler smells without blocking',
+  {
+    harness: reviewHarness,
+    judges: [DesignSmellSurfacedJudge, NoCriticalSmellJudge],
+    // Enforcing. Both judges scored 1.00 across repeated sonnet runs on the
+    // airtight fixture: the triple-identical slug functions make the smell
+    // unmistakable (recall is robust), and the fixture is bug-free so a CRITICAL
+    // is a clear violation. Evals run only via `npm run test:evals`, never in the
+    // default CI test job, so an enforcing threshold here cannot flake PR CI.
+    judgeThreshold: 1,
+    skipIf: missingApiKey,
+  },
+  (it) => {
+    it('surfaces duplicated code / feature envy as non-blocking findings', async ({ run }) => {
+      const diff = await readFile(join(FIXTURES, 'design-smells.diff'), 'utf8');
+      const result = await run({ diff, skills: ['code-review'] });
+      expect(result.output).toBeDefined();
     });
   },
 );
