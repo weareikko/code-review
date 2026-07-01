@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from './config.js';
 import { ReviewerError } from './errors.js';
 import {
+  blendedCost,
   buildEffectivePool,
   buildJSONSystemPrompt,
   buildUserPrompt,
@@ -1515,12 +1516,13 @@ describe('resolveVerifyMember', () => {
     expect(resolveVerifyMember(cfg, primary, logger)).toBeNull();
   });
 
-  it('resolves a distinct, keyed model and logs the routing', () => {
+  it('resolves a distinct, keyed model and logs the routing', async () => {
     process.env.ANTHROPIC_API_KEY = 'ak';
     const { logger, infos, warns } = capturingLogger();
     const cfg = { ...baseConfig, verifyModel: 'anthropic/claude-opus-4-1' };
     const member = resolveVerifyMember(cfg, primary, logger);
     expect(member?.id).toBe('anthropic/claude-opus-4-1');
+    expect(await member?.getApiKey()).toBe('ak');
     expect(infos.some((m) => m.includes('Verify stage routed to'))).toBe(true);
     // opus is pricier than the sonnet finder → no cheaper-tier warning
     expect(warns.some((m) => m.includes('cheaper'))).toBe(false);
@@ -1541,5 +1543,26 @@ describe('resolveVerifyMember', () => {
     const cfg = { ...baseConfig, verifyModel: 'openai/gpt-5.4-nano' };
     expect(resolveVerifyMember(cfg, primary, logger)).toBeNull();
     expect(warns.some((m) => m.includes('no API key'))).toBe(true);
+  });
+
+  it('returns null and warns when the verify model is unresolvable', () => {
+    const { logger, warns } = capturingLogger();
+    const cfg = { ...baseConfig, verifyModel: 'nonexistent-provider/no-such-model' };
+    expect(resolveVerifyMember(cfg, primary, logger)).toBeNull();
+    expect(warns.some((m) => m.includes('Ignoring --verify-model'))).toBe(true);
+  });
+});
+
+describe('blendedCost', () => {
+  it('sums input and output per-token cost', () => {
+    const model = { cost: { input: 3, output: 15 } } as unknown as Parameters<
+      typeof blendedCost
+    >[0];
+    expect(blendedCost(model)).toBe(18);
+  });
+
+  it('returns 0 when the model has no cost metadata', () => {
+    const model = {} as unknown as Parameters<typeof blendedCost>[0];
+    expect(blendedCost(model)).toBe(0);
   });
 });

@@ -770,7 +770,7 @@ export function buildEffectivePool(config: Config, logger: Logger): PoolMember[]
 }
 
 /** Blended per-token cost (input + output) used to compare model tiers. */
-function blendedCost(model: Model<string>): number {
+export function blendedCost(model: Model<string>): number {
   const cost = model.cost;
   if (!cost) return 0;
   return (cost.input ?? 0) + (cost.output ?? 0);
