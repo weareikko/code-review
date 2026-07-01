@@ -886,6 +886,14 @@ describe('buildJSONSystemPrompt — skill section', () => {
     expect(prompt).not.toContain('<skills>');
   });
 
+  it('reiterates the guard-exclusion gate in the base rules', () => {
+    const prompt = buildJSONSystemPrompt({ conventions: [], reviewRules: [], skills: [] }, 'INFO');
+    expect(prompt).toContain(
+      'if a guard, early return, default value, optional chaining, or a type already prevents',
+    );
+    expect(prompt).toContain('"It crashes when X" only stands when X is reachable past the guards');
+  });
+
   describe('format directives', () => {
     const emptyContext = { conventions: [], reviewRules: [], skills: [] };
 

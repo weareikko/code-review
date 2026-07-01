@@ -387,6 +387,7 @@ function buildSharedBase(minSeverity: GitLabReviewSeverity): string[] {
     '',
     '<rules>',
     '- Only flag what is actually wrong in the diff — no hypotheticals',
+    '- Before reporting a runtime failure (crash, null/undefined dereference, unhandled case, missing check), re-read the function entry and the lines adjacent to your target: if a guard, early return, default value, optional chaining, or a type already prevents that failure, do NOT report it. "It crashes when X" only stands when X is reachable past the guards visible in the code — e.g. do not claim a value is dereferenced unchecked when the function opens with `if (!value) return;`.',
     '- If nothing is wrong, say so clearly',
     '- Do not make claims about external state (dates, library versions, deprecation status, API availability) that cannot be verified from the diff itself',
     '- A finding that asserts something about the literal text of the code — a typo, a misspelled or wrong identifier, a missing or duplicated character, wrong casing — MUST quote the offending token verbatim and only stands if that exact token appears in the diff character-for-character. Re-read the line before reporting: if the spelling you claim is correct already matches the code, the finding is fabricated — drop it.',

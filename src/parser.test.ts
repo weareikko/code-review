@@ -112,6 +112,64 @@ describe('gitlab-review parsing', () => {
     expect(result.map((c) => c.confidence)).toEqual(['medium', 'low', 'medium', 'high']);
   });
 
+  it('downgrades a non-high-confidence CRITICAL to WARN and relabels the header', () => {
+    const markdown = [
+      '```json',
+      JSON.stringify({
+        comments: [
+          {
+            file: 'a.ts',
+            line: 1,
+            side: 'RIGHT',
+            severity: 'CRITICAL',
+            confidence: 'medium',
+            body: 'issue (blocking): Possible null deref\n\nDetails.',
+          },
+          {
+            file: 'b.ts',
+            line: 2,
+            side: 'RIGHT',
+            severity: 'CRITICAL',
+            confidence: 'low',
+            body: 'issue (blocking): Might overflow',
+          },
+        ],
+      }),
+      '```',
+    ].join('\n');
+
+    const result = parseReviewMarkdown(markdown);
+    // Both CRITICALs lack high confidence → downgraded to WARN, header relabelled.
+    expect(result.map((c) => c.severity)).toEqual(['warn', 'warn']);
+    expect(result[0].body.split('\n', 1)[0]).toBe('issue: Possible null deref');
+    expect(result[1].body.split('\n', 1)[0]).toBe('issue: Might overflow');
+    // Confidence is preserved as reported.
+    expect(result.map((c) => c.confidence)).toEqual(['medium', 'low']);
+  });
+
+  it('keeps a high-confidence CRITICAL as CRITICAL', () => {
+    const markdown = [
+      '```json',
+      JSON.stringify({
+        comments: [
+          {
+            file: 'a.ts',
+            line: 1,
+            side: 'RIGHT',
+            severity: 'CRITICAL',
+            confidence: 'high',
+            body: 'issue (blocking): Proven crash',
+          },
+        ],
+      }),
+      '```',
+    ].join('\n');
+
+    const result = parseReviewMarkdown(markdown);
+    expect(result[0].severity).toBe('critical');
+    expect(result[0].body.split('\n', 1)[0]).toBe('issue (blocking): Proven crash');
+  });
+
   it('emits warnings for text before the first parseable inline header', () => {
     const markdown = [
       '== Inline Comments ==',
