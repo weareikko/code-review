@@ -1,50 +1,37 @@
-diff --git a/src/accounts.ts b/src/accounts.ts
+diff --git a/src/format.ts b/src/format.ts
 index 1111111..2222222 100644
---- a/src/accounts.ts
-+++ b/src/accounts.ts
-@@ -3,6 +3,38 @@ import type { Admin, Order, User } from './types.js';
+--- a/src/format.ts
++++ b/src/format.ts
+@@ -1,3 +1,31 @@
+ // Formatting helpers for the storefront.
 
- const MIN_NAME_LENGTH = 2;
-
-+// Validate a new user before persisting.
-+export function validateUser(user: User): string[] {
-+  const errors: string[] = [];
-+  if (!user.name || user.name.trim().length < MIN_NAME_LENGTH) {
-+    errors.push('name too short');
-+  }
-+  if (!user.email.includes('@')) {
-+    errors.push('email invalid');
-+  }
-+  if (user.age < 18) {
-+    errors.push('must be 18+');
-+  }
-+  return errors;
++type Money = { cents: number; currency: string };
++
++// Slugify a product name for its URL.
++export function slugifyProduct(name: string, id: number): string {
++  const base = name.trim().toLowerCase().replace(/\s+/g, '-');
++  return `${base}-${id}`;
 +}
 +
-+// Validate a new admin before persisting.
-+export function validateAdmin(admin: Admin): string[] {
-+  const errors: string[] = [];
-+  if (!admin.name || admin.name.trim().length < MIN_NAME_LENGTH) {
-+    errors.push('name too short');
-+  }
-+  if (!admin.email.includes('@')) {
-+    errors.push('email invalid');
-+  }
-+  if (admin.age < 18) {
-+    errors.push('must be 18+');
-+  }
-+  return errors;
++// Slugify a category name for its URL.
++export function slugifyCategory(name: string, id: number): string {
++  const base = name.trim().toLowerCase().replace(/\s+/g, '-');
++  return `${base}-${id}`;
 +}
 +
-+// Render the shipping line for a receipt.
-+export function shippingLine(order: Order): string {
-+  const street = order.customer.address.street;
-+  const city = order.customer.address.city;
-+  const zip = order.customer.address.zip;
-+  const country = order.customer.address.country;
-+  return `${street}, ${city} ${zip}, ${country}`;
++// Slugify a brand name for its URL.
++export function slugifyBrand(name: string, id: number): string {
++  const base = name.trim().toLowerCase().replace(/\s+/g, '-');
++  return `${base}-${id}`;
 +}
 +
- export function accountLabel(user: User): string {
-   return `${user.name} <${user.email}>`;
++// Render a price for display. Reaches into Money's internals to format it
++// rather than asking Money to format itself.
++export function formatPrice(price: Money): string {
++  const amount = (price.cents / 100).toFixed(2);
++  return `${amount} ${price.currency}`;
++}
++
+ export function joinName(first: string, last: string): string {
+   return `${first} ${last}`;
  }

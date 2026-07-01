@@ -57,6 +57,7 @@ function makeConfig(overrides: Partial<Config>): Config {
     gitlabToken: 'test',
     gitlabAuthHeader: 'PRIVATE-TOKEN',
     model: process.env.GITLAB_REVIEW_EVAL_MODEL ?? 'anthropic/claude-sonnet-4-5',
+    modelPool: [],
     minSeverity: 'info',
     thinkingLevel: 'off',
     postingMode: 'direct',
@@ -64,14 +65,18 @@ function makeConfig(overrides: Partial<Config>): Config {
     apiKey,
     baseUrl: process.env.GITLAB_REVIEW_BASE_URL ?? '',
     maxTokens: Number(process.env.GITLAB_REVIEW_MAX_TOKENS ?? 0),
+    maxDiffChars: 100_000,
+    decomposeHintLines: 0,
     reviewFile: 'gitlab-review.md',
     output: 'review-comments.json',
     dryRun: true,
     noPost: true,
     postSummary: false,
     forceReview: false,
+    verbose: false,
     cwd: process.cwd(),
     skills: [],
+    refreshGitSkills: false,
     ...overrides,
   };
 }
@@ -1263,21 +1268,25 @@ describeEval(
 // Code smell baseline — Fowler design smells surfaced as judgment calls
 //
 // The code-review skill now carries a fixed Fowler smell baseline (Refactoring,
-// ch. 3) as a secondary, non-blocking dimension. The design-smells fixture
-// introduces two clear smells and NO correctness bug: validateUser/validateAdmin
-// are near-identical (Duplicated Code) and shippingLine reaches repeatedly into
-// order.customer.address (Feature Envy / Message Chains).
+// ch. 3) as a secondary, non-blocking dimension. The design-smells fixture is
+// deliberately airtight on correctness — every value is a typed, non-optional
+// primitive or a field of an inline non-optional type, so there is no null-deref
+// or edge case to legitimately flag. What it DOES contain is clear design smells:
+// slugifyProduct/slugifyCategory/slugifyBrand are byte-identical (Duplicated
+// Code) and formatPrice reaches into Money's internals to format it (Feature
+// Envy).
 //
 // Two things must hold: (1) the reviewer surfaces at least one of these design
-// smells, and (2) it never escalates a smell to CRITICAL (a smell is never
-// blocking). Recording-only — LLM behaviour varies, and the baseline improves
-// coverage rather than reliability, so it graduates to an enforcing threshold
-// only after real-world validation.
+// smells, and (2) it never escalates any finding to CRITICAL — the code is
+// bug-free, so a CRITICAL here is either a fabricated bug or a smell wrongly
+// treated as blocking. Recording-only — LLM behaviour varies, and the baseline
+// improves coverage rather than reliability, so it graduates to an enforcing
+// threshold only after real-world validation.
 // =============================================================================
 
 const DesignSmellSurfacedJudge = createLlmJudge<EvalInput, EvalOutput>(
   'DesignSmellSurfacedJudge',
-  'The review must surface at least one Fowler design smell introduced by this diff: the duplicated validation logic (validateUser and validateAdmin are near-identical and should be extracted), or the feature envy / message chains in shippingLine (it reaches repeatedly into order.customer.address instead of asking that object to format itself). Naming the smell or describing it as a maintainability/duplication/refactor concern both count, at any severity. A review that only discusses correctness, or finds nothing, does NOT pass.',
+  'The review must surface at least one Fowler design smell introduced by this diff: the duplicated slug logic (slugifyProduct, slugifyCategory, and slugifyBrand are byte-identical and should be extracted), or the feature envy in formatPrice (it reaches into Money.cents/Money.currency to format a value that Money should format itself). Naming the smell or describing it as a maintainability/duplication/refactor concern both count, at any severity. A review that only discusses correctness, or finds nothing, does NOT pass.',
 );
 
 // No design smell may be reported as CRITICAL — a smell is never blocking.
