@@ -106,6 +106,14 @@ export interface Config {
    * single-pass behaviour; `verify` adds an adversarial Verify + Synthesize pass.
    */
   reviewDepth: ReviewDepth;
+  /**
+   * Optional `provider/modelId` for the Verify stage (`verify`/`full` depth). When
+   * set, every adversarial verifier runs on this model instead of the pool's
+   * cross-family pick — pairing a cheap, high-recall Find model with a strong,
+   * high-precision verifier. Empty (default) keeps the pool-based selection.
+   * Sourced from `--verify-model` or `GITLAB_REVIEW_VERIFY_MODEL`.
+   */
+  verifyModel: string;
   postingMode: PostingMode;
   apiKey: string;
   /** Custom base URL for the AI provider API (e.g. Ollama or other OpenAI-compatible endpoints). */
@@ -369,6 +377,7 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     reviewDepth: normalizeChoice(
       args.reviewDepth ?? env.GITLAB_REVIEW_DEPTH ?? 'single',
     ) as ReviewDepth,
+    verifyModel: String(args.verifyModel ?? env.GITLAB_REVIEW_VERIFY_MODEL ?? ''),
     postingMode: normalizeChoice(
       args.postingMode ?? env.GITLAB_REVIEW_POSTING_MODE ?? 'direct',
     ) as PostingMode,

@@ -3,14 +3,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentEvent } from '@earendil-works/pi-agent-core';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from './config.js';
 import { ReviewerError } from './errors.js';
 import {
+  blendedCost,
+  buildEffectivePool,
   buildJSONSystemPrompt,
   buildUserPrompt,
   filterDiff,
   loadReviewContext,
+  resolveVerifyMember,
   runReview,
   type AgentLike,
   type CreateAgent,
@@ -30,6 +33,7 @@ describe('runReview pipeline', () => {
     thinkingLevel: 'off',
     postingMode: 'direct',
     reviewDepth: 'single',
+    verifyModel: '',
     apiKey: 'key',
     baseUrl: '',
     maxTokens: 0,
@@ -1442,5 +1446,123 @@ describe('full depth with a model pool', () => {
     expect([...providers]).toEqual(['anthropic']);
     // single distinct model → no per-model breakdown surfaced
     expect(usage.byModel === undefined || usage.byModel.length <= 1).toBe(true);
+  });
+});
+
+describe('resolveVerifyMember', () => {
+  const baseConfig: Config = {
+    project: 'proj',
+    mr: '1',
+    gitlabUrl: 'https://gitlab.example.com',
+    gitlabToken: 'tok',
+    gitlabAuthHeader: 'PRIVATE-TOKEN',
+    model: 'anthropic/claude-sonnet-4-5',
+    modelPool: [],
+    minSeverity: 'info',
+    thinkingLevel: 'off',
+    postingMode: 'direct',
+    reviewDepth: 'verify',
+    verifyModel: '',
+    apiKey: 'key',
+    baseUrl: '',
+    maxTokens: 0,
+    maxDiffChars: 100_000,
+    decomposeHintLines: 0,
+    reviewFile: 'gitlab-review.md',
+    output: 'review-comments.json',
+    dryRun: true,
+    noPost: true,
+    postSummary: false,
+    forceReview: false,
+    verbose: false,
+    cwd: '/tmp',
+    skills: [],
+    refreshGitSkills: false,
+  };
+
+  function capturingLogger(): { logger: Logger; warns: string[]; infos: string[] } {
+    const warns: string[] = [];
+    const infos: string[] = [];
+    return {
+      logger: {
+        ...noopLogger,
+        warn: (m: string) => warns.push(m),
+        info: (m: string) => infos.push(m),
+      },
+      warns,
+      infos,
+    };
+  }
+
+  const primary = buildEffectivePool(baseConfig, noopLogger)[0];
+
+  const savedOpenai = process.env.OPENAI_API_KEY;
+  const savedAnthropic = process.env.ANTHROPIC_API_KEY;
+  afterEach(() => {
+    if (savedOpenai === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = savedOpenai;
+    if (savedAnthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = savedAnthropic;
+  });
+
+  it('returns null when no verify model is configured', () => {
+    const { logger } = capturingLogger();
+    expect(resolveVerifyMember({ ...baseConfig, verifyModel: '' }, primary, logger)).toBeNull();
+  });
+
+  it('returns null when the verify model equals the find model', () => {
+    const { logger } = capturingLogger();
+    const cfg = { ...baseConfig, verifyModel: baseConfig.model };
+    expect(resolveVerifyMember(cfg, primary, logger)).toBeNull();
+  });
+
+  it('resolves a distinct, keyed model and logs the routing', async () => {
+    process.env.ANTHROPIC_API_KEY = 'ak';
+    const { logger, infos, warns } = capturingLogger();
+    const cfg = { ...baseConfig, verifyModel: 'anthropic/claude-opus-4-1' };
+    const member = resolveVerifyMember(cfg, primary, logger);
+    expect(member?.id).toBe('anthropic/claude-opus-4-1');
+    expect(await member?.getApiKey()).toBe('ak');
+    expect(infos.some((m) => m.includes('Verify stage routed to'))).toBe(true);
+    // opus is pricier than the sonnet finder → no cheaper-tier warning
+    expect(warns.some((m) => m.includes('cheaper'))).toBe(false);
+  });
+
+  it('warns when the verify model looks cheaper than the find model', () => {
+    process.env.OPENAI_API_KEY = 'ok';
+    const { logger, warns } = capturingLogger();
+    const cfg = { ...baseConfig, verifyModel: 'openai/gpt-5.4-nano' };
+    const member = resolveVerifyMember(cfg, primary, logger);
+    expect(member?.id).toBe('openai/gpt-5.4-nano');
+    expect(warns.some((m) => m.includes('cheaper'))).toBe(true);
+  });
+
+  it('returns null and warns when the verify model has no provider key', () => {
+    delete process.env.OPENAI_API_KEY;
+    const { logger, warns } = capturingLogger();
+    const cfg = { ...baseConfig, verifyModel: 'openai/gpt-5.4-nano' };
+    expect(resolveVerifyMember(cfg, primary, logger)).toBeNull();
+    expect(warns.some((m) => m.includes('no API key'))).toBe(true);
+  });
+
+  it('returns null and warns when the verify model is unresolvable', () => {
+    const { logger, warns } = capturingLogger();
+    const cfg = { ...baseConfig, verifyModel: 'nonexistent-provider/no-such-model' };
+    expect(resolveVerifyMember(cfg, primary, logger)).toBeNull();
+    expect(warns.some((m) => m.includes('Ignoring --verify-model'))).toBe(true);
+  });
+});
+
+describe('blendedCost', () => {
+  it('sums input and output per-token cost', () => {
+    const model = { cost: { input: 3, output: 15 } } as unknown as Parameters<
+      typeof blendedCost
+    >[0];
+    expect(blendedCost(model)).toBe(18);
+  });
+
+  it('returns 0 when the model has no cost metadata', () => {
+    const model = {} as unknown as Parameters<typeof blendedCost>[0];
+    expect(blendedCost(model)).toBe(0);
   });
 });

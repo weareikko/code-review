@@ -124,6 +124,34 @@ describe('config env defaults', () => {
     });
     expect(cfg.modelPool).toEqual(['anthropic/claude-opus-4-1', 'openai/gpt-5']);
   });
+
+  const baseEnv = {
+    CI_PROJECT_ID: '1',
+    CI_MERGE_REQUEST_IID: '2',
+    CI_SERVER_URL: 'https://gitlab.example.com',
+    GITLAB_TOKEN: 'tok',
+    GITLAB_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
+  };
+
+  it('defaults verifyModel to empty when unset', () => {
+    expect(resolveConfig([], { ...baseEnv }).verifyModel).toBe('');
+  });
+
+  it('resolves verifyModel from GITLAB_REVIEW_VERIFY_MODEL', () => {
+    const cfg = resolveConfig([], {
+      ...baseEnv,
+      GITLAB_REVIEW_VERIFY_MODEL: 'cloudflare-ai-gateway/gpt-5.4',
+    });
+    expect(cfg.verifyModel).toBe('cloudflare-ai-gateway/gpt-5.4');
+  });
+
+  it('prefers --verify-model over GITLAB_REVIEW_VERIFY_MODEL', () => {
+    const cfg = resolveConfig(['--verify-model', 'openai/gpt-5.4'], {
+      ...baseEnv,
+      GITLAB_REVIEW_VERIFY_MODEL: 'cloudflare-ai-gateway/gpt-5.4',
+    });
+    expect(cfg.verifyModel).toBe('openai/gpt-5.4');
+  });
 });
 
 describe('validateConfig', () => {

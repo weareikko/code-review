@@ -67,6 +67,24 @@ pipeline runs:
 
 The current skateboard ships `single` and `verify`. `full` is future work.
 
+### Stage-scoped model routing (`--verify-model`)
+
+At `verify`/`full` depth the Find and Verify stages have different jobs: Find
+casts a wide net (recall), Verify adversarially prunes (precision). `--verify-model`
+(env `GITLAB_REVIEW_VERIFY_MODEL`) routes the Verify stage to its own model so a
+**cheap, high-recall finder** can pair with a **strong, high-precision verifier**.
+Measured on the eval fixtures, a cheap-find/strong-verify pairing matched an
+all-strong pipeline on recall and precision at a fraction of the cost.
+
+Two rules of thumb, both borne out by the measurements:
+
+- **Don't route Verify to a cheaper tier than Find.** Verify is a precision-judgment
+  task; a weak verifier refutes real findings and silently drops them (recall loss).
+  The tool warns when the verify model looks cheaper than the find model.
+- **Put the cheap tier on Find, the strong tier on Verify** — not the reverse.
+
+Empty (default) keeps the pool-based cross-family verifier selection unchanged.
+
 ## Large diffs / the 100k cap (deferred)
 
 `filterDiff` drops whole files once the diff crosses `DEFAULT_MAX_DIFF_CHARS`

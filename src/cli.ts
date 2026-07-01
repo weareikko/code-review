@@ -89,6 +89,10 @@ Options:
   --review-depth <depth>  single (one pass), verify (adversarial re-check of each
                           severe finding), or full (multi-angle finders → triage →
                           verify). (default: single; env: GITLAB_REVIEW_DEPTH)
+  --verify-model <p/id>   Model for the Verify stage (verify/full depth). Pairs a cheap
+                          finder with a strong, high-precision verifier. Warns if it looks
+                          cheaper than --model. Empty (default) = pool selection.
+                          (env: GITLAB_REVIEW_VERIFY_MODEL)
   --posting-mode <mode>   direct (sequential discussions) or draft (atomic bulk publish)
                           (default: direct)
   --review-file <path>    Raw gitlab-review output file (default: gitlab-review.md)
