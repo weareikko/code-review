@@ -769,6 +769,57 @@ export function buildEffectivePool(config: Config, logger: Logger): PoolMember[]
   return members;
 }
 
+/** Blended per-token cost (input + output) used to compare model tiers. */
+function blendedCost(model: Model<string>): number {
+  const cost = model.cost;
+  if (!cost) return 0;
+  return (cost.input ?? 0) + (cost.output ?? 0);
+}
+
+/**
+ * Resolve `config.verifyModel` into a dedicated Verify-stage pool member. Returns
+ * null when unset (Verify falls back to the pool's cross-family pick) or when the
+ * model/key can't be resolved (warns and falls back, so a bad value never aborts
+ * the run). Also warns when the verify model is a *cheaper* tier than the finder:
+ * the Verify stage is a precision-judgment task, and a weak verifier drops real
+ * findings (recall loss) — so cheap-find/strong-verify is the intended shape.
+ */
+export function resolveVerifyMember(
+  config: Config,
+  primary: PoolMember,
+  logger: Logger,
+): PoolMember | null {
+  const id = config.verifyModel?.trim();
+  if (!id) return null;
+  if (id === primary.id) return null; // same as finder — nothing to route
+  let model: Model<string>;
+  try {
+    model = resolveModel(id, config.baseUrl ?? '', config.maxTokens ?? 0);
+  } catch (error) {
+    logger.warn(`Ignoring --verify-model "${id}": ${(error as Error).message}`);
+    return null;
+  }
+  const key = resolveProviderApiKey(id);
+  if (!key) {
+    logger.warn(
+      `Ignoring --verify-model "${id}": no API key for its provider. ` +
+        `Set the provider's key (e.g. ANTHROPIC_API_KEY) to route Verify to it.`,
+    );
+    return null;
+  }
+  const verifyCost = blendedCost(model);
+  const findCost = blendedCost(primary.model);
+  if (verifyCost > 0 && findCost > 0 && verifyCost < findCost) {
+    logger.warn(
+      `--verify-model "${id}" looks cheaper than the find model "${primary.id}". ` +
+        `Verify is a precision-judgment task; a weaker verifier tends to drop real ` +
+        `findings (recall loss). Prefer a cheap finder with a strong verifier.`,
+    );
+  }
+  logger.info(`Verify stage routed to ${id} (find: ${primary.id}).`);
+  return { id, model, getApiKey: async () => key };
+}
+
 interface ModelUsageBucket {
   tokens: UsageBreakdown;
   cost: UsageBreakdown;
@@ -899,6 +950,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     timeoutMs,
     logger,
     aggregated,
+    verifyMember: resolveVerifyMember(config, primary, logger),
   };
 
   let outputText: string;
@@ -1089,6 +1141,12 @@ interface StageDeps {
   timeoutMs: number;
   logger: Logger;
   aggregated: AggregatedUsage;
+  /**
+   * Explicit Verify-stage model (from `--verify-model`). When set, every verifier
+   * runs on this member instead of the pool's cross-family pick. Null keeps the
+   * pool-based selection.
+   */
+  verifyMember?: PoolMember | null;
 }
 
 /**
@@ -1186,9 +1244,10 @@ async function verifyAndSynthesize(
     const verifySystemPrompt = buildVerifySystemPrompt(diff, commitLog);
     const tasks = severe.map(({ finding, index }) => async () => {
       const comment = finding.comment;
-      // Cross-family verifier: a pool member other than the one that authored
-      // the finding (degenerates to the author with a 1-model pool).
-      const verifierMember = pickVerifier(deps.pool, finding.authorModel);
+      // Explicit --verify-model wins; otherwise a cross-family verifier: a pool
+      // member other than the one that authored the finding (degenerates to the
+      // author with a 1-model pool).
+      const verifierMember = deps.verifyMember ?? pickVerifier(deps.pool, finding.authorModel);
       const verifier = deps.createAgent({
         systemPrompt: verifySystemPrompt,
         model: verifierMember.model,
