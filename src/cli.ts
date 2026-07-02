@@ -84,6 +84,10 @@ Options:
                           When > 0, an MR whose reviewed diff changes more lines than this
                           threshold gets a "consider decomposing this MR" note in the summary.
                           0 = off (default). (env: GITLAB_REVIEW_DECOMPOSE_HINT_LINES)
+  --diff-context <n>      Lines of surrounding context per diff hunk (git --unified). More
+                          context aids reasoning but inflates tokens and fits fewer files in
+                          the budget; less fits more. 0 = built-in default (20).
+                          (env: GITLAB_REVIEW_DIFF_CONTEXT)
   --min-severity <level>  info, warn, or critical (default: info)
   --thinking <level>      off, minimal, low, medium, high, or xhigh (default: off).
                           Higher levels add billable thinking tokens at the model output rate.
@@ -257,7 +261,10 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
       config,
       runId,
       async (context) => {
-        const merged = await getMergeDiff(mr.target_branch, { cwd: config.cwd });
+        const merged = await getMergeDiff(mr.target_branch, {
+          cwd: config.cwd,
+          ...(config.diffContext > 0 ? { context: config.diffContext } : {}),
+        });
         const summary = summarizeDiff(merged);
         context.diffFilesChanged = summary.filesChanged;
         context.diffLinesAdded = summary.linesAdded;
