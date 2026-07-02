@@ -1,6 +1,7 @@
 import { jsonrepair } from 'jsonrepair';
 import { FINGERPRINT_MARKER_PATTERN } from './fingerprints.js';
 import { normalizeConfidence, normalizeSeverity, type ReviewComment, type Side } from './types.js';
+import { relabelBodyHeader } from './verify.js';
 
 /** Why the reviewer's JSON could not be recovered. Surfaced for diagnostics. */
 export type ParseFailureReason =
@@ -71,14 +72,20 @@ function addJsonComment(out: ReviewComment[], item: unknown): void {
     line > 0 &&
     body.length > 0
   ) {
-    out.push({
-      file,
-      line,
-      side,
-      severity: normalizeSeverity(value.severity),
-      confidence: normalizeConfidence(value.confidence),
-      body,
-    });
+    // Enforce the severity/confidence contract deterministically: a CRITICAL
+    // must be high confidence (the prompt states this, but self-reported
+    // severity is otherwise accepted verbatim and inflates in the default
+    // `single` depth, which runs no Verify pass). A CRITICAL that isn't
+    // high-confidence is downgraded to WARN and its Conventional Comment header
+    // relabelled to match, so an unproven "blocking" claim can't gate a merge.
+    let severity = normalizeSeverity(value.severity);
+    const confidence = normalizeConfidence(value.confidence);
+    let finalBody = body;
+    if (severity === 'critical' && confidence !== 'high') {
+      severity = 'warn';
+      finalBody = relabelBodyHeader(body, 'warn');
+    }
+    out.push({ file, line, side, severity, confidence, body: finalBody });
   }
 }
 

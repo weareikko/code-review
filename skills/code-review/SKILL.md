@@ -107,5 +107,6 @@ Use the lower severity when impact depends on unproven preconditions.
 - Existing bugs untouched by the diff.
 - Typos, misspelled identifiers, or wrong characters unless you quote the offending token verbatim from the diff and it appears there character-for-character. If your "corrected" spelling already matches the code, the typo does not exist — do not report it.
 - Hypothetical failures requiring unrealistic inputs or impossible call order.
+- A failure that an existing guard, early return, default, optional chain, or type already prevents. Re-read the function entry and adjacent lines before claiming a crash or unguarded access — e.g. do NOT report "crashes when `this.input` is missing" when the method opens with `if (!this.input) return;`. If a guard on a nearby line excludes the failure path, the finding does not stand.
 - Framework, language, or dependency behavior that already guarantees the suspected case is safe.
 - Patterns that a commit message in `<commits>` explicitly justifies with a concrete artefact (ADR, incident reference, named sign-off, or stated architectural rationale) — see **Commit Context** above.
