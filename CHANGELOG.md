@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Default prompt-cache retention to `long` (24h) so repeated reviews reuse the cached system-prompt prefix on providers that support it (OpenAI, incl. via the Cloudflare AI Gateway); no-op on Anthropic. Override with `PI_CACHE_RETENTION` / `GITLAB_REVIEW_PI_CACHE_RETENTION`.
+
 [Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.3...HEAD
 
 ## [0.7.3] - 2026-07-02
