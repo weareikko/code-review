@@ -27,6 +27,7 @@ import {
   upsertSummaryNote,
 } from './posting.js';
 import { extractChangedFiles, extractPriorThreads } from './prior-threads.js';
+import { withCarriedOverFindings } from './summary-carryover.js';
 import type { DiffRefs, GeneratedComment, Severity } from './types.js';
 
 export type {
@@ -404,11 +405,24 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
         withHttpStamping(
           () => lastHttp,
           async (context) => {
+            // Carry still-open prior findings into the summary so an unresolved
+            // inline thread never vanishes from the issue list when this run
+            // didn't re-emit it, and the risk line never drops below one (#92).
+            const currentFingerprints = new Set<string>();
+            for (const g of generated) {
+              currentFingerprints.add(g.fingerprints.primary);
+              currentFingerprints.add(g.fingerprints.secondary);
+            }
+            const summaryBody = withCarriedOverFindings(
+              parsed.summary as string,
+              discussions,
+              currentFingerprints,
+            );
             const result = await upsertSummaryNote(
               gitlab,
               config.project,
               config.mr,
-              parsed.summary as string,
+              summaryBody,
               discussions,
               {
                 costFooter: [formatUsageLine(usage), formatPerModelUsage(usage)]
