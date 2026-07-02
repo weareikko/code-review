@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.2...HEAD
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.3...HEAD
+
+## [0.7.3] - 2026-07-02
+
+### Fixed
+
+- The posted summary usage footer reports all models — the run total is labelled `(N models)` instead of the find model alone, and the per-model breakdown is included (previously only in the job log) ([#98]).
+- Curb severity inflation: the guard-exclusion gate is now a hard rule in the base prompt (not just the skill), and a CRITICAL that isn't high-confidence is downgraded to WARN at parse time, so an unproven "blocking" claim can't gate a merge — including in `single` depth ([#99]).
+- The summary carries still-open findings across runs: an unresolved prior inline thread the current run doesn't re-emit is retained in the summary and the risk line never drops below it ([#100]).
+
+[0.7.3]: https://github.com/ikko-dev/gitlab-review/compare/0.7.2...0.7.3
+[#98]: https://github.com/ikko-dev/gitlab-review/pull/98
+[#99]: https://github.com/ikko-dev/gitlab-review/pull/99
+[#100]: https://github.com/ikko-dev/gitlab-review/pull/100
 
 ## [0.7.2] - 2026-07-01
 
