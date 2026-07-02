@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Report partial-review coverage: when the diff char budget drops files, the reviewer prompt and summary size callout now surface `~N% of changed lines reviewed`, and the budget ranks files by changed-line count before dropping. New `--diff-context` / `GITLAB_REVIEW_DIFF_CONTEXT` tunes hunk context (`git diff --unified`) as a coverage/token lever ([#103]).
+- Optional `--retrieve-skipped` / `GITLAB_REVIEW_RETRIEVE_SKIPPED` (default off): stage diffs for files dropped by the size budget on disk so the reviewer can read them on demand instead of losing them ([#104]).
 
 ### Changed
 
@@ -18,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.3...HEAD
 [#102]: https://github.com/ikko-dev/gitlab-review/pull/102
 [#103]: https://github.com/ikko-dev/gitlab-review/pull/103
+[#104]: https://github.com/ikko-dev/gitlab-review/pull/104
 
 ## [0.7.3] - 2026-07-02
 
