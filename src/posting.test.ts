@@ -66,6 +66,19 @@ describe('summary note upsert', () => {
     expect(body.toLowerCase()).toContain('split');
   });
 
+  it('renders a coverage ratio in the size-skip callout when coverage is present', () => {
+    const body = buildSummaryBody('Looks good.', undefined, {
+      sizeNotice: {
+        sizeSkippedFiles: [{ path: 'src/huge.ts', chars: 120_000, changedLines: 400 }],
+        coverage: { reviewedLines: 20, totalLines: 420 },
+      },
+    });
+    expect(body).toContain('Partial review — ~5% of changed lines reviewed');
+    expect(body).toContain('20 of 420');
+    expect(body).toContain('not a clean bill of health');
+    expect(body).toContain('src/huge.ts');
+  });
+
   it('renders an MR-level decompose hint when over threshold even with no skips', () => {
     const body = buildSummaryBody('Looks good.', undefined, {
       sizeNotice: { sizeSkippedFiles: [], decomposeHint: { lines: 2400, threshold: 1500 } },
