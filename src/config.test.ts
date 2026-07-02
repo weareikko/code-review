@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  applyDefaultCacheRetention,
   applyGitLabReviewEnvPrefix,
   parseArgs,
   parseModelProvider,
@@ -959,5 +960,31 @@ describe('applyGitLabReviewEnvPrefix', () => {
         'VERBOSE',
       ].toSorted(),
     );
+  });
+});
+
+describe('applyDefaultCacheRetention', () => {
+  it('defaults PI_CACHE_RETENTION to long when unset', () => {
+    const env: NodeJS.ProcessEnv = {};
+    applyDefaultCacheRetention(env);
+    expect(env.PI_CACHE_RETENTION).toBe('long');
+  });
+
+  it('leaves an explicit PI_CACHE_RETENTION untouched', () => {
+    const env: NodeJS.ProcessEnv = { PI_CACHE_RETENTION: 'short' };
+    applyDefaultCacheRetention(env);
+    expect(env.PI_CACHE_RETENTION).toBe('short');
+  });
+
+  it('honours a GITLAB_REVIEW_ override once the prefix shim has mapped it', () => {
+    const env: NodeJS.ProcessEnv = { GITLAB_REVIEW_PI_CACHE_RETENTION: 'none' };
+    applyGitLabReviewEnvPrefix(env);
+    applyDefaultCacheRetention(env);
+    expect(env.PI_CACHE_RETENTION).toBe('none');
+  });
+
+  it('returns the same env object it was given', () => {
+    const env: NodeJS.ProcessEnv = {};
+    expect(applyDefaultCacheRetention(env)).toBe(env);
   });
 });

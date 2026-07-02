@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Report partial-review coverage: when the diff char budget drops files, the reviewer prompt and summary size callout now surface `~N% of changed lines reviewed`, and the budget ranks files by changed-line count before dropping. New `--diff-context` / `GITLAB_REVIEW_DIFF_CONTEXT` tunes hunk context (`git diff --unified`) as a coverage/token lever ([#103]).
+
+### Changed
+
+- Default prompt-cache retention to `long` (24h) so repeated reviews reuse the cached system-prompt prefix on providers that support it (OpenAI, incl. via the Cloudflare AI Gateway); no-op on Anthropic. Override with `PI_CACHE_RETENTION` / `GITLAB_REVIEW_PI_CACHE_RETENTION` ([#102]).
+
 [Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.3...HEAD
+[#102]: https://github.com/ikko-dev/gitlab-review/pull/102
+[#103]: https://github.com/ikko-dev/gitlab-review/pull/103
 
 ## [0.7.3] - 2026-07-02
 

@@ -83,6 +83,25 @@ export function applyGitLabReviewEnvPrefix(env = process.env): NodeJS.ProcessEnv
   return env;
 }
 
+/**
+ * Default pi-ai's prompt-cache retention to `long` when the caller has not set
+ * it. pi-ai reads `PI_CACHE_RETENTION` from `process.env` at request time; `long`
+ * asks providers that support it (e.g. OpenAI's `openai-responses` API, including
+ * via the Cloudflare AI Gateway) to keep the cached system-prompt prefix for up
+ * to 24h so reviews spaced hours apart still reuse it. It is a safe no-op for
+ * providers/models without long-retention support (e.g. Anthropic), where it
+ * behaves exactly like the default `short`.
+ *
+ * Overridable: an explicit `PI_CACHE_RETENTION` (or `GITLAB_REVIEW_PI_CACHE_RETENTION`,
+ * mapped by {@link applyGitLabReviewEnvPrefix} first) is left untouched.
+ */
+export function applyDefaultCacheRetention(env = process.env): NodeJS.ProcessEnv {
+  if (!env.PI_CACHE_RETENTION) {
+    env.PI_CACHE_RETENTION = 'long';
+  }
+  return env;
+}
+
 export interface Config {
   project: string;
   mr: string;
