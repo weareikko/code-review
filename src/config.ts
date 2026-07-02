@@ -137,6 +137,12 @@ export interface Config {
    * the built-in default. Sourced from `--diff-context` / `GITLAB_REVIEW_DIFF_CONTEXT`.
    */
   diffContext: number;
+  /**
+   * When true, diffs for files dropped by the char budget are staged on disk so
+   * the reviewer can read them on demand instead of losing them (retrieval mode).
+   * Default false. Sourced from `--retrieve-skipped` / `GITLAB_REVIEW_RETRIEVE_SKIPPED`.
+   */
+  retrieveSkipped: boolean;
   reviewFile: string;
   output: string;
   dryRun: boolean;
@@ -157,6 +163,7 @@ const BOOLEAN_FLAGS = new Set([
   'no-post',
   'no-summary',
   'force-review',
+  'retrieve-skipped',
   'verbose',
   'help',
   'version',
@@ -398,6 +405,8 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     maxDiffChars,
     decomposeHintLines,
     diffContext,
+    retrieveSkipped:
+      toBoolean(args.retrieveSkipped) || toBoolean(env.GITLAB_REVIEW_RETRIEVE_SKIPPED),
     reviewFile: String(args.reviewFile ?? 'gitlab-review.md'),
     output: String(args.output ?? 'review-comments.json'),
     dryRun: toBoolean(args.dryRun),
