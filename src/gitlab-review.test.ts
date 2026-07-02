@@ -178,6 +178,63 @@ describe('runReview pipeline', () => {
     }
   });
 
+  it('filterDiff preserves diff order and reports full coverage when under budget', () => {
+    const raw = [
+      'diff --git a/src/a.ts b/src/a.ts',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -1 +1,2 @@',
+      ' ctx',
+      '+a1',
+      'diff --git a/src/b.ts b/src/b.ts',
+      '--- a/src/b.ts',
+      '+++ b/src/b.ts',
+      '@@ -1 +1,2 @@',
+      ' ctx',
+      '+b1',
+      '',
+    ].join('\n');
+    const result = filterDiff(raw); // default 100k budget — nothing dropped
+    expect(result.diff.indexOf('src/a.ts')).toBeLessThan(result.diff.indexOf('src/b.ts'));
+    expect(result.sizeSkippedFiles).toEqual([]);
+    expect(result.skippedChangedLines).toBe(0);
+  });
+
+  it('filterDiff ranks by added lines before dropping, and reports coverage', () => {
+    const small = ['diff --git a/small.ts b/small.ts', '@@ -1 +1,2 @@', ' ctx', '+s1', ''].join(
+      '\n',
+    );
+    const bigAdds = [
+      'diff --git a/big.ts b/big.ts',
+      '@@ -1 +1,20 @@',
+      ' ctx',
+      ...Array.from({ length: 18 }, (_, i) => `+big${i}`),
+      '',
+    ].join('\n');
+    const raw = small + bigAdds;
+    const result = filterDiff(raw, bigAdds.length + 5); // only one section fits
+    expect(result.diff).toContain('big.ts');
+    expect(result.diff).not.toContain('small.ts');
+    expect(result.sizeSkippedFiles.map((f) => f.path)).toEqual(['small.ts']);
+    expect(result.sizeSkippedFiles[0].changedLines).toBe(1);
+    expect(result.skippedChangedLines).toBe(1);
+    expect(result.reviewedChangedLines).toBe(18);
+  });
+
+  it('buildUserPrompt adds a coverage block only when files were dropped', () => {
+    const withCov = buildUserPrompt('diff', ['dropped.ts'], undefined, undefined, undefined, {
+      reviewedLines: 5,
+      totalLines: 100,
+    });
+    expect(withCov).toContain('<coverage>');
+    expect(withCov).toContain('5 of 100 changed lines (~5%)');
+    const full = buildUserPrompt('diff', [], undefined, undefined, undefined, {
+      reviewedLines: 100,
+      totalLines: 100,
+    });
+    expect(full).not.toContain('<coverage>');
+  });
+
   it('filterDiff reports reviewed changed-line count for the included diff', () => {
     const raw = [
       'diff --git a/src/a.ts b/src/a.ts',

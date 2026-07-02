@@ -35,6 +35,8 @@ export interface SizeNotice {
   sizeSkippedFiles: SizeSkippedFile[];
   /** Set when the reviewed diff's changed-line count crossed the configured threshold. */
   decomposeHint?: { lines: number; threshold: number };
+  /** Diff coverage when files were dropped: reviewed vs total changed lines. */
+  coverage?: { reviewedLines: number; totalLines: number };
 }
 
 export interface SummaryBodyOptions {
@@ -70,10 +72,15 @@ export function buildSizeNoticeBlock(notice?: SizeNotice): string {
     const fileList = sizeSkippedFiles
       .map((file) => `- \`${file.path}\` (${formatChars(file.chars)})`)
       .join('\n');
+    const cov = notice.coverage;
+    const coverageLine =
+      cov && cov.totalLines > 0
+        ? `> **Partial review — ~${Math.round((cov.reviewedLines / cov.totalLines) * 100)}% of changed lines reviewed** (${cov.reviewedLines} of ${cov.totalLines}). The files below were NOT reviewed; their absence from the findings is not a clean bill of health.`
+        : `> **${sizeSkippedFiles.length} file(s) were not reviewed** — the diff exceeded the size budget, so these files were dropped from the review:`;
     blocks.push(
       [
         `> [!WARNING]`,
-        `> **${sizeSkippedFiles.length} file(s) were not reviewed** — the diff exceeded the size budget, so these files were dropped from the review:`,
+        coverageLine,
         `>`,
         ...fileList.split('\n').map((line) => `> ${line}`),
         `>`,

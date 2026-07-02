@@ -45,6 +45,13 @@ export interface UsageBreakdown {
 export interface ReviewSizeNotice {
   sizeSkippedFiles: SizeSkippedFile[];
   decomposeHint?: { lines: number; threshold: number };
+  /**
+   * Diff coverage when files were dropped for the char budget: how many changed
+   * lines were actually reviewed vs the total. Present only when something was
+   * size-skipped, so a partial review reports its coverage instead of reading as
+   * a confident full review.
+   */
+  coverage?: { reviewedLines: number; totalLines: number };
 }
 
 /** Token and cost usage attributed to a single pool member. */
@@ -278,6 +285,8 @@ export interface FilteredDiff {
   sizeSkippedFiles: SizeSkippedFile[];
   /** Number of added/removed lines in the reviewed (included) diff. */
   reviewedChangedLines: number;
+  /** Number of added/removed lines in files dropped for the char budget. */
+  skippedChangedLines: number;
 }
 
 function parseFilePath(header: string): string | null {
@@ -298,6 +307,16 @@ function countChangedLines(diffSection: string): number {
   return count;
 }
 
+/** Added lines only (excluding the `+++` header) — the review-worthiness signal. */
+function countAddedLines(diffSection: string): number {
+  let count = 0;
+  for (const line of diffSection.split('\n')) {
+    if (line.startsWith('+++')) continue;
+    if (line.startsWith('+')) count += 1;
+  }
+  return count;
+}
+
 export function filterDiff(raw: string, maxChars = DEFAULT_MAX_DIFF_CHARS): FilteredDiff {
   const sections = raw.split(/(?=^diff --git )/m).filter((section) => section.trim());
   const kept: string[] = [];
@@ -313,23 +332,42 @@ export function filterDiff(raw: string, maxChars = DEFAULT_MAX_DIFF_CHARS): Filt
     }
   }
 
+  // Rank-before-drop: only when the budget will actually truncate. Under budget,
+  // the original diff order is preserved so the common case is byte-identical.
+  // When we must drop, spend the budget on the most review-worthy files first
+  // (most added lines) instead of whatever happens to sort early in the diff.
+  const totalKeptChars = kept.reduce((total, section) => total + section.length, 0);
+  const ordered =
+    totalKeptChars <= maxChars
+      ? kept
+      : [...kept].sort((a, b) => countAddedLines(b) - countAddedLines(a));
+
   const included: string[] = [];
   const sizeSkippedFiles: SizeSkippedFile[] = [];
   let totalChars = 0;
   let reviewedChangedLines = 0;
-  for (const section of kept) {
+  let skippedChangedLines = 0;
+  for (const section of ordered) {
+    const changedLines = countChangedLines(section);
     if (totalChars + section.length > maxChars) {
       const firstLine = section.split('\n', 1)[0] ?? '';
       const filePath = parseFilePath(firstLine);
-      if (filePath) sizeSkippedFiles.push({ path: filePath, chars: section.length });
+      if (filePath) sizeSkippedFiles.push({ path: filePath, chars: section.length, changedLines });
+      skippedChangedLines += changedLines;
       continue;
     }
     included.push(section);
     totalChars += section.length;
-    reviewedChangedLines += countChangedLines(section);
+    reviewedChangedLines += changedLines;
   }
 
-  return { diff: included.join(''), noiseSkippedFiles, sizeSkippedFiles, reviewedChangedLines };
+  return {
+    diff: included.join(''),
+    noiseSkippedFiles,
+    sizeSkippedFiles,
+    reviewedChangedLines,
+    skippedChangedLines,
+  };
 }
 
 function mergeContent(files: ContextFile[]): string {
@@ -578,6 +616,7 @@ export function buildUserPrompt(
   commitLog?: string,
   priorThreads?: PriorThread[],
   intent?: ReviewIntent,
+  coverage?: { reviewedLines: number; totalLines: number },
 ): string {
   const parts: string[] = [];
   const intentBlock = renderIntentBlock(intent);
@@ -597,6 +636,12 @@ export function buildUserPrompt(
         .join(
           '\n',
         )}\n</skipped_files>\nThe above files were not included because the diff exceeded the size limit. Mention them explicitly in your summary as not reviewed.`,
+    );
+  }
+  if (coverage && coverage.totalLines > 0 && coverage.reviewedLines < coverage.totalLines) {
+    const pct = Math.round((coverage.reviewedLines / coverage.totalLines) * 100);
+    parts.push(
+      `<coverage>You reviewed ${coverage.reviewedLines} of ${coverage.totalLines} changed lines (~${pct}%). The rest were dropped for the size budget and you did NOT see them. State this partial coverage in your summary and do not imply the unreviewed files are clean — their absence from your findings is not a clearance.</coverage>`,
     );
   }
   if (priorThreads && priorThreads.length > 0) {
@@ -889,10 +934,8 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   const logger = options.logger ?? noopLogger;
 
   const maxDiffChars = config.maxDiffChars > 0 ? config.maxDiffChars : DEFAULT_MAX_DIFF_CHARS;
-  const { diff, noiseSkippedFiles, sizeSkippedFiles, reviewedChangedLines } = filterDiff(
-    options.diff,
-    maxDiffChars,
-  );
+  const { diff, noiseSkippedFiles, sizeSkippedFiles, reviewedChangedLines, skippedChangedLines } =
+    filterDiff(options.diff, maxDiffChars);
   if (!diff.trim()) {
     throw new ReviewerError('No reviewable diff content after filtering noise files.', {
       hint: 'Ensure the merge request introduces changes outside of generated/lock files.',
@@ -908,7 +951,15 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     config.decomposeHintLines > 0 && reviewedChangedLines > config.decomposeHintLines
       ? { lines: reviewedChangedLines, threshold: config.decomposeHintLines }
       : undefined;
-  const sizeNotice: ReviewSizeNotice = { sizeSkippedFiles, decomposeHint };
+  // Coverage is only meaningful when the budget actually dropped files.
+  const coverage =
+    sizeSkippedFiles.length > 0
+      ? {
+          reviewedLines: reviewedChangedLines,
+          totalLines: reviewedChangedLines + skippedChangedLines,
+        }
+      : undefined;
+  const sizeNotice: ReviewSizeNotice = { sizeSkippedFiles, decomposeHint, coverage };
 
   const context = await loadReviewContext(cwd, config.skills, (msg) => logger.warn(msg), {
     refreshGitSkills: config.refreshGitSkills,
@@ -920,6 +971,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     options.commitLog,
     options.priorThreads,
     options.intent,
+    coverage,
   );
 
   const skillNames = context.skills.map((s) => s.name);

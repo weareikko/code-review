@@ -149,6 +149,13 @@ export interface Config {
    * gets a "consider decomposing this MR" hint in the summary. 0 = off (default).
    */
   decomposeHintLines: number;
+  /**
+   * Lines of surrounding context per diff hunk (`git diff --unified`). More
+   * context helps the model reason about each change but inflates tokens and
+   * fits fewer files in the char budget; less context fits more files. 0 uses
+   * the built-in default. Sourced from `--diff-context` / `GITLAB_REVIEW_DIFF_CONTEXT`.
+   */
+  diffContext: number;
   reviewFile: string;
   output: string;
   dryRun: boolean;
@@ -379,6 +386,10 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
   const decomposeHintLines =
     Number.isFinite(rawDecomposeHintLines) && rawDecomposeHintLines > 0 ? rawDecomposeHintLines : 0;
 
+  const rawDiffContext = Number(args.diffContext ?? env.GITLAB_REVIEW_DIFF_CONTEXT);
+  const diffContext =
+    Number.isFinite(rawDiffContext) && rawDiffContext >= 0 ? Math.floor(rawDiffContext) : 0;
+
   return {
     project: String(args.project ?? env.CI_PROJECT_ID ?? ''),
     mr: String(args.mr ?? env.CI_MERGE_REQUEST_IID ?? ''),
@@ -405,6 +416,7 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     maxTokens,
     maxDiffChars,
     decomposeHintLines,
+    diffContext,
     reviewFile: String(args.reviewFile ?? 'gitlab-review.md'),
     output: String(args.output ?? 'review-comments.json'),
     dryRun: toBoolean(args.dryRun),

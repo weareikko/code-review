@@ -153,6 +153,17 @@ describe('config env defaults', () => {
     });
     expect(cfg.verifyModel).toBe('openai/gpt-5.4');
   });
+
+  it('defaults diffContext to 0 (use built-in default) when unset', () => {
+    expect(resolveConfig([], { ...baseEnv }).diffContext).toBe(0);
+  });
+
+  it('resolves diffContext from --diff-context and GITLAB_REVIEW_DIFF_CONTEXT', () => {
+    expect(resolveConfig(['--diff-context', '8'], { ...baseEnv }).diffContext).toBe(8);
+    expect(resolveConfig([], { ...baseEnv, GITLAB_REVIEW_DIFF_CONTEXT: '12' }).diffContext).toBe(
+      12,
+    );
+  });
 });
 
 describe('validateConfig', () => {

@@ -47,6 +47,8 @@ export interface ReviewComment {
 export interface SizeSkippedFile {
   path: string;
   chars: number;
+  /** Added/removed lines in this file's dropped diff — feeds the coverage ratio. */
+  changedLines: number;
 }
 
 export interface DiffRefs {
