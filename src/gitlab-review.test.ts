@@ -235,6 +235,64 @@ describe('runReview pipeline', () => {
     expect(full).not.toContain('<coverage>');
   });
 
+  it('with retrieveSkipped: stages dropped-file diffs on disk, feeds them to the prompt, then cleans up', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const bigBody = '+x\n'.repeat(50);
+    const raw = [
+      'diff --git a/src/big-a.ts b/src/big-a.ts',
+      '--- a/src/big-a.ts',
+      '+++ b/src/big-a.ts',
+      '@@ -1 +1 @@',
+      bigBody,
+      'diff --git a/src/big-b.ts b/src/big-b.ts',
+      '--- a/src/big-b.ts',
+      '+++ b/src/big-b.ts',
+      '@@ -1 +1 @@',
+      bigBody,
+      '',
+    ].join('\n');
+
+    let capturedPrompt = '';
+    const infos: string[] = [];
+    const logger = {
+      debug: () => {},
+      info: (m: string) => infos.push(m),
+      warn: () => {},
+      error: () => {},
+    };
+    const messages = [makeAssistant('done', { input: 1, output: 1 })];
+    // Capture the user prompt, then drive the agent lifecycle so runReview resolves.
+    const listeners: Array<(e: AgentEvent) => void | Promise<void>> = [];
+    const capturingAgent: AgentLike = {
+      subscribe(fn) {
+        listeners.push(fn);
+        return () => {};
+      },
+      async prompt(prompt: string) {
+        capturedPrompt = prompt;
+        for (const fn of listeners) {
+          for (const message of messages) await fn({ type: 'message_end', message });
+          await fn({ type: 'agent_end', messages });
+        }
+      },
+    };
+
+    await runReview(
+      { ...minimalConfig, cwd, maxDiffChars: 300, retrieveSkipped: true },
+      { cwd, diff: raw, createAgent: () => capturingAgent, logger },
+    );
+
+    // Staging log fired for the one dropped file.
+    expect(infos.some((m) => /Staged 1 dropped-file diff/.test(m))).toBe(true);
+    // The retrieval block (not the plain skipped list) reached the prompt.
+    expect(capturedPrompt).toContain('staged on disk');
+    expect(capturedPrompt).toContain('src/big-b.ts');
+    // Staging dir is cleaned up after the run.
+    await expect(
+      readFile(join(cwd, '.gitlab-review-skipped', 'src__big-b.ts.diff')),
+    ).rejects.toThrow();
+  });
+
   it('filterDiff reports reviewed changed-line count for the included diff', () => {
     const raw = [
       'diff --git a/src/a.ts b/src/a.ts',
@@ -1251,6 +1309,26 @@ describe('buildUserPrompt', () => {
     expect(commitsPos).toBeLessThan(diffPos);
     expect(diffPos).toBeLessThan(skippedPos);
     expect(skippedPos).toBeLessThan(priorPos);
+  });
+
+  it('with retrievableSkipped: renders the on-disk retrieval block with path → diskPath and takes precedence over the plain skipped_files list', () => {
+    const prompt = buildUserPrompt(
+      diff,
+      ['app/search.vue'],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      [{ path: 'app/search.vue', diskPath: '/tmp/skip/app__search.vue.diff' }],
+    );
+
+    expect(prompt).toContain('<skipped_files>');
+    expect(prompt).toContain('- app/search.vue → /tmp/skip/app__search.vue.diff');
+    expect(prompt).toContain('staged on disk');
+    expect(prompt).toContain('file-read tool');
+    // Retrieval block replaces the plain "not reviewed" list, not appends to it.
+    expect(prompt).not.toContain('The above files were not included because the diff exceeded');
+    expect(prompt.indexOf('<diff>')).toBeLessThan(prompt.indexOf('<skipped_files>'));
   });
 });
 

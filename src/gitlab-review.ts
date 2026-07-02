@@ -17,6 +17,12 @@ import type { PriorThread } from './prior-threads.js';
 import { renderPriorThreadsBlock } from './prior-threads.js';
 import type { Skill } from './skills.js';
 import { loadAutoDiscoveredSkills, loadNamedSkill } from './skills.js';
+import {
+  cleanupSkippedDiffs,
+  renderRetrievableSkippedBlock,
+  type SkippedDiffFile,
+  writeSkippedDiffs,
+} from './skipped-retrieval.js';
 import { REVIEW_ANGLES, triageFindings, type AuthoredFinding, type ReviewAngle } from './triage.js';
 import type { GitLabReviewSeverity, SizeSkippedFile, ThinkingLevel } from './types.js';
 import { splitModel, toGitLabReviewSeverity } from './types.js';
@@ -287,6 +293,12 @@ export interface FilteredDiff {
   reviewedChangedLines: number;
   /** Number of added/removed lines in files dropped for the char budget. */
   skippedChangedLines: number;
+  /**
+   * The raw diff text of each size-dropped file, keyed by path. Lets the caller
+   * write them to disk so an agentic reviewer can read the dropped diffs on
+   * demand instead of losing them entirely (opt-in retrieval).
+   */
+  sizeSkippedSections: Array<{ path: string; section: string }>;
 }
 
 function parseFilePath(header: string): string | null {
@@ -340,10 +352,11 @@ export function filterDiff(raw: string, maxChars = DEFAULT_MAX_DIFF_CHARS): Filt
   const ordered =
     totalKeptChars <= maxChars
       ? kept
-      : [...kept].sort((a, b) => countAddedLines(b) - countAddedLines(a));
+      : kept.toSorted((a, b) => countAddedLines(b) - countAddedLines(a));
 
   const included: string[] = [];
   const sizeSkippedFiles: SizeSkippedFile[] = [];
+  const sizeSkippedSections: Array<{ path: string; section: string }> = [];
   let totalChars = 0;
   let reviewedChangedLines = 0;
   let skippedChangedLines = 0;
@@ -352,7 +365,10 @@ export function filterDiff(raw: string, maxChars = DEFAULT_MAX_DIFF_CHARS): Filt
     if (totalChars + section.length > maxChars) {
       const firstLine = section.split('\n', 1)[0] ?? '';
       const filePath = parseFilePath(firstLine);
-      if (filePath) sizeSkippedFiles.push({ path: filePath, chars: section.length, changedLines });
+      if (filePath) {
+        sizeSkippedFiles.push({ path: filePath, chars: section.length, changedLines });
+        sizeSkippedSections.push({ path: filePath, section });
+      }
       skippedChangedLines += changedLines;
       continue;
     }
@@ -367,6 +383,7 @@ export function filterDiff(raw: string, maxChars = DEFAULT_MAX_DIFF_CHARS): Filt
     sizeSkippedFiles,
     reviewedChangedLines,
     skippedChangedLines,
+    sizeSkippedSections,
   };
 }
 
@@ -617,6 +634,7 @@ export function buildUserPrompt(
   priorThreads?: PriorThread[],
   intent?: ReviewIntent,
   coverage?: { reviewedLines: number; totalLines: number },
+  retrievableSkipped?: SkippedDiffFile[],
 ): string {
   const parts: string[] = [];
   const intentBlock = renderIntentBlock(intent);
@@ -629,7 +647,10 @@ export function buildUserPrompt(
     parts.push(`Commits in this MR (oldest first):\n<commits>\n${commitLog.trim()}\n</commits>`);
   }
   parts.push(`Review this diff:\n<diff>\n${diff}\n</diff>`);
-  if (skippedFiles.length > 0) {
+  if (retrievableSkipped && retrievableSkipped.length > 0) {
+    // Retrieval mode: size-dropped diffs are staged on disk for the agent to read.
+    parts.push(renderRetrievableSkippedBlock(retrievableSkipped));
+  } else if (skippedFiles.length > 0) {
     parts.push(
       `<skipped_files>\n${skippedFiles
         .map((file) => `- ${file}`)
@@ -934,8 +955,14 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   const logger = options.logger ?? noopLogger;
 
   const maxDiffChars = config.maxDiffChars > 0 ? config.maxDiffChars : DEFAULT_MAX_DIFF_CHARS;
-  const { diff, noiseSkippedFiles, sizeSkippedFiles, reviewedChangedLines, skippedChangedLines } =
-    filterDiff(options.diff, maxDiffChars);
+  const {
+    diff,
+    noiseSkippedFiles,
+    sizeSkippedFiles,
+    reviewedChangedLines,
+    skippedChangedLines,
+    sizeSkippedSections,
+  } = filterDiff(options.diff, maxDiffChars);
   if (!diff.trim()) {
     throw new ReviewerError('No reviewable diff content after filtering noise files.', {
       hint: 'Ensure the merge request introduces changes outside of generated/lock files.',
@@ -961,6 +988,16 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
       : undefined;
   const sizeNotice: ReviewSizeNotice = { sizeSkippedFiles, decomposeHint, coverage };
 
+  // Retrieval mode (opt-in): stage dropped-file diffs on disk so the agent can
+  // read the ones it deems risky instead of losing them to the char budget.
+  const retrievableSkipped =
+    config.retrieveSkipped && sizeSkippedSections.length > 0
+      ? await writeSkippedDiffs(cwd, sizeSkippedSections)
+      : ([] as SkippedDiffFile[]);
+  if (retrievableSkipped.length > 0) {
+    logger.info(`Staged ${retrievableSkipped.length} dropped-file diff(s) on disk for retrieval.`);
+  }
+
   const context = await loadReviewContext(cwd, config.skills, (msg) => logger.warn(msg), {
     refreshGitSkills: config.refreshGitSkills,
   });
@@ -972,6 +1009,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     options.priorThreads,
     options.intent,
     coverage,
+    retrievableSkipped,
   );
 
   const skillNames = context.skills.map((s) => s.name);
@@ -1055,6 +1093,9 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   const reviewPath = resolve(cwd, config.reviewFile);
   await mkdir(dirname(reviewPath), { recursive: true });
   await writeFile(reviewPath, outputText, 'utf8');
+
+  // Remove the staged dropped-file diffs now the agent is done reading them.
+  if (retrievableSkipped.length > 0) await cleanupSkippedDiffs(cwd);
 
   return {
     model: config.model,

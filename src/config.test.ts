@@ -164,6 +164,14 @@ describe('config env defaults', () => {
       12,
     );
   });
+
+  it('resolves retrieveSkipped from the flag and env, default false', () => {
+    expect(resolveConfig([], { ...baseEnv }).retrieveSkipped).toBe(false);
+    expect(resolveConfig(['--retrieve-skipped'], { ...baseEnv }).retrieveSkipped).toBe(true);
+    expect(
+      resolveConfig([], { ...baseEnv, GITLAB_REVIEW_RETRIEVE_SKIPPED: '1' }).retrieveSkipped,
+    ).toBe(true);
+  });
 });
 
 describe('validateConfig', () => {
