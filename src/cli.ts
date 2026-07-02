@@ -2,7 +2,12 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Config } from './config.js';
-import { applyGitLabReviewEnvPrefix, resolveConfig, validateConfig } from './config.js';
+import {
+  applyDefaultCacheRetention,
+  applyGitLabReviewEnvPrefix,
+  resolveConfig,
+  validateConfig,
+} from './config.js';
 import {
   createDiagnosticRunId,
   traceDiagnosticPhase,
@@ -642,6 +647,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   // resolving config: getEnvApiKey and pi-ai's request-time reads both read
   // process.env directly, so this must mutate the live env first.
   applyGitLabReviewEnvPrefix();
+  // Prefer long (24h) prompt-cache retention unless the caller set it explicitly,
+  // so repeated reviews reuse the cached system-prompt prefix. Runs after the
+  // prefix shim so GITLAB_REVIEW_PI_CACHE_RETENTION still wins.
+  applyDefaultCacheRetention();
   const config = resolveConfig(argv);
   const otel = await startOtelBridge();
   try {
