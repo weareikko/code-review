@@ -228,14 +228,6 @@ function issueBullet(comment: ReviewComment): string {
   return label ? `- **${label}** — ${loc} — ${subject}` : `- ${loc} — ${subject}`;
 }
 
-function auditBullet(entry: AuditEntry): string {
-  const loc = `\`${entry.file}:${entry.line}\``;
-  if (entry.action === 'dropped') {
-    return `- Verify removed a ${entry.fromSeverity.toUpperCase()} finding at ${loc} — ${entry.reason}`;
-  }
-  return `- Verify downgraded ${loc} from ${entry.fromSeverity.toUpperCase()} to ${(entry.toSeverity ?? 'info').toUpperCase()} — ${entry.reason}`;
-}
-
 function extractOverview(summary: string | null): string {
   if (!summary) return '';
   const lines = summary.split('\n');
@@ -260,19 +252,21 @@ function extractNotes(summary: string | null): string[] {
 
 /**
  * Rebuild the review summary from the comments that survived Verify, preserving
- * the Find stage's prose overview, regenerating the risk line and issues block
- * from the surviving set, and recording every drop/downgrade in the Notes
- * section so the developer can audit what the pipeline suppressed.
+ * the Find stage's prose overview and its own Notes (the context it applied,
+ * e.g. an ADR/commit that suppressed a finding), and regenerating the risk line
+ * and issues block from the surviving set.
+ *
+ * Verify's own drop/downgrade decisions are deliberately NOT surfaced here: a
+ * finding the verifier refuted is a non-issue the developer never saw, so
+ * echoing "Verify removed a WARN at x:y — not a real defect" only re-injects the
+ * noise the verifier just removed. The drop/downgrade counts stay in the run log
+ * for operators; see `result.audit` at the call site.
  *
  * Deterministic by design: the production Synthesize stage may instead write the
  * summary with an LLM, but the skateboard keeps it pure and testable so the
  * variable under test (Verify's decisions) is isolated from model variance.
  */
-export function rebuildSummary(
-  originalSummary: string | null,
-  kept: ReviewComment[],
-  audit: AuditEntry[],
-): string {
+export function rebuildSummary(originalSummary: string | null, kept: ReviewComment[]): string {
   const level = riskFor(kept);
   const overview = extractOverview(originalSummary);
   const parts: string[] = [`**Risk: ${level}** — ${riskSentence(level)}`];
@@ -284,7 +278,7 @@ export function rebuildSummary(
     parts.push(`**${kept.length} ${noun} found:**\n${kept.map(issueBullet).join('\n')}`);
   }
 
-  const noteLines = [...extractNotes(originalSummary), ...audit.map(auditBullet)];
+  const noteLines = extractNotes(originalSummary);
   if (noteLines.length > 0) {
     parts.push(`**Notes:**\n${noteLines.join('\n')}`);
   }
@@ -303,7 +297,7 @@ export function synthesizeReviewJson(
 ): string {
   return JSON.stringify(
     {
-      summary: rebuildSummary(originalSummary, result.comments, result.audit),
+      summary: rebuildSummary(originalSummary, result.comments),
       comments: result.comments,
     },
     null,
