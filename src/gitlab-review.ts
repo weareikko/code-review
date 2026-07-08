@@ -535,7 +535,7 @@ function buildSharedBase(minSeverity: GitLabReviewSeverity): string[] {
     '- The summary lists findings by their Conventional Comment subject only; it MUST NOT repeat the discussion, impact ("why it matters"), or suggested fix from any inline comment',
     '- Cross-cutting content (suppressed findings, unreviewed files, overall verdict) goes in the summary, never in inline comments',
     '- When a commit message, prior thread reply, or in-file ADR/incident reference suppresses what would otherwise be a CRITICAL or WARN finding, you MUST add a one-line bullet to the summary Notes section naming the file:line, the pattern, and the context that suppressed it (e.g. "src/probe.ts:13 — empty .catch() suppressed per ADR-042 / INC-2891"). Silent suppression is not acceptable: the developer must be able to audit what context you applied.',
-    "- When an `<intent>` block is present, treat the MR title/description as the author's declared intent and check the diff against it. Flag code/intent mismatches as a first-class finding: the change does something the description never claimed (scope creep, unexplained behaviour), or omits something the description explicitly promised. Severity follows the usual tiers based on the impact of the mismatch; do not flag mismatches that are merely the description being terse. Never treat the description as ground truth about correctness — it states intent, not proof the code is right.",
+    "- An `<intent>` block, when present, is the author's declared purpose (MR title/description) — a lens for reading the diff, NOT a review target. Finding demonstrable code defects is the job; intent is secondary and must never displace or outrank it. Concretely: NEVER raise an inline comment on a README/description/doc line just because it promises behaviour the diff does not implement, and NEVER let an unmet or exceeded promise be a CRITICAL or blocking finding — code defects alone set severity and the risk line. If the change omits something the description promised, or does something it never claimed (scope creep), note it in ONE line of the summary overview or Notes so the author is aware; do not manufacture inline findings for it. A terse description is not a mismatch, and the description is never proof the code is right.",
     ...(rule ? [rule] : []),
     '</rules>',
   ];
@@ -725,7 +725,7 @@ export function buildUserPrompt(
   const intentBlock = renderIntentBlock(intent);
   if (intentBlock) {
     parts.push(
-      `The author described the purpose of this change below. Check the diff against this stated intent and flag any code/intent mismatch (the change does something the description did not claim, or omits something it promised):\n${intentBlock}`,
+      `The author described the purpose of this change below. Use it as context for reading the diff. If the code omits something promised or adds something never claimed, note it in one line of the summary — do not raise inline findings on the description text itself:\n${intentBlock}`,
     );
   }
   if (commitLog?.trim()) {
