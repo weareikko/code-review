@@ -378,6 +378,22 @@ describeEval(
         .toLowerCase();
       expect(allText.length).toBeGreaterThan(0);
     });
+
+    it('FULL depth: reports the real crash, not a blocking doc-anchored promise finding', async ({
+      run,
+    }) => {
+      const diff = await readFile(join(FIXTURES, 'intent-skew-bait.diff'), 'utf8');
+      const result = await run({
+        diff,
+        skills: ['code-review'],
+        intent: INTENT_SKEW,
+        reviewDepth: 'full',
+      });
+      const allText = [result.output.summary, ...result.output.comments.map((c) => c.body)]
+        .join(' ')
+        .toLowerCase();
+      expect(allText.length).toBeGreaterThan(0);
+    });
   },
 );
 
