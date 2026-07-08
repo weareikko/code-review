@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
 import type { Config } from '../../src/config.js';
+import { resolveProviderApiKey } from '../../src/config.js';
 import { runReview } from '../../src/gitlab-review.js';
 
 // Standalone measurement harness for the Verify cache-alignment optimisation
@@ -34,11 +35,10 @@ const TRIALS = Number(process.env.CACHE_ALIGN_TRIALS) || 3;
 const LABEL = process.env.CACHE_ALIGN_LABEL ?? 'unlabeled';
 const RESULTS_FILE = process.env.CACHE_ALIGN_RESULTS ?? join(tmpdir(), 'cache-align-results.jsonl');
 
-const apiKey =
-  process.env.GITLAB_REVIEW_API_KEY ||
-  process.env.ANTHROPIC_API_KEY ||
-  process.env.CLAUDE_API_KEY ||
-  '';
+// Route through the configured provider (Cloudflare AI Gateway in CI); no direct
+// OpenAI/Anthropic calls. Key resolved per-provider from the model id.
+const MODEL = process.env.GITLAB_REVIEW_EVAL_MODEL ?? 'cloudflare-ai-gateway/claude-3-5-haiku';
+const apiKey = resolveProviderApiKey(MODEL);
 
 // Skip unless explicitly opted in AND a key is available. The CACHE_ALIGN_RUN
 // gate keeps this paid measurement off the default `npm run test:evals` path.
@@ -51,7 +51,7 @@ function makeConfig(cwd: string): Config {
     gitlabUrl: 'https://gitlab.example.com',
     gitlabToken: 'test',
     gitlabAuthHeader: 'PRIVATE-TOKEN',
-    model: process.env.GITLAB_REVIEW_EVAL_MODEL ?? 'anthropic/claude-haiku-4-5-20251001',
+    model: MODEL,
     modelPool: [],
     minSeverity: 'info',
     thinkingLevel: 'off',

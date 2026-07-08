@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 import type { Config } from '../../src/config.js';
+import { resolveProviderApiKey } from '../../src/config.js';
 import { runReview } from '../../src/gitlab-review.js';
 import { parseReviewMarkdownWithWarnings } from '../../src/parser.js';
 
@@ -15,12 +16,10 @@ import { parseReviewMarkdownWithWarnings } from '../../src/parser.js';
 // OFF by default (real LLM, costs money): SKIPPED_RETRIEVAL_RUN=1 to run.
 
 const TRIALS = Number(process.env.SKIPPED_RETRIEVAL_TRIALS) || 3;
-const MODEL = process.env.GITLAB_REVIEW_EVAL_MODEL ?? 'anthropic/claude-haiku-4-5-20251001';
-const apiKey =
-  process.env.GITLAB_REVIEW_API_KEY ||
-  process.env.ANTHROPIC_API_KEY ||
-  process.env.CLAUDE_API_KEY ||
-  '';
+// Route through the configured provider (Cloudflare AI Gateway in CI); no direct
+// OpenAI/Anthropic calls. Key resolved per-provider from the model id.
+const MODEL = process.env.GITLAB_REVIEW_EVAL_MODEL ?? 'cloudflare-ai-gateway/claude-3-5-haiku';
+const apiKey = resolveProviderApiKey(MODEL);
 const skip = process.env.SKIPPED_RETRIEVAL_RUN !== '1' || !apiKey;
 
 // Bulk file: many added lines, no bug — ranks first, consumes the budget.

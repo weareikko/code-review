@@ -1,64 +1,76 @@
+import {
+  type Api,
+  completeSimple,
+  getEnvApiKey,
+  getModel,
+  type KnownProvider,
+  type Model,
+  registerBuiltInApiProviders,
+} from '@earendil-works/pi-ai';
 import { createJudge } from 'vitest-evals';
 import type { Judge, JudgeContext } from 'vitest-evals';
 
-const ANTHROPIC_VERSION = '2023-06-01';
-const DEFAULT_JUDGE_MODEL = 'claude-haiku-4-5-20251001';
-const DEFAULT_BASE_URL = 'https://api.anthropic.com';
+// The judge routes through the same provider stack as the reviewer. Evals must
+// NOT make direct OpenAI/Anthropic calls — everything goes through the
+// configured provider (in this project's CI, the Cloudflare AI Gateway), so the
+// judge model is a `provider/modelId` string resolved via pi-ai, not a raw
+// Anthropic endpoint.
+const DEFAULT_JUDGE_MODEL = 'cloudflare-ai-gateway/claude-haiku-4-5';
 
 type LlmJudgeVerdict = {
   score: 0 | 1;
   rationale: string;
 };
 
-function getApiKey(): string {
-  return (
-    process.env.GITLAB_REVIEW_API_KEY ||
-    process.env.ANTHROPIC_API_KEY ||
-    process.env.CLAUDE_API_KEY ||
-    ''
-  );
+let providersRegistered = false;
+function ensureProviders(): void {
+  if (providersRegistered) return;
+  registerBuiltInApiProviders();
+  providersRegistered = true;
 }
 
-function getBaseUrl(): string {
-  // Reuse the reviewer's base URL when the user has configured a proxy (e.g.
-  // OpenRouter via an Anthropic-compatible endpoint). If unset, hit Anthropic
-  // directly. The judge endpoint is always /v1/messages.
-  return process.env.GITLAB_REVIEW_EVAL_JUDGE_BASE_URL ?? DEFAULT_BASE_URL;
-}
-
-function getModel(): string {
+function getModelId(): string {
   return process.env.GITLAB_REVIEW_EVAL_JUDGE_MODEL ?? DEFAULT_JUDGE_MODEL;
 }
 
+/** Split a `provider/modelId` string on the first slash. */
+function splitModel(spec: string): { provider: string; modelId: string } {
+  const slash = spec.indexOf('/');
+  if (slash === -1) return { provider: '', modelId: spec };
+  return { provider: spec.slice(0, slash), modelId: spec.slice(slash + 1) };
+}
+
 async function callJudge(systemPrompt: string, userPrompt: string): Promise<LlmJudgeVerdict> {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    throw new Error('LLM judge requires GITLAB_REVIEW_API_KEY / ANTHROPIC_API_KEY in env');
-  }
-  const url = `${getBaseUrl()}/v1/messages`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'anthropic-version': ANTHROPIC_VERSION,
-      'x-api-key': apiKey,
-    },
-    body: JSON.stringify({
-      model: getModel(),
-      max_tokens: 512,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
+  ensureProviders();
+  const { provider, modelId } = splitModel(getModelId());
+  if (!provider) {
     throw new Error(
-      `LLM judge request failed: ${res.status} ${res.statusText} — ${body.slice(0, 300)}`,
+      `Judge model "${getModelId()}" must be a provider/modelId string (e.g. cloudflare-ai-gateway/claude-3-5-haiku)`,
     );
   }
-  const data = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
-  const text = (data.content ?? [])
-    .map((c) => (c.type === 'text' ? (c.text ?? '') : ''))
+  const apiKey = getEnvApiKey(provider) ?? '';
+  if (!apiKey) {
+    throw new Error(
+      `LLM judge requires the ${provider} provider key in env (e.g. CLOUDFLARE_API_KEY for cloudflare-ai-gateway)`,
+    );
+  }
+  // getModel is statically typed against the MODELS table; the judge model is a
+  // runtime string, so resolve through a widened signature.
+  const resolve = getModel as (p: KnownProvider, m: string) => Model<Api>;
+  const model = resolve(provider as KnownProvider, modelId);
+  const result = await completeSimple(
+    model,
+    {
+      systemPrompt,
+      messages: [{ role: 'user', content: userPrompt, timestamp: Date.now() }],
+    },
+    { apiKey, maxTokens: 512 },
+  );
+  if (result.stopReason === 'error' || result.stopReason === 'aborted') {
+    throw new Error(`Judge model call failed: ${result.errorMessage ?? result.stopReason}`);
+  }
+  const text = result.content
+    .map((c) => (c.type === 'text' ? c.text : ''))
     .join('')
     .trim();
   return parseVerdict(text);
@@ -160,7 +172,7 @@ export function createLlmJudge<I, O extends ReviewSummary>(
           score: verdict.score,
           metadata: {
             rationale: verdict.rationale,
-            judgeModel: getModel(),
+            judgeModel: getModelId(),
           },
         };
       } catch (err) {
@@ -168,7 +180,7 @@ export function createLlmJudge<I, O extends ReviewSummary>(
           score: 0,
           metadata: {
             rationale: `LLM judge error: ${(err as Error).message}`,
-            judgeModel: getModel(),
+            judgeModel: getModelId(),
           },
         };
       }
