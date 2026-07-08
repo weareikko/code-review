@@ -7,12 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Noise filtering is now layered (path + diff content) instead of a flat path list: a cross-ecosystem lockfile set matched by basename at any depth (adds `composer.lock`, `go.sum`, `Cargo.lock`, etc.), generated-dir patterns matched at any depth, and content heuristics that skip minified/compiled blobs and generated-banner files regardless of name — so machine-written churn no longer consumes the diff budget and starves real source of coverage ([#107]).
+
 ### Fixed
 
 - `verify` depth no longer echoes the verifier's dropped/downgraded findings into the summary Notes; a refuted finding is a non-issue the developer never saw, so only the Find model's own context notes remain. Drop/downgrade counts stay in the run log ([#106]).
 
 [Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.4...HEAD
 [#106]: https://github.com/ikko-dev/gitlab-review/pull/106
+[#107]: https://github.com/ikko-dev/gitlab-review/pull/107
 
 ## [0.7.4] - 2026-07-02
 
