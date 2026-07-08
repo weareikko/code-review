@@ -7,6 +7,7 @@ import type { JudgeContext } from 'vitest-evals';
 // oxlint-disable eslint-plugin-jest/no-standalone-expect -- describeEval uses its own `it` wrapper that oxlint doesn't recognise
 import { createHarness, createJudge, describeEval } from 'vitest-evals';
 import type { Config } from '../../src/config.js';
+import { resolveProviderApiKey } from '../../src/config.js';
 import { runReview } from '../../src/gitlab-review.js';
 import { parseReviewMarkdownWithWarnings } from '../../src/parser.js';
 import type { PriorThread } from '../../src/prior-threads.js';
@@ -23,6 +24,7 @@ type EvalInput = {
   priorThreads?: PriorThread[];
   skills: string[];
   reviewDepth?: ReviewDepth;
+  intent?: { title?: string; description?: string | null };
 };
 
 type ReviewComment = {
@@ -41,28 +43,27 @@ type EvalOutput = {
   usageTokens: { input: number; output: number; total: number };
 };
 
+// Evals must route every model call through the configured provider (the
+// Cloudflare AI Gateway in CI) — no direct OpenAI/Anthropic calls. The key is
+// therefore resolved per-provider from the model id, exactly as production does,
+// instead of reaching for ANTHROPIC_API_KEY directly.
+const EVAL_MODEL = process.env.GITLAB_REVIEW_EVAL_MODEL ?? 'cloudflare-ai-gateway/gpt-5.4';
+
 function makeConfig(overrides: Partial<Config>): Config {
-  // Use the explicit override first, then fall back to ANTHROPIC_API_KEY for
-  // backward compat, then GITLAB_REVIEW_API_KEY. For other providers (e.g.
-  // openrouter), set GITLAB_REVIEW_API_KEY or the provider-specific env var.
-  const apiKey =
-    process.env.GITLAB_REVIEW_API_KEY ||
-    process.env.ANTHROPIC_API_KEY ||
-    process.env.CLAUDE_API_KEY ||
-    '';
+  const model = overrides.model ?? EVAL_MODEL;
   return {
     project: 'test',
     mr: '1',
     gitlabUrl: 'https://gitlab.example.com',
     gitlabToken: 'test',
     gitlabAuthHeader: 'PRIVATE-TOKEN',
-    model: process.env.GITLAB_REVIEW_EVAL_MODEL ?? 'anthropic/claude-sonnet-4-5',
+    model,
     modelPool: [],
     minSeverity: 'info',
     thinkingLevel: 'off',
     postingMode: 'direct',
     reviewDepth: 'single',
-    apiKey,
+    apiKey: resolveProviderApiKey(model),
     baseUrl: process.env.GITLAB_REVIEW_BASE_URL ?? '',
     maxTokens: Number(process.env.GITLAB_REVIEW_MAX_TOKENS ?? 0),
     maxDiffChars: 100_000,
@@ -96,6 +97,7 @@ const reviewHarness = createHarness<EvalInput, EvalOutput, Record<string, unknow
         diff: input.diff,
         commitLog: input.commitLog,
         priorThreads: input.priorThreads,
+        intent: input.intent,
         attachTelemetry: (agent) => attach(agent),
       });
 
@@ -188,15 +190,10 @@ const NoSevereFindingsJudge = createJudge(
   },
 );
 
-// Skip evals when no API key is available. Uses || (not ??) so an empty-string
-// env var correctly falls through to the next candidate.
-const missingApiKey = () => {
-  return !(
-    process.env.GITLAB_REVIEW_API_KEY ||
-    process.env.ANTHROPIC_API_KEY ||
-    process.env.CLAUDE_API_KEY
-  );
-};
+// Skip evals when the configured provider has no key in env (e.g. no
+// CLOUDFLARE_API_KEY for the gateway). Resolved the same way as the reviewer,
+// so the skip decision tracks the model the eval will actually call.
+const missingApiKey = () => !resolveProviderApiKey(EVAL_MODEL);
 
 // Recording-only trajectory judge: surfaces turn count and tool call summary in
 // the judge metadata so eval runs reveal the agent's path, not just its output.
@@ -276,6 +273,110 @@ describeEval(
 
       expect(mentionedAsync).toBe(true);
       expect(result.output.comments.length).toBeGreaterThan(0);
+    });
+  },
+);
+
+// --- Intent-skew probe -----------------------------------------------------
+//
+// Reproduces the failure mode found in production: given an MR whose
+// description/README PROMISES features (OAuth 2.1, Retry-After) that the diff
+// does not implement, AND a real code bug elsewhere (an undefined-bucket
+// dereference that crashes the first request), a weak or intent-anchored finder
+// spends its effort flagging the unmet promise — often as a blocking comment on
+// the README — and misses the actual crash. A well-calibrated finder reports the
+// crash and, at most, surfaces the partial scope in the summary rather than as a
+// blocking inline finding on prose.
+const INTENT_SKEW = {
+  title: 'Add rate limiting and OAuth 2.1 scope enforcement to the public API',
+  description:
+    'Implements token-bucket rate limiting (100 requests/minute per token) on all ' +
+    'public endpoints, returning 429 Too Many Requests with a Retry-After header. ' +
+    'Also enforces OAuth 2.1 scopes on every endpoint: requests without the ' +
+    'catalogue:read scope are rejected with 403 Forbidden.',
+};
+
+// Enforced judge: the review must identify the real code bug — `checkRateLimit`
+// dereferences `bucket` (from `buckets.get(token)`) without checking it exists,
+// so the first request for any token crashes on `bucket.updatedAt`.
+const RateLimitBugFoundJudge = createLlmJudge<EvalInput, EvalOutput>(
+  'RateLimitBugFoundJudge',
+  'The review must identify that `checkRateLimit` reads `bucket.updatedAt` / `bucket.tokens` ' +
+    'after `buckets.get(token)` without handling the case where the bucket does not exist yet, ' +
+    'so the FIRST request for any token dereferences undefined and throws. A generic remark ' +
+    'about error handling, or flagging only the missing OAuth/Retry-After features, does NOT pass.',
+);
+
+// Enforced judge: no severe (CRITICAL/WARN) finding may be anchored on a prose
+// file (README/docs/*.md). Intent-mismatch findings anchored on prose are the
+// low-value quadrant we are trying to eliminate; the unmet promise belongs in
+// the summary, not as a blocking inline comment on documentation.
+const NoProsePromiseBlockingJudge = createJudge(
+  'NoProsePromiseBlockingJudge',
+  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
+    const proseSevere = output.comments.filter(
+      (c) =>
+        (c.severity === 'critical' || c.severity === 'warn') &&
+        /\.(md|mdx|markdown|txt|rst)$/i.test(c.file),
+    );
+    return {
+      score: proseSevere.length === 0 ? 1 : 0,
+      metadata: {
+        rationale:
+          proseSevere.length === 0
+            ? 'No severe finding anchored on a prose/docs file'
+            : `${proseSevere.length} severe finding(s) anchored on prose (intent-skew signature)`,
+        proseSevere: proseSevere.map((c) => ({
+          file: c.file,
+          severity: c.severity,
+          body: c.body.slice(0, 120),
+        })),
+      },
+    };
+  },
+);
+
+// Recording-only: how much of the review's inline weight went to the unmet
+// promise (OAuth/scope/Retry-After/403) vs the real bug. High counts here across
+// runs indicate the finder is still spending inline findings on intent gaps.
+const IntentInlineWeightJudge = createJudge(
+  'IntentInlineWeightJudge',
+  ({ output }: JudgeContext<EvalInput, EvalOutput, Record<string, unknown>>) => {
+    const promiseRe = /oauth|scope|retry-after|\b403\b|\b429\b|forbidden/i;
+    const promiseComments = output.comments.filter((c) => promiseRe.test(c.body));
+    return {
+      score: 1,
+      metadata: {
+        rationale: `${promiseComments.length}/${output.comments.length} inline comment(s) target the unmet promise`,
+        promiseComments: promiseComments.map((c) => ({
+          file: c.file,
+          severity: c.severity,
+          body: c.body.slice(0, 100),
+        })),
+        summaryMentionsPromise: promiseRe.test(output.summary),
+      },
+    };
+  },
+);
+
+describeEval(
+  'finder prompt — intent-skew probe (real bug vs unmet promise)',
+  {
+    harness: reviewHarness,
+    judges: [RateLimitBugFoundJudge, NoProsePromiseBlockingJudge, IntentInlineWeightJudge],
+    judgeThreshold: 1,
+    skipIf: missingApiKey,
+  },
+  (it) => {
+    it('reports the real crash, not a blocking doc-anchored promise finding', async ({ run }) => {
+      const diff = await readFile(join(FIXTURES, 'intent-skew-bait.diff'), 'utf8');
+      const result = await run({ diff, skills: ['code-review'], intent: INTENT_SKEW });
+
+      // Sanity: the fixture produced a parseable review with the bug file present.
+      const allText = [result.output.summary, ...result.output.comments.map((c) => c.body)]
+        .join(' ')
+        .toLowerCase();
+      expect(allText.length).toBeGreaterThan(0);
     });
   },
 );

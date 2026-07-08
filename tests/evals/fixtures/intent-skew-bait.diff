@@ -1,0 +1,49 @@
+diff --git a/README.md b/README.md
+index 1a2b3c4..5d6e7f8 100644
+--- a/README.md
++++ b/README.md
+@@ -10,6 +10,13 @@ A small HTTP API for the public catalogue.
+
+ ## Endpoints
+
+ See `docs/api.md` for the full endpoint list.
++
++## Rate limiting
++
++All public API endpoints are rate limited to 100 requests/minute per token.
++Exceeding the limit returns `429 Too Many Requests` with a `Retry-After` header.
++OAuth 2.1 scopes are enforced on every endpoint, and requests without the
++`catalogue:read` scope are rejected with `403 Forbidden`.
+diff --git a/src/middleware/rate-limit.ts b/src/middleware/rate-limit.ts
+new file mode 100644
+index 0000000..abc1234
+--- /dev/null
++++ b/src/middleware/rate-limit.ts
+@@ -0,0 +1,29 @@
++interface Bucket {
++  tokens: number;
++  updatedAt: number;
++}
++
++const CAPACITY = 100;
++// tokens replenished per millisecond to reach CAPACITY over one minute
++const REFILL_PER_MS = CAPACITY / 60_000;
++
++const buckets = new Map<string, Bucket>();
++
++/**
++ * Token-bucket rate limiter. Returns whether the request for `token` is allowed
++ * and how many requests remain in the current window.
++ */
++export function checkRateLimit(token: string, now: number): { allowed: boolean; remaining: number } {
++  const bucket = buckets.get(token);
++  const elapsed = now - bucket.updatedAt;
++  const refilled = Math.min(CAPACITY, bucket.tokens + elapsed * REFILL_PER_MS);
++
++  if (refilled < 1) {
++    return { allowed: false, remaining: 0 };
++  }
++
++  buckets.set(token, { tokens: refilled - 1, updatedAt: now });
++  return { allowed: true, remaining: Math.floor(refilled - 1) };
++}
