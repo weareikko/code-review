@@ -160,44 +160,33 @@ describe('rebuildSummary', () => {
     '**1 issue found:**\n- **issue (blocking)** — `src/a.ts:10` — Off-by-one in retry loop';
 
   it('recomputes risk to Low and drops the issues block when nothing survives', () => {
-    const summary = rebuildSummary(
-      original,
-      [],
-      [
-        {
-          file: 'src/a.ts',
-          line: 10,
-          action: 'dropped',
-          fromSeverity: 'critical',
-          reason: 'not reachable',
-        },
-      ],
-    );
+    const summary = rebuildSummary(original, []);
     expect(summary).toMatch(/^\*\*Risk: Low\*\*/);
     expect(summary).not.toMatch(/issue.*found/i);
     // Overview prose is preserved.
     expect(summary).toContain('Adds a checkout retry helper');
-    // The drop is auditable in the Notes section.
+  });
+
+  it("does not echo Verify's drop/downgrade decisions into the summary", () => {
+    // When nothing survives and the Find model wrote no Notes of its own, the
+    // summary carries no Notes section — the verifier's refuted findings are
+    // non-issues the developer never saw and must not be re-injected as noise.
+    const summary = rebuildSummary(original, []);
+    expect(summary).not.toContain('**Notes:**');
+    expect(summary).not.toMatch(/Verify (removed|downgraded)/);
+  });
+
+  it("preserves the Find model's own Notes (applied context)", () => {
+    const withNotes =
+      original + '\n\n**Notes:**\n- `src/probe.ts:13` — empty .catch() suppressed per ADR-042';
+    const summary = rebuildSummary(withNotes, []);
     expect(summary).toContain('**Notes:**');
-    expect(summary).toContain('Verify removed a CRITICAL finding at `src/a.ts:10`');
+    expect(summary).toContain('suppressed per ADR-042');
   });
 
   it('regenerates the issues block from the surviving comments', () => {
     const survivor = comment({ severity: 'warn', body: 'issue: Off-by-one in retry loop\n\nx' });
-    const summary = rebuildSummary(
-      original,
-      [survivor],
-      [
-        {
-          file: 'src/a.ts',
-          line: 10,
-          action: 'downgraded',
-          fromSeverity: 'critical',
-          toSeverity: 'warn',
-          reason: 'failure path unproven',
-        },
-      ],
-    );
+    const summary = rebuildSummary(original, [survivor]);
     expect(summary).toMatch(/^\*\*Risk: Medium\*\*/);
     expect(summary).toMatch(/\*\*1 issue found:\*\*/);
     expect(summary).toContain('`src/a.ts:10`');

@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `verify` depth no longer echoes the verifier's dropped/downgraded findings into the summary Notes; a refuted finding is a non-issue the developer never saw, so only the Find model's own context notes remain. Drop/downgrade counts stay in the run log ([#106]).
+
 [Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.4...HEAD
+[#106]: https://github.com/ikko-dev/gitlab-review/pull/106
 
 ## [0.7.4] - 2026-07-02
 

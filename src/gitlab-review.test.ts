@@ -578,7 +578,9 @@ describe('runReview pipeline', () => {
     const parsed = JSON.parse(written) as { summary: string; comments: unknown[] };
     expect(parsed.comments).toHaveLength(0);
     expect(parsed.summary).toMatch(/^\*\*Risk: Low\*\*/);
-    expect(parsed.summary).toContain('Verify removed a CRITICAL finding at `src/a.ts:2`');
+    // The verifier's refuted finding is a non-issue the developer never saw; it
+    // must not be echoed back into the summary as noise.
+    expect(parsed.summary).not.toMatch(/Verify (removed|downgraded)/);
   });
 
   it('verify depth keeps a finding the verifier confirms', async () => {
