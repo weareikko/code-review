@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.5...HEAD
+
+## [0.7.5] - 2026-07-08
+
 ### Changed
 
 - Noise filtering is now layered (path + diff content) instead of a flat path list: a cross-ecosystem lockfile set matched by basename at any depth (adds `composer.lock`, `go.sum`, `Cargo.lock`, etc.), generated-dir patterns matched at any depth, and content heuristics that skip minified/compiled blobs and generated-banner files regardless of name — so machine-written churn no longer consumes the diff budget and starves real source of coverage ([#107]).
@@ -16,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The reviewer no longer treats MR description/intent mismatches as first-class inline findings: the `<intent>` block is a lens for reading the diff, unmet/exceeded promises are never CRITICAL or blocking, inline findings must anchor on code (never on README/description prose), and scope-creep is surfaced in one summary line. Keeps the finder focused on demonstrable code defects ([#108]).
 - `verify` depth no longer echoes the verifier's dropped/downgraded findings into the summary Notes; a refuted finding is a non-issue the developer never saw, so only the Find model's own context notes remain. Drop/downgrade counts stay in the run log ([#106]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.4...HEAD
+[0.7.5]: https://github.com/ikko-dev/gitlab-review/compare/0.7.4...0.7.5
 [#106]: https://github.com/ikko-dev/gitlab-review/pull/106
 [#107]: https://github.com/ikko-dev/gitlab-review/pull/107
 [#108]: https://github.com/ikko-dev/gitlab-review/pull/108
