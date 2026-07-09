@@ -547,12 +547,9 @@ export function formatUsageLine(usage: ReviewUsage): string {
   // count instead and let the per-model breakdown carry the split.
   const modelLabel =
     usage.byModel && usage.byModel.length >= 2 ? `${usage.byModel.length} models` : usage.model;
-  // Only surface the reasoning effort when it deviates from the `off` default, so
-  // the common default-run footer stays byte-identical to before.
-  const thinkingLabel =
-    usage.thinkingLevel && usage.thinkingLevel !== 'off'
-      ? `, thinking: ${usage.thinkingLevel}`
-      : '';
+  // Always record the reasoning effort the run used, including the `off` default,
+  // so the footer is an unambiguous record of the run config.
+  const thinkingLabel = `, thinking: ${usage.thinkingLevel ?? 'off'}`;
   return `Review usage: ${inputLabel} / ${output} out tokens — $${cost} (${modelLabel}${thinkingLabel})`;
 }
 

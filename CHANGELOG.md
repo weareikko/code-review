@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- The `Review usage:` footer now appends `, thinking: <level>` when `--thinking` ran at anything other than the `off` default, so the summary note records the reasoning effort alongside the model and cost ([#111]).
+- The `Review usage:` footer now records the `--thinking` level (`thinking: <level>`, including the `off` default) alongside the model and cost, so the summary note captures the reasoning effort the run used ([#111]).
 
 [Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.5...HEAD
 [#111]: https://github.com/ikko-dev/gitlab-review/pull/111

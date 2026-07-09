@@ -107,21 +107,21 @@ describe('formatUsageLine', () => {
     const usage = makeUsage({ input: 35, cacheRead: 10000, cacheWrite: 298, output: 1476 });
     const line = formatUsageLine(usage);
     expect(line).toBe(
-      'Review usage: 10,333 in (10,000 cached) / 1,476 out tokens — $0.0533 (anthropic/claude-sonnet-4-5)',
+      'Review usage: 10,333 in (10,000 cached) / 1,476 out tokens — $0.0533 (anthropic/claude-sonnet-4-5, thinking: off)',
     );
   });
 
   it('omits the cached hint when cacheRead is zero', () => {
     const usage = makeUsage({ input: 200, output: 50 });
     expect(formatUsageLine(usage)).toBe(
-      'Review usage: 200 in / 50 out tokens — $0.0533 (anthropic/claude-sonnet-4-5)',
+      'Review usage: 200 in / 50 out tokens — $0.0533 (anthropic/claude-sonnet-4-5, thinking: off)',
     );
   });
 
   it('still counts cacheWrite when cacheRead is zero', () => {
     const usage = makeUsage({ input: 100, cacheWrite: 500, output: 25 });
     expect(formatUsageLine(usage)).toBe(
-      'Review usage: 600 in / 25 out tokens — $0.0533 (anthropic/claude-sonnet-4-5)',
+      'Review usage: 600 in / 25 out tokens — $0.0533 (anthropic/claude-sonnet-4-5, thinking: off)',
     );
   });
 
@@ -144,21 +144,14 @@ describe('formatUsageLine', () => {
       ],
     };
     expect(formatUsageLine(usage)).toBe(
-      'Review usage: 200 in / 50 out tokens — $0.0533 (2 models)',
+      'Review usage: 200 in / 50 out tokens — $0.0533 (2 models, thinking: off)',
     );
   });
 
-  it('appends the thinking level when it is not the off default', () => {
+  it('records the thinking level, including a non-off value', () => {
     const usage: ReviewUsage = { ...makeUsage({ input: 200, output: 50 }), thinkingLevel: 'high' };
     expect(formatUsageLine(usage)).toBe(
       'Review usage: 200 in / 50 out tokens — $0.0533 (anthropic/claude-sonnet-4-5, thinking: high)',
-    );
-  });
-
-  it('omits the thinking level when it is off', () => {
-    const usage: ReviewUsage = { ...makeUsage({ input: 200, output: 50 }), thinkingLevel: 'off' };
-    expect(formatUsageLine(usage)).toBe(
-      'Review usage: 200 in / 50 out tokens — $0.0533 (anthropic/claude-sonnet-4-5)',
     );
   });
 });
