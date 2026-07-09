@@ -69,6 +69,8 @@ export interface ModelUsage {
 
 export interface ReviewUsage {
   model: string;
+  /** Reasoning effort the main agent ran at, surfaced alongside the model in the footer. */
+  thinkingLevel: ThinkingLevel;
   tokens: UsageBreakdown;
   cost: UsageBreakdown;
   /**
@@ -1184,6 +1186,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
 
   return {
     model: config.model,
+    thinkingLevel: config.thinkingLevel,
     tokens: aggregated.tokens,
     cost: aggregated.cost,
     byModel: buildByModelUsage(aggregated),

@@ -32,6 +32,7 @@ function makeComment(severity: Severity, duplicate = false): GeneratedComment {
 function makeUsage(overrides: Partial<ReviewUsage['tokens']> = {}): ReviewUsage {
   return {
     model: 'anthropic/claude-sonnet-4-5',
+    thinkingLevel: 'off',
     tokens: {
       input: overrides.input ?? 0,
       output: overrides.output ?? 0,
@@ -144,6 +145,20 @@ describe('formatUsageLine', () => {
     };
     expect(formatUsageLine(usage)).toBe(
       'Review usage: 200 in / 50 out tokens — $0.0533 (2 models)',
+    );
+  });
+
+  it('appends the thinking level when it is not the off default', () => {
+    const usage: ReviewUsage = { ...makeUsage({ input: 200, output: 50 }), thinkingLevel: 'high' };
+    expect(formatUsageLine(usage)).toBe(
+      'Review usage: 200 in / 50 out tokens — $0.0533 (anthropic/claude-sonnet-4-5, thinking: high)',
+    );
+  });
+
+  it('omits the thinking level when it is off', () => {
+    const usage: ReviewUsage = { ...makeUsage({ input: 200, output: 50 }), thinkingLevel: 'off' };
+    expect(formatUsageLine(usage)).toBe(
+      'Review usage: 200 in / 50 out tokens — $0.0533 (anthropic/claude-sonnet-4-5)',
     );
   });
 });

@@ -66,7 +66,7 @@ Skills: `code-review`
 Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) for commit <sha>.
 ```
 
-The `Skills:` line is only present when one or more skills were active for the run.
+The `Review usage:` line names the model, and appends `, thinking: <level>` when `--thinking` ran at anything other than the `off` default. The `Skills:` line is only present when one or more skills were active for the run.
 
 If a later CI job sees that the current MR head commit already appears in that footer, it skips the agent run to avoid producing a different review for the same diff. Use `--force-review` or `GITLAB_REVIEW_FORCE_REVIEW=true` to bypass the guard. The summary upsert runs in both `direct` and `draft` posting modes (it always uses the regular notes endpoints — the atomic bulk-publish flow is reserved for inline comments).
 

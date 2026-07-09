@@ -33,7 +33,7 @@ import {
 } from './posting.js';
 import { extractChangedFiles, extractPriorThreads } from './prior-threads.js';
 import { withCarriedOverFindings } from './summary-carryover.js';
-import type { DiffRefs, GeneratedComment, Severity } from './types.js';
+import type { DiffRefs, GeneratedComment, Severity, ThinkingLevel } from './types.js';
 
 export type {
   DiagnosticContext,
@@ -234,7 +234,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
       !config.noPost &&
       reviewedCommitSha === version.head_commit_sha
     ) {
-      const usage = zeroReviewUsage(config.model);
+      const usage = zeroReviewUsage(config.model, config.thinkingLevel);
       runContext.usage = usage;
       runContext.generated = 0;
       runContext.newComments = 0;
@@ -315,7 +315,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
       // rather than failing the pipeline, so a billing dead-end does not block
       // every MR. Any other error still propagates and fails the job.
       if (!isQuotaExceededError(error)) throw error;
-      const skipUsage = zeroReviewUsage(config.model);
+      const skipUsage = zeroReviewUsage(config.model, config.thinkingLevel);
       runContext.usage = skipUsage;
       runContext.generated = 0;
       runContext.newComments = 0;
@@ -515,9 +515,10 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
   });
 }
 
-function zeroReviewUsage(model: string): ReviewUsage {
+function zeroReviewUsage(model: string, thinkingLevel: ThinkingLevel): ReviewUsage {
   return {
     model,
+    thinkingLevel,
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     skills: [],
@@ -546,7 +547,13 @@ export function formatUsageLine(usage: ReviewUsage): string {
   // count instead and let the per-model breakdown carry the split.
   const modelLabel =
     usage.byModel && usage.byModel.length >= 2 ? `${usage.byModel.length} models` : usage.model;
-  return `Review usage: ${inputLabel} / ${output} out tokens — $${cost} (${modelLabel})`;
+  // Only surface the reasoning effort when it deviates from the `off` default, so
+  // the common default-run footer stays byte-identical to before.
+  const thinkingLabel =
+    usage.thinkingLevel && usage.thinkingLevel !== 'off'
+      ? `, thinking: ${usage.thinkingLevel}`
+      : '';
+  return `Review usage: ${inputLabel} / ${output} out tokens — $${cost} (${modelLabel}${thinkingLabel})`;
 }
 
 /**

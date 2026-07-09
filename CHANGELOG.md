@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The `Review usage:` footer now appends `, thinking: <level>` when `--thinking` ran at anything other than the `off` default, so the summary note records the reasoning effort alongside the model and cost ([#111]).
+
 [Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.5...HEAD
+[#111]: https://github.com/ikko-dev/gitlab-review/pull/111
 
 ## [0.7.5] - 2026-07-08
 
