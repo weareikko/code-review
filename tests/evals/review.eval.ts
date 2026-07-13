@@ -83,7 +83,7 @@ function makeConfig(overrides: Partial<Config>): Config {
 }
 
 const reviewHarness = createHarness<EvalInput, EvalOutput, Record<string, unknown>>({
-  name: 'gitlab-review',
+  name: 'code-review',
   run: async ({ input }) => {
     const dir = await mkdtemp(join(tmpdir(), 'gitlab-review-eval-'));
     try {

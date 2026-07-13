@@ -1,6 +1,6 @@
 # Eval suite
 
-LLM-backed evaluations for the gitlab-review reviewer agent. Real model calls
+LLM-backed evaluations for the code-review reviewer agent. Real model calls
 hit Anthropic (or your configured provider); the suite is skipped automatically
 when no API key is present.
 

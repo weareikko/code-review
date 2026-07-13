@@ -103,7 +103,7 @@ Options:
                           (env: GITLAB_REVIEW_VERIFY_MODEL)
   --posting-mode <mode>   direct (sequential discussions) or draft (atomic bulk publish)
                           (default: direct)
-  --review-file <path>    Raw gitlab-review output file (default: gitlab-review.md)
+  --review-file <path>    Raw code-review output file (default: gitlab-review.md)
   --output <path>         Generated payload artifact (default: review-comments.json)
   --cwd <path>            Working directory (default: process.cwd())
   --dry-run               Generate artifacts and skip posting
