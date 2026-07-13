@@ -212,6 +212,31 @@ export function buildSummaryHistoryEntries(
   return nextEntries.slice(0, SUMMARY_HISTORY_LIMIT);
 }
 
+/**
+ * Resolve the summary upsert into the note body to write plus the existing note
+ * to update (or `null` to create). Platform-agnostic — it operates on the
+ * normalized {@link Discussion}[] and returns strings/ids — so both the GitLab
+ * and GitHub platforms share the exact same body-building and history-carryover
+ * logic and only differ in which API call posts the result.
+ */
+export function buildUpsertSummary(
+  summary: string,
+  discussions: Discussion[],
+  options: UpsertSummaryOptions,
+): { body: string; existing: SummaryNote | null } {
+  const existing = findExistingSummaryNote(discussions);
+  const historyEntries = existing
+    ? buildSummaryHistoryEntries(existing.body, options.archivedAt)
+    : (options.historyEntries ?? []);
+  const body = buildSummaryBody(summary, options.costFooter, {
+    historyEntries,
+    reviewedCommitSha: options.reviewedCommitSha,
+    skillsFooter: options.skillsFooter,
+    sizeNotice: options.sizeNotice,
+  });
+  return { body, existing };
+}
+
 export async function upsertSummaryNote(
   gitlab: GitLabClient,
   project: string,
@@ -224,16 +249,7 @@ export async function upsertSummaryNote(
     typeof costFooterOrOptions === 'string'
       ? { costFooter: costFooterOrOptions }
       : (costFooterOrOptions ?? {});
-  const existing = findExistingSummaryNote(discussions);
-  const historyEntries = existing
-    ? buildSummaryHistoryEntries(existing.body, options.archivedAt)
-    : (options.historyEntries ?? []);
-  const body = buildSummaryBody(summary, options.costFooter, {
-    historyEntries,
-    reviewedCommitSha: options.reviewedCommitSha,
-    skillsFooter: options.skillsFooter,
-    sizeNotice: options.sizeNotice,
-  });
+  const { body, existing } = buildUpsertSummary(summary, discussions, options);
   if (existing) {
     await gitlab.updateMergeRequestNote(project, mr, existing.id, body);
     return { action: 'updated', noteId: existing.id };
