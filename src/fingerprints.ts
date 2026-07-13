@@ -8,8 +8,13 @@ import type { Fingerprints, ReviewComment, Side } from './types.js';
  * defined in one place; each call site builds its own RegExp with the flags it
  * needs (the capture group is harmless when only stripping or testing). This is
  * a stable wire contract — see CLAUDE.md before changing it.
+ *
+ * Reads match BOTH the current `code-review:` prefix and the legacy
+ * `gitlab-review:` prefix so findings posted under the old product identity are
+ * still recognised and deduplicated after the rename. Writes emit the current
+ * prefix (see {@link appendFingerprintMarkers}).
  */
-export const FINGERPRINT_MARKER_PATTERN = String.raw`<!--\s*gitlab-review:fingerprint-(?:primary|secondary):([a-f0-9]+)\s*-->`;
+export const FINGERPRINT_MARKER_PATTERN = String.raw`<!--\s*(?:code-review|gitlab-review):fingerprint-(?:primary|secondary):([a-f0-9]+)\s*-->`;
 
 const FINGERPRINT_MARKER_RE = new RegExp(FINGERPRINT_MARKER_PATTERN, 'gi');
 
@@ -119,7 +124,7 @@ export function fingerprints(comment: ReviewComment, hunkContext: string): Finge
 }
 
 export function appendFingerprintMarkers(body: string, fp: Fingerprints): string {
-  return `${body.trim()}\n\n<!-- gitlab-review:fingerprint-primary:${fp.primary} -->\n<!-- gitlab-review:fingerprint-secondary:${fp.secondary} -->`;
+  return `${body.trim()}\n\n<!-- code-review:fingerprint-primary:${fp.primary} -->\n<!-- code-review:fingerprint-secondary:${fp.secondary} -->`;
 }
 
 export function extractExistingFingerprints(discussions: Discussion[]): Set<string> {

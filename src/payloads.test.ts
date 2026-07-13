@@ -7,7 +7,7 @@ declare const __PKG_VERSION__: string;
 const COMMIT_SHA = 'a'.repeat(40);
 const BASE_SHA = 'b'.repeat(40);
 const START_SHA = 'c'.repeat(40);
-const EXPECTED_FOOTER = `<sub>Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) v${__PKG_VERSION__} for commit ${COMMIT_SHA}.</sub>`;
+const EXPECTED_FOOTER = `<sub>Reviewed by [@ikko-dev/code-review](https://github.com/ikko-dev/gitlab-review) v${__PKG_VERSION__} for commit ${COMMIT_SHA}.</sub>`;
 
 const refs: DiffRefs = {
   base_sha: BASE_SHA,
@@ -210,7 +210,7 @@ describe('buildGeneratedComments', () => {
   it('appends fingerprint markers after the commit footer', () => {
     const [generated] = buildGeneratedComments([comment], diff, refs, new Set());
     const footerIndex = generated.payload.body.indexOf(EXPECTED_FOOTER);
-    const fpIndex = generated.payload.body.indexOf('<!-- gitlab-review:fingerprint-primary:');
+    const fpIndex = generated.payload.body.indexOf('<!-- code-review:fingerprint-primary:');
     expect(fpIndex).toBeGreaterThan(footerIndex);
   });
 

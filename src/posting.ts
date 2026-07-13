@@ -3,14 +3,30 @@ import type { Discussion, GitLabClient } from './gitlab.js';
 import { PRODUCT_LINK } from './product.js';
 import type { Fingerprints, GeneratedComment, SizeSkippedFile } from './types.js';
 
-export const SUMMARY_MARKER = '<!-- gitlab-review:summary -->';
-export const SUMMARY_HISTORY_START = '<!-- gitlab-review:summary-history:start -->';
-export const SUMMARY_HISTORY_END = '<!-- gitlab-review:summary-history:end -->';
-export const SUMMARY_HISTORY_ENTRY_START = '<!-- gitlab-review:summary-history-entry:start -->';
-export const SUMMARY_HISTORY_ENTRY_END = '<!-- gitlab-review:summary-history-entry:end -->';
+export const SUMMARY_MARKER = '<!-- code-review:summary -->';
+export const SUMMARY_HISTORY_START = '<!-- code-review:summary-history:start -->';
+export const SUMMARY_HISTORY_END = '<!-- code-review:summary-history:end -->';
+export const SUMMARY_HISTORY_ENTRY_START = '<!-- code-review:summary-history-entry:start -->';
+export const SUMMARY_HISTORY_ENTRY_END = '<!-- code-review:summary-history-entry:end -->';
 export const SUMMARY_HISTORY_LIMIT = 10;
+
+/**
+ * Legacy marker set emitted by the tool under its former `gitlab-review`
+ * identity. Writers only ever emit the current `code-review` markers above, but
+ * readers must still match these so the first post-rename run finds (and
+ * upserts, not duplicates) a summary note it wrote under the old identity.
+ */
+const LEGACY_SUMMARY_MARKER = '<!-- gitlab-review:summary -->';
+const LEGACY_SUMMARY_HISTORY_START = '<!-- gitlab-review:summary-history:start -->';
+const LEGACY_SUMMARY_HISTORY_END = '<!-- gitlab-review:summary-history:end -->';
+
+/**
+ * Matches the reviewed-commit footer on read. The product name segment accepts
+ * both the current `@ikko-dev/code-review` and the legacy
+ * `@ikko-dev/gitlab-review`; the repo URL is unchanged across the rename.
+ */
 export const REVIEWED_COMMIT_FOOTER_PATTERN =
-  /Reviewed by \[@ikko-dev\/gitlab-review\]\(https:\/\/github\.com\/ikko-dev\/gitlab-review\)(?: v\S+)? for commit ([a-f0-9]{40})\./i;
+  /Reviewed by \[@ikko-dev\/(?:code|gitlab)-review\]\(https:\/\/github\.com\/ikko-dev\/gitlab-review\)(?: v\S+)? for commit ([a-f0-9]{40})\./i;
 
 declare const __PKG_VERSION__: string;
 
@@ -143,7 +159,10 @@ export function findExistingSummaryNote(discussions: Discussion[]): SummaryNote 
       const id = note.id;
       if (typeof id !== 'number') continue;
       const body = note.body;
-      if (typeof body === 'string' && body.includes(SUMMARY_MARKER)) {
+      if (
+        typeof body === 'string' &&
+        (body.includes(SUMMARY_MARKER) || body.includes(LEGACY_SUMMARY_MARKER))
+      ) {
         return { id, body };
       }
     }
@@ -168,8 +187,11 @@ export function buildArchivedSummaryEntry(body: string, archivedAt = new Date())
 
 export function extractSummaryHistoryEntries(body: string): string[] {
   const entries: string[] = [];
+  // Match both the current `code-review` entry markers and the legacy
+  // `gitlab-review` ones so history written under the old identity carries
+  // forward; re-emitted entries always use the current markers.
   const entryPattern = new RegExp(
-    `${escapeRegExp(SUMMARY_HISTORY_ENTRY_START)}\\s*([\\s\\S]*?)\\s*${escapeRegExp(SUMMARY_HISTORY_ENTRY_END)}`,
+    `${bothPrefixMarkerPattern(SUMMARY_HISTORY_ENTRY_START)}\\s*([\\s\\S]*?)\\s*${bothPrefixMarkerPattern(SUMMARY_HISTORY_ENTRY_END)}`,
     'g',
   );
   for (const match of body.matchAll(entryPattern)) {
@@ -181,24 +203,30 @@ export function extractSummaryHistoryEntries(body: string): string[] {
 }
 
 export function stripSummaryHistory(body: string): string {
-  const start = body.indexOf(SUMMARY_HISTORY_START);
-  if (start === -1) return body.trim();
+  // Try the current marker pair first, then the legacy pair, so a summary note
+  // written under either identity has its history block removed correctly.
+  for (const [startMarker, endMarker] of [
+    [SUMMARY_HISTORY_START, SUMMARY_HISTORY_END],
+    [LEGACY_SUMMARY_HISTORY_START, LEGACY_SUMMARY_HISTORY_END],
+  ] as const) {
+    const start = body.indexOf(startMarker);
+    if (start === -1) continue;
 
-  const detailsStart = body.lastIndexOf('<details>', start);
-  const blockStart = detailsStart === -1 ? start : detailsStart;
-  const endMarkerStart = body.indexOf(SUMMARY_HISTORY_END, start);
-  const endMarkerEnd =
-    endMarkerStart === -1
-      ? start + SUMMARY_HISTORY_START.length
-      : endMarkerStart + SUMMARY_HISTORY_END.length;
-  const detailsEnd = body.indexOf('</details>', endMarkerEnd);
-  const blockEnd = detailsEnd === -1 ? endMarkerEnd : detailsEnd + '</details>'.length;
+    const detailsStart = body.lastIndexOf('<details>', start);
+    const blockStart = detailsStart === -1 ? start : detailsStart;
+    const endMarkerStart = body.indexOf(endMarker, start);
+    const endMarkerEnd =
+      endMarkerStart === -1 ? start + startMarker.length : endMarkerStart + endMarker.length;
+    const detailsEnd = body.indexOf('</details>', endMarkerEnd);
+    const blockEnd = detailsEnd === -1 ? endMarkerEnd : detailsEnd + '</details>'.length;
 
-  return `${body.slice(0, blockStart)}${body.slice(blockEnd)}`.trim();
+    return `${body.slice(0, blockStart)}${body.slice(blockEnd)}`.trim();
+  }
+  return body.trim();
 }
 
 export function stripSummaryMarker(body: string): string {
-  return body.replace(SUMMARY_MARKER, '').trim();
+  return body.replace(SUMMARY_MARKER, '').replace(LEGACY_SUMMARY_MARKER, '').trim();
 }
 
 export function buildSummaryHistoryEntries(
@@ -280,6 +308,15 @@ function formatSummaryArchiveDate(date: Date): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Turn a current (`code-review`) marker string into a regex source that also
+ * matches its legacy (`gitlab-review`) equivalent, so readers accept both
+ * product identities. The two markers differ only by that prefix.
+ */
+function bothPrefixMarkerPattern(marker: string): string {
+  return escapeRegExp(marker).replace('code-review', '(?:code-review|gitlab-review)');
 }
 
 export type PostingMode = 'direct' | 'draft';

@@ -113,9 +113,25 @@ describe('summary note upsert', () => {
     const body = buildSummaryBody('Great work.', undefined, { reviewedCommitSha: commit });
 
     expect(body).toContain(
-      `---\n\nReviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) v${__PKG_VERSION__} for commit 27dab603346bcb994190042029ce7368021ff21e.`,
+      `---\n\nReviewed by [@ikko-dev/code-review](https://github.com/ikko-dev/gitlab-review) v${__PKG_VERSION__} for commit 27dab603346bcb994190042029ce7368021ff21e.`,
     );
     expect(extractReviewedCommitSha(body)).toBe(commit);
+  });
+
+  // Migration guard: findings/summaries posted under the former
+  // `gitlab-review` product identity must still be recognised on read after
+  // the rename, so a first post-rename run upserts (not duplicates) them.
+  it('still parses a reviewed commit footer written under the legacy identity', () => {
+    const commit = 'abcabcabcabcabcabcabcabcabcabcabcabcabca';
+    const legacyBody = `${SUMMARY_MARKER}\n\nGreat work.\n\n---\n\nReviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) v0.7.6 for commit ${commit}.`;
+    expect(extractReviewedCommitSha(legacyBody)).toBe(commit);
+  });
+
+  it('finds an existing summary note written under the legacy marker', () => {
+    const discussions = [
+      { notes: [{ id: 7, body: '<!-- gitlab-review:summary -->\n\nlegacy summary' }] },
+    ];
+    expect(findExistingSummaryNoteId(discussions)).toBe(7);
   });
 
   it('finds the reviewed commit from the current summary note', () => {

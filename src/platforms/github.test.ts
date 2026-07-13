@@ -114,7 +114,7 @@ describe('buildGitHubComments', () => {
     expect(payload.side).toBe('RIGHT');
     expect(payload.body).toContain('fix: guard the null case');
     expect(payload.body).toContain('for commit head-sha');
-    expect(payload.body).toContain('gitlab-review:fingerprint-primary');
+    expect(payload.body).toContain('code-review:fingerprint-primary');
     expect(generated.duplicate).toBe(false);
   });
 
