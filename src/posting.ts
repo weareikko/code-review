@@ -1,5 +1,6 @@
 import { extractExistingFingerprints } from './fingerprints.js';
 import type { Discussion, GitLabClient } from './gitlab.js';
+import { PRODUCT_LINK } from './product.js';
 import type { Fingerprints, GeneratedComment, SizeSkippedFile } from './types.js';
 
 export const SUMMARY_MARKER = '<!-- gitlab-review:summary -->';
@@ -124,7 +125,7 @@ export function buildSummaryBody(
 }
 
 export function buildReviewedCommitFooter(commitSha: string): string {
-  return `Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) v${__PKG_VERSION__} for commit ${commitSha}.`;
+  return `Reviewed by ${PRODUCT_LINK} v${__PKG_VERSION__} for commit ${commitSha}.`;
 }
 
 export function extractReviewedCommitSha(body: string): string | null {

@@ -1,5 +1,6 @@
 import { type ResolvedDiffLine, resolveDiffLine } from './diff-lines.js';
 import { appendFingerprintMarkers, extractDiffHunkContext, fingerprints } from './fingerprints.js';
+import { PRODUCT_LINK } from './product.js';
 import type {
   Confidence,
   DiffRefs,
@@ -49,7 +50,7 @@ function boldCommentTitle(body: string): string {
  */
 export function buildCommentBody(body: string, commitSha: string, confidence: Confidence): string {
   const confidenceLine = `_Confidence: ${confidence}._`;
-  const footer = `<sub>Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) v${__PKG_VERSION__} for commit ${commitSha}.</sub>`;
+  const footer = `<sub>Reviewed by ${PRODUCT_LINK} v${__PKG_VERSION__} for commit ${commitSha}.</sub>`;
   return `${boldCommentTitle(body.trim())}\n\n${confidenceLine}\n\n---\n\n${footer}`;
 }
 
