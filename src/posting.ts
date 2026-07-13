@@ -1,5 +1,6 @@
 import { extractExistingFingerprints } from './fingerprints.js';
 import type { Discussion, GitLabClient } from './gitlab.js';
+import { PRODUCT_LINK } from './product.js';
 import type { Fingerprints, GeneratedComment, SizeSkippedFile } from './types.js';
 
 export const SUMMARY_MARKER = '<!-- gitlab-review:summary -->';
@@ -124,7 +125,7 @@ export function buildSummaryBody(
 }
 
 export function buildReviewedCommitFooter(commitSha: string): string {
-  return `Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) v${__PKG_VERSION__} for commit ${commitSha}.`;
+  return `Reviewed by ${PRODUCT_LINK} v${__PKG_VERSION__} for commit ${commitSha}.`;
 }
 
 export function extractReviewedCommitSha(body: string): string | null {
@@ -212,6 +213,31 @@ export function buildSummaryHistoryEntries(
   return nextEntries.slice(0, SUMMARY_HISTORY_LIMIT);
 }
 
+/**
+ * Resolve the summary upsert into the note body to write plus the existing note
+ * to update (or `null` to create). Platform-agnostic — it operates on the
+ * normalized {@link Discussion}[] and returns strings/ids — so both the GitLab
+ * and GitHub platforms share the exact same body-building and history-carryover
+ * logic and only differ in which API call posts the result.
+ */
+export function buildUpsertSummary(
+  summary: string,
+  discussions: Discussion[],
+  options: UpsertSummaryOptions,
+): { body: string; existing: SummaryNote | null } {
+  const existing = findExistingSummaryNote(discussions);
+  const historyEntries = existing
+    ? buildSummaryHistoryEntries(existing.body, options.archivedAt)
+    : (options.historyEntries ?? []);
+  const body = buildSummaryBody(summary, options.costFooter, {
+    historyEntries,
+    reviewedCommitSha: options.reviewedCommitSha,
+    skillsFooter: options.skillsFooter,
+    sizeNotice: options.sizeNotice,
+  });
+  return { body, existing };
+}
+
 export async function upsertSummaryNote(
   gitlab: GitLabClient,
   project: string,
@@ -224,16 +250,7 @@ export async function upsertSummaryNote(
     typeof costFooterOrOptions === 'string'
       ? { costFooter: costFooterOrOptions }
       : (costFooterOrOptions ?? {});
-  const existing = findExistingSummaryNote(discussions);
-  const historyEntries = existing
-    ? buildSummaryHistoryEntries(existing.body, options.archivedAt)
-    : (options.historyEntries ?? []);
-  const body = buildSummaryBody(summary, options.costFooter, {
-    historyEntries,
-    reviewedCommitSha: options.reviewedCommitSha,
-    skillsFooter: options.skillsFooter,
-    sizeNotice: options.sizeNotice,
-  });
+  const { body, existing } = buildUpsertSummary(summary, discussions, options);
   if (existing) {
     await gitlab.updateMergeRequestNote(project, mr, existing.id, body);
     return { action: 'updated', noteId: existing.id };

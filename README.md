@@ -79,6 +79,55 @@ review:
       - review-usage.json
 ```
 
+## GitHub Actions
+
+The same reviewer also reviews **GitHub pull requests** — the engine is platform-agnostic and auto-detects GitHub from the Actions environment (`GITHUB_ACTIONS`, `GITHUB_REPOSITORY`, the `pull_request` event). Set `--platform github` to force it.
+
+Use the bundled composite action. It needs:
+
+- **Permissions:** `pull-requests: write` (to post the review and summary) and `contents: read` (to check out the code). The default `GITHUB_TOKEN` is enough; the action reads it as `${{ github.token }}` by default.
+- **Full git history:** check out with `fetch-depth: 0` so the merge-base diff and commit log resolve.
+- **A model + its key:** pass the model via the `model` input and the provider's key via the `api-key` input (or expose the provider's standard env var, e.g. `ANTHROPIC_API_KEY`, to the step).
+
+```yml
+name: code-review
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ikko-dev/gitlab-review@main # pin to a release tag in production
+        with:
+          model: anthropic/claude-sonnet-4-5
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # github-token defaults to ${{ github.token }}
+          # args: --min-severity warn --dry-run
+```
+
+Inputs: `model` (required), `api-key`, `github-token` (default `${{ github.token }}`), `version` (npm dist-tag/version, default `latest`), `node-version` (default `24`), `working-directory`, and `args` (extra CLI flags forwarded verbatim).
+
+Prefer to run the CLI directly (no composite action)? `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, and the PR number are read straight from the Actions environment:
+
+```yml
+- uses: actions/setup-node@v4
+  with:
+    node-version: 24
+- run: npx @ikko-dev/gitlab-review
+  env:
+    GITHUB_TOKEN: ${{ github.token }}
+    GITLAB_REVIEW_MODEL: anthropic/claude-sonnet-4-5
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
 ## Documentation
 
 The README covers getting started. Reference material lives in [`docs/`](https://github.com/ikko-dev/gitlab-review/tree/main/docs):

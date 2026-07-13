@@ -1,6 +1,7 @@
 export type ErrorCode =
   | 'CONFIG_ERROR'
   | 'GITLAB_API_ERROR'
+  | 'GITHUB_API_ERROR'
   | 'GIT_ERROR'
   | 'REVIEWER_ERROR'
   | 'PARSE_ERROR'
@@ -97,6 +98,29 @@ export class GitLabApiError extends GitlabReviewError {
   }
 }
 
+export class GitHubApiError extends GitlabReviewError {
+  readonly method: string;
+  readonly path: string;
+  readonly status?: number;
+  readonly responseBody?: string;
+
+  constructor(
+    message: string,
+    options: Omit<GitlabReviewErrorOptions, 'code'> & {
+      method: string;
+      path: string;
+      status?: number;
+      responseBody?: string;
+    },
+  ) {
+    super(message, { ...options, code: 'GITHUB_API_ERROR' });
+    this.method = options.method;
+    this.path = options.path;
+    this.status = options.status;
+    this.responseBody = options.responseBody;
+  }
+}
+
 export class GitError extends GitlabReviewError {
   constructor(message: string, options: Omit<GitlabReviewErrorOptions, 'code'> = {}) {
     super(message, { ...options, code: 'GIT_ERROR' });
@@ -125,7 +149,10 @@ export function formatError(error: unknown): string {
   if (error instanceof GitlabReviewError) {
     const lines = [`[${error.code}] ${error.message}`];
     if (error.hint) lines.push(`Hint: ${error.hint}`);
-    if (error instanceof GitLabApiError && error.responseBody) {
+    if (
+      (error instanceof GitLabApiError || error instanceof GitHubApiError) &&
+      error.responseBody
+    ) {
       lines.push(`Response: ${error.responseBody}`);
     }
     return lines.join('\n');

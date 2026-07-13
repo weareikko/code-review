@@ -1,0 +1,72 @@
+name: gitlab-review
+description: >-
+  Agent-driven code review for GitHub pull requests. Posts deduplicated inline
+  review comments and an upserted summary. (Same engine as the GitLab CI flow;
+  the package name stays @ikko-dev/gitlab-review.)
+author: ikko-dev
+branding:
+  icon: git-pull-request
+  color: blue
+
+inputs:
+  model:
+    description: >-
+      Model to review with, as `provider/modelId` (e.g.
+      `anthropic/claude-sonnet-4-5`). Sets `GITLAB_REVIEW_MODEL`. Required.
+    required: true
+  api-key:
+    description: >-
+      API key for the model provider. Passed as `--api-key`. Optional when the
+      provider's standard env var (e.g. `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)
+      is already exposed to the step, or for keyless providers (Ollama) and
+      ambient credentials (Bedrock/Vertex).
+    required: false
+    default: ''
+  github-token:
+    description: >-
+      Token used to read the pull request and post the review. Needs
+      `pull-requests: write`. Defaults to the automatic workflow token.
+    required: false
+    default: ${{ github.token }}
+  version:
+    description: npm version or dist-tag of @ikko-dev/gitlab-review to run.
+    required: false
+    default: latest
+  node-version:
+    description: Node.js version to set up (the CLI requires >=24).
+    required: false
+    default: '24'
+  working-directory:
+    description: Directory to run the review in (the checked-out repository).
+    required: false
+    default: '.'
+  args:
+    description: >-
+      Extra CLI flags forwarded verbatim (e.g.
+      `--min-severity warn --posting-mode draft --dry-run`).
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+    - name: Run gitlab-review
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GITLAB_REVIEW_MODEL: ${{ inputs.model }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_API_KEY: ${{ inputs.api-key }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_ARGS: ${{ inputs.args }}
+      run: |
+        set -euo pipefail
+        flags=()
+        if [ -n "${INPUT_API_KEY}" ]; then
+          flags+=(--api-key "${INPUT_API_KEY}")
+        fi
+        npx --yes "@ikko-dev/gitlab-review@${INPUT_VERSION}" "${flags[@]}" ${INPUT_ARGS}

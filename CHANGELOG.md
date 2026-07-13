@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Review GitHub pull requests with the same engine as GitLab MRs: the platform is auto-detected from the environment (`--platform github|gitlab` to force it), findings post as one batched PR review with an upserted summary comment. Ships a composite `action.yml` and a GitHub Actions setup guide in the README ([#118]).
+
+### Changed
+
+- Diagnostics phase/channel names renamed `gitlab.* → scm.*` (`get_merge_request`, `get_latest_version`, `get_discussions`, `post_comments`, `upsert_summary`) ([#118]).
+- `GeneratedComment.payload` is now generic (platform-specific payload; GitLab keeps `GitLabDiscussionPayload`) ([#118]).
+
 [Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.6...HEAD
+[#118]: https://github.com/ikko-dev/gitlab-review/pull/118
 
 ## [0.7.6] - 2026-07-09
 
