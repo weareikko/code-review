@@ -4,22 +4,22 @@
 
 ## Diagnostics channels
 
-`gitlab-review` publishes opt-in Node.js `diagnostics_channel` tracing events with no external telemetry dependency. Subscribers can listen before calling `run()` or from a Node preload/import hook before running the CLI.
+`code-review` publishes opt-in Node.js `diagnostics_channel` tracing events with no external telemetry dependency. Subscribers can listen before calling `run()` or from a Node preload/import hook before running the CLI.
 
 Base tracing channel names:
 
-- `@ikko-dev/gitlab-review:run`
-- `@ikko-dev/gitlab-review:scm.get_merge_request`
-- `@ikko-dev/gitlab-review:scm.get_latest_version`
-- `@ikko-dev/gitlab-review:git.prepare_history`
-- `@ikko-dev/gitlab-review:git.get_merge_diff`
-- `@ikko-dev/gitlab-review:reviewer.run`
-- `@ikko-dev/gitlab-review:review.parse`
-- `@ikko-dev/gitlab-review:scm.get_discussions`
-- `@ikko-dev/gitlab-review:comments.build`
-- `@ikko-dev/gitlab-review:artifact.write_output`
-- `@ikko-dev/gitlab-review:scm.post_comments`
-- `@ikko-dev/gitlab-review:scm.upsert_summary`
+- `@ikko-dev/code-review:run`
+- `@ikko-dev/code-review:scm.get_merge_request`
+- `@ikko-dev/code-review:scm.get_latest_version`
+- `@ikko-dev/code-review:git.prepare_history`
+- `@ikko-dev/code-review:git.get_merge_diff`
+- `@ikko-dev/code-review:reviewer.run`
+- `@ikko-dev/code-review:review.parse`
+- `@ikko-dev/code-review:scm.get_discussions`
+- `@ikko-dev/code-review:comments.build`
+- `@ikko-dev/code-review:artifact.write_output`
+- `@ikko-dev/code-review:scm.post_comments`
+- `@ikko-dev/code-review:scm.upsert_summary`
 
 Node emits tracing subchannels as `tracing:<base>:start`, `:end`, `:asyncStart`, `:asyncEnd`, and `:error`. Payloads include safe run metadata (`runId`, phase, project, MR, GitLab URL, model, severity, timings, comment counts, and sanitized `errorInfo`) and intentionally exclude tokens/API keys.
 
@@ -30,7 +30,7 @@ The `git.get_merge_diff` payload exposes `diffFilesChanged`, `diffLinesAdded`, a
 The `reviewer.run` payload exposes a `usage` field (`{ model, tokens, cost }`) once the agent has returned. The same `usage` is forwarded onto the top-level `run` payload so a subscriber on `run:asyncEnd` sees the final token and cost totals for the review.
 
 ```js
-import { diagnosticChannels, run } from '@ikko-dev/gitlab-review';
+import { diagnosticChannels, run } from '@ikko-dev/code-review';
 
 const onStart = (ctx) => console.log('review started', ctx.runId);
 const onEnd = (ctx) => console.log('review completed', ctx.durationMs, ctx.generated);
@@ -54,8 +54,8 @@ Exporter selection follows the standard `OTEL_*` env vars (`OTEL_EXPORTER_OTLP_E
 The full trace hierarchy in Tempo is:
 
 ```
-invoke_workflow gitlab-review
-└── invoke_agent gitlab-review
+invoke_workflow code-review
+└── invoke_agent code-review
     ├── gen_ai.agent.turn (turn 1)
     │   ├── execute_tool Read
     │   └── execute_tool Grep
@@ -64,11 +64,11 @@ invoke_workflow gitlab-review
     └── gen_ai.agent.turn (turn N)
 ```
 
-- `invoke_workflow gitlab-review` — root span per run, carrying `gitlab.project_id`, `gitlab.mr_iid`, comment counters, and `gen_ai.*` totals.
-- `invoke_agent gitlab-review` — wraps the full agent call. Tagged with `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.operation.name=invoke_agent`, aggregate token and cost attributes.
+- `invoke_workflow code-review` — root span per run, carrying `gitlab.project_id`, `gitlab.mr_iid`, comment counters, and `gen_ai.*` totals.
+- `invoke_agent code-review` — wraps the full agent call. Tagged with `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.operation.name=invoke_agent`, aggregate token and cost attributes.
 - `gen_ai.agent.turn` — one child span per agent turn with per-turn token counts, cost, model, and stop reason.
 - `execute_tool <name>` — one grandchild span per tool call (`gen_ai.tool.name`, `gen_ai.tool.call.id`). Error status is set on failed calls; failed calls also carry `process.exit_code`, and (only with content capture) `tool.stderr` and `tool.command`.
-- `gitlab-review.<phase>` — one span per remaining phase (`scm.get_merge_request`, `git.get_merge_diff`, `scm.post_comments`, …) for latency and error rates.
+- `code-review.<phase>` — one span per remaining phase (`scm.get_merge_request`, `git.get_merge_diff`, `scm.post_comments`, …) for latency and error rates.
 
 Source-control API read spans (`scm.get_merge_request`, `scm.get_latest_version`, `scm.get_discussions`) carry stable OTel HTTP semantic-convention attributes — `http.request.method`, `http.response.status_code`, `url.full`, `http.response.body.size`, `server.address` — so API rate limits and 4xx/5xx responses are visible at the span level (the failing request's status is recorded even when the call throws). The `git.get_merge_diff` span carries `diff.files_changed`, `diff.lines_added`, and `diff.lines_removed` so duration and cost can be correlated with change size. The root `invoke_workflow` span carries `gitlab_review.run_id` (and `gen_ai.conversation.id`) so a trace can be joined to its metric series and log stream.
 
@@ -158,7 +158,7 @@ Library callers with pre-existing `TracerProvider`/`MeterProvider`/`LoggerProvid
 ```js
 import { metrics, trace } from '@opentelemetry/api';
 import { logs } from '@opentelemetry/api-logs';
-import { startOtelBridge } from '@ikko-dev/gitlab-review';
+import { startOtelBridge } from '@ikko-dev/code-review';
 
 await startOtelBridge({
   runtime: {

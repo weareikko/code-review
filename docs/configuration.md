@@ -43,7 +43,7 @@ The CLI auto-resolves values from CI variables and common token/key names.
 
 ### Namespacing provider/infra variables with `GITLAB_REVIEW_`
 
-In a shared GitLab CI environment, the provider credentials and infra variables read by the AI SDK use generic, provider-standard names (`ANTHROPIC_API_KEY`, `CLOUDFLARE_API_KEY`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_GATEWAY_ID`, `OLLAMA_HOST`, ambient AWS/Vertex creds, …). To avoid collisions with unrelated jobs and make it obvious which variables belong to gitlab-review, you can optionally prefix any of them with `GITLAB_REVIEW_`. At startup, each `GITLAB_REVIEW_<NAME>` variable is exposed as `<NAME>`:
+In a shared GitLab CI environment, the provider credentials and infra variables read by the AI SDK use generic, provider-standard names (`ANTHROPIC_API_KEY`, `CLOUDFLARE_API_KEY`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_GATEWAY_ID`, `OLLAMA_HOST`, ambient AWS/Vertex creds, …). To avoid collisions with unrelated jobs and make it obvious which variables belong to code-review, you can optionally prefix any of them with `GITLAB_REVIEW_`. At startup, each `GITLAB_REVIEW_<NAME>` variable is exposed as `<NAME>`:
 
 ```
 GITLAB_REVIEW_ANTHROPIC_API_KEY     → ANTHROPIC_API_KEY

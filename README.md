@@ -1,8 +1,8 @@
-# @ikko-dev/gitlab-review
+# @ikko-dev/code-review
 
-[![NPM Version](https://img.shields.io/npm/v/@ikko-dev/gitlab-review.svg?style=flat&colorB=3e63dd&colorA=414853)](https://www.npmjs.com/package/@ikko-dev/gitlab-review/)
-[![Downloads](https://img.shields.io/npm/dm/@ikko-dev/gitlab-review?style=flat&colorB=3e63dd&colorA=414853)](https://www.npmjs.com/package/@ikko-dev/gitlab-review/)
-[![Size](https://img.shields.io/bundlephobia/minzip/@ikko-dev/gitlab-review?style=flat&colorB=3e63dd&colorA=414853&label=size)](https://bundlephobia.com/package/@ikko-dev/gitlab-review)
+[![NPM Version](https://img.shields.io/npm/v/@ikko-dev/code-review.svg?style=flat&colorB=3e63dd&colorA=414853)](https://www.npmjs.com/package/@ikko-dev/code-review/)
+[![Downloads](https://img.shields.io/npm/dm/@ikko-dev/code-review?style=flat&colorB=3e63dd&colorA=414853)](https://www.npmjs.com/package/@ikko-dev/code-review/)
+[![Size](https://img.shields.io/bundlephobia/minzip/@ikko-dev/code-review?style=flat&colorB=3e63dd&colorA=414853&label=size)](https://bundlephobia.com/package/@ikko-dev/code-review)
 ![Codecov](https://img.shields.io/codecov/c/github/ikko-dev/gitlab-review?style=flat&colorB=3e63dd&colorA=414853)
 
 Run an agent-driven code review in GitLab CI, parse inline comments, post deduplicated merge request discussions, and report per-run token usage and cost.
@@ -20,33 +20,33 @@ The reviewer reads the MR **title and description** as the author's declared int
 Run without installing:
 
 ```bash
-npx @ikko-dev/gitlab-review
+npx @ikko-dev/code-review
 ```
 
 Or install in your project:
 
 ```bash
-npm i -D @ikko-dev/gitlab-review
-npx gitlab-review --help
+npm i -D @ikko-dev/code-review
+npx code-review --help
 ```
 
 ### Binary entrypoint
 
-This package exposes the `gitlab-review` binary through:
+This package exposes the `code-review` binary through:
 
-- `bin/gitlab-review.js` (runtime shim)
+- `bin/code-review.js` (runtime shim)
 - `dist/cli.js` (compiled CLI)
 
 ## Usage
 
 ```bash
-gitlab-review [options]
+code-review [options]
 ```
 
 Common local dry-run:
 
 ```bash
-gitlab-review \
+code-review \
   --project 123 \
   --mr 42 \
   --gitlab-url https://gitlab.example.com \
@@ -70,7 +70,7 @@ review:
     # CI/CD variable, e.g. ANTHROPIC_API_KEY.
     GITLAB_REVIEW_MODEL: anthropic/claude-sonnet-4-5
   script:
-    - npx @ikko-dev/gitlab-review
+    - npx @ikko-dev/code-review
   artifacts:
     when: always
     paths:
@@ -121,7 +121,7 @@ Prefer to run the CLI directly (no composite action)? `GITHUB_TOKEN`, `GITHUB_RE
 - uses: actions/setup-node@v4
   with:
     node-version: 24
-- run: npx @ikko-dev/gitlab-review
+- run: npx @ikko-dev/code-review
   env:
     GITHUB_TOKEN: ${{ github.token }}
     GITLAB_REVIEW_MODEL: anthropic/claude-sonnet-4-5
@@ -144,14 +144,14 @@ The README covers getting started. Reference material lives in [`docs/`](https:/
 The CLI auto-resolves most values from GitLab CI variables and provider-standard env vars. The two things you must provide are a model and its provider's API key:
 
 ```bash
-gitlab-review --model anthropic/claude-sonnet-4-5 --api-key "$ANTHROPIC_API_KEY"
+code-review --model anthropic/claude-sonnet-4-5 --api-key "$ANTHROPIC_API_KEY"
 ```
 
 Equivalently, set `GITLAB_REVIEW_MODEL` and the provider's key (e.g. `ANTHROPIC_API_KEY`) as CI/CD variables. Common knobs include `--min-severity`, `--thinking`, `--posting-mode draft`, `--no-summary`, and `--dry-run`. See the full [environment-variable and flag reference](https://github.com/ikko-dev/gitlab-review/blob/main/docs/configuration.md).
 
 ## Providers
 
-`gitlab-review` uses [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi-ai) for model access. Any registered provider can be selected with `--model provider/modelId` (e.g. `anthropic/claude-sonnet-4-5`, `openrouter/anthropic/claude-3-opus-20240229`, `google/gemini-2.0-flash`, `ollama/qwen2.5-coder:32b`). See [Providers](https://github.com/ikko-dev/gitlab-review/blob/main/docs/providers.md) for per-provider setup and the model pool.
+`code-review` uses [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi-ai) for model access. Any registered provider can be selected with `--model provider/modelId` (e.g. `anthropic/claude-sonnet-4-5`, `openrouter/anthropic/claude-3-opus-20240229`, `google/gemini-2.0-flash`, `ollama/qwen2.5-coder:32b`). See [Providers](https://github.com/ikko-dev/gitlab-review/blob/main/docs/providers.md) for per-provider setup and the model pool.
 
 ## Artifacts
 
@@ -214,8 +214,8 @@ The review agent runs against pinned `@earendil-works/pi-agent-core`, `@earendil
 
 ## Acknowledgements
 
-`gitlab-review` builds on ideas and prior work from several projects:
+`code-review` builds on ideas and prior work from several projects:
 
-- **[pi-reviewer](https://github.com/earendil-works/pi-reviewer)** — the original agent-driven code reviewer that `gitlab-review` grew out of. The agent runtime (`@earendil-works/pi-agent-core`), model abstraction (`@earendil-works/pi-ai`), and read-only coding tools (`@earendil-works/pi-coding-agent`) are all pi-reviewer infrastructure.
+- **[pi-reviewer](https://github.com/earendil-works/pi-reviewer)** — the original agent-driven code reviewer that `code-review` grew out of. The agent runtime (`@earendil-works/pi-agent-core`), model abstraction (`@earendil-works/pi-ai`), and read-only coding tools (`@earendil-works/pi-coding-agent`) are all pi-reviewer infrastructure.
 - **[Warden](https://warden.sentry.dev)** by Sentry — the skills architecture (per-skill instruction blocks, reference files loaded on demand by the agent, project-level discovery) takes direct inspiration from Warden's approach to composable, domain-specific review modules.
 - **[agentskills.io](https://agentskills.io)** — the `SKILL.md` frontmatter format and multi-file skill layout (`references/`, `scripts/`, `assets/`) follow the agentskills.io open standard for portable agent skills.

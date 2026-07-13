@@ -14,7 +14,7 @@ Skills are domain-specific review modules that sharpen the agent's focus on a pa
 Enable a built-in skill with `--skill`:
 
 ```bash
-gitlab-review --skill code-review
+code-review --skill code-review
 ```
 
 Or set it permanently via the environment variable:
@@ -27,7 +27,7 @@ variables:
 Multiple skills can be specified by repeating `--skill` or comma-separating values in `GITLAB_REVIEW_SKILLS`:
 
 ```bash
-gitlab-review --skill code-review --skill my-custom-skill
+code-review --skill code-review --skill my-custom-skill
 ```
 
 ## External skills
@@ -50,13 +50,13 @@ The repo is shallow-cloned at a **pinned ref** (a tag, branch, or commit). Appen
 
 ```bash
 # repo root, default branch
-gitlab-review --skill git:https://gitlab.example.com/tools/review-skill.git
+code-review --skill git:https://gitlab.example.com/tools/review-skill.git
 
 # pin a tag, load a sub-directory from a multi-skill bundle
-gitlab-review --skill 'git:https://gitlab.example.com/tools/skills.git#v1.2.0/security'
+code-review --skill 'git:https://gitlab.example.com/tools/skills.git#v1.2.0/security'
 
 # private GitLab repo over SSH (preferred), pinned to a branch
-gitlab-review --skill 'git+ssh://git@gitlab.example.com/tools/skills.git#main'
+code-review --skill 'git+ssh://git@gitlab.example.com/tools/skills.git#main'
 ```
 
 Following the project's SSH-over-HTTPS convention, prefer `git+ssh://git@<host>/<group>/<project>.git` for private GitLab remotes — authentication then uses the SSH key already available to the runner. The scp-style shorthand (`git@host:group/project.git`) is intentionally not accepted, since its `:` collides with the `#ref` fragment; use the full `git+ssh://` URI instead.
