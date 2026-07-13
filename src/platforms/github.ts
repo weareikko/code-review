@@ -1,4 +1,4 @@
-import { resolveDiffLine } from '../diff-lines.js';
+import { contextLineWithinGitHubDiff, resolveDiffLine } from '../diff-lines.js';
 import { ConfigError, GitHubApiError } from '../errors.js';
 import { appendFingerprintMarkers, extractDiffHunkContext, fingerprints } from '../fingerprints.js';
 import {
@@ -85,14 +85,22 @@ export interface GitHubPlatformOptions {
 
 /**
  * Resolve one reviewer finding to a GitHub review-comment payload, or `null`
- * when it cannot be anchored to the diff. GitHub uses a single `line` + `side`:
- *   - a RIGHT-side finding takes the new-file line,
- *   - a LEFT-side finding takes the old-file line,
- *   - a context line takes the one side matching the finding's `side`.
+ * when it cannot be anchored to GitHub's diff. GitHub uses a single `line` +
+ * `side`:
+ *   - a pure added line takes the new-file line with `side: 'RIGHT'`,
+ *   - a pure removed line takes the old-file line with `side: 'LEFT'`,
+ *   - an unchanged (context) line takes the new-file line with `side: 'RIGHT'`,
+ *     regardless of the finding's side — GitHub's API prescribes RIGHT for
+ *     "unchanged lines ... shown for context", so a LEFT context comment is
+ *     doc-noncompliant and risks a 422.
  *
  * Returning `null` for an off-diff line is deliberate: GitHub answers 422 when a
- * review comment points at a line outside the diff, so the poster drops these
- * rather than fail the whole batched review.
+ * review comment points at a line outside the diff, and one such comment fails
+ * the whole batched review, so the poster drops these rather than post them. A
+ * context line is only kept when it lies within GitHub's default 3-line hunk
+ * context of a change — our local diff carries far more context (`--unified=20`)
+ * than GitHub's PR diff, so a distant context line is inside our diff but off
+ * GitHub's.
  */
 export function buildGitHubReviewPayload(
   comment: ReviewComment,
@@ -101,6 +109,12 @@ export function buildGitHubReviewPayload(
 ): GitHubReviewCommentPayload | null {
   const resolved = resolveDiffLine(diff, comment.file, comment.line, comment.side);
   if (!resolved) return null;
+  // A context line resolves to BOTH sides. GitHub only shows context lines close
+  // to a change and wants them on the RIGHT side.
+  if (resolved.oldLine !== undefined && resolved.newLine !== undefined) {
+    if (!contextLineWithinGitHubDiff(diff, comment.file, comment.line, comment.side)) return null;
+    return { path: comment.file, body, line: resolved.newLine, side: 'RIGHT' };
+  }
   if (comment.side === 'LEFT') {
     if (resolved.oldLine === undefined) return null;
     return { path: comment.file, body, line: resolved.oldLine, side: 'LEFT' };
@@ -315,13 +329,36 @@ export class GitHubPlatform implements ReviewPlatform {
         hint: 'Call getRefs()/buildComments() to resolve refs before postComments().',
       });
     }
+    const commitId = this.commitId;
 
-    await this.client.createReview(this.owner, this.repo, this.pull, {
-      commit_id: this.commitId,
-      event: 'COMMENT',
-      comments,
-    });
-    return { posted: comments.length };
+    try {
+      await this.client.createReview(this.owner, this.repo, this.pull, {
+        commit_id: commitId,
+        event: 'COMMENT',
+        comments,
+      });
+      return { posted: comments.length };
+    } catch (batchError) {
+      // GitHub 422s the ENTIRE batched review if a single comment lands off its
+      // diff, losing every finding. We already guard positions locally, but as
+      // defense-in-depth (mirroring the GitLab draft `publishFailed` fallback)
+      // retry each comment as its own single-comment review so valid findings
+      // still land and only the rejected ones are dropped. Re-throw the original
+      // error when every retry also fails, so a genuinely broken run surfaces.
+      if (!(batchError instanceof GitHubApiError) || batchError.status !== 422) throw batchError;
+      const results = await Promise.allSettled(
+        comments.map((comment) =>
+          this.client.createReview(this.owner, this.repo, this.pull, {
+            commit_id: commitId,
+            event: 'COMMENT',
+            comments: [comment],
+          }),
+        ),
+      );
+      const posted = results.filter((result) => result.status === 'fulfilled').length;
+      if (posted === 0) throw batchError;
+      return { posted };
+    }
   }
 
   async upsertSummary(

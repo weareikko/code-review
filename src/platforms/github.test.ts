@@ -53,12 +53,51 @@ describe('buildGitHubReviewPayload', () => {
     expect(payload).toEqual({ path: 'src/index.ts', body: 'body', line: 2, side: 'LEFT' });
   });
 
-  it('maps a context line to a single side matching the finding', () => {
-    // New line 1 (` const a = 1;`) is an unchanged context line.
+  it('maps a context line to RIGHT/newLine regardless of the finding side', () => {
+    // New line 1 (` const a = 1;`) is an unchanged context line adjacent to the
+    // change. GitHub's API prescribes RIGHT for context lines, so both sides map
+    // to the same RIGHT/new-line position.
     const right = buildGitHubReviewPayload(comment({ line: 1, side: 'RIGHT' }), 'body', DIFF);
     expect(right).toEqual({ path: 'src/index.ts', body: 'body', line: 1, side: 'RIGHT' });
     const left = buildGitHubReviewPayload(comment({ line: 1, side: 'LEFT' }), 'body', DIFF);
-    expect(left).toEqual({ path: 'src/index.ts', body: 'body', line: 1, side: 'LEFT' });
+    expect(left).toEqual({ path: 'src/index.ts', body: 'body', line: 1, side: 'RIGHT' });
+  });
+
+  it('drops a context line beyond GitHub 3-line hunk context (guards batch 422)', () => {
+    // A hunk whose only change is at new line 7-8; our local diff carries wide
+    // (--unified=20) context, so new line 1 is a valid line in OUR diff but 6 rows
+    // from the nearest change — outside GitHub's 3-line PR diff, which would 422
+    // the whole batched review. It must be dropped (null); a context line within
+    // 3 rows of the change is still placed on RIGHT.
+    const farDiff = [
+      'diff --git a/src/far.ts b/src/far.ts',
+      '--- a/src/far.ts',
+      '+++ b/src/far.ts',
+      '@@ -1,10 +1,11 @@',
+      ' line1',
+      ' line2',
+      ' line3',
+      ' line4',
+      ' line5',
+      ' line6',
+      '-old7',
+      '+new7',
+      '+new8',
+      ' line9',
+      ' line10',
+    ].join('\n');
+    const far = buildGitHubReviewPayload(
+      comment({ file: 'src/far.ts', line: 1, side: 'RIGHT' }),
+      'body',
+      farDiff,
+    );
+    expect(far).toBeNull();
+    const near = buildGitHubReviewPayload(
+      comment({ file: 'src/far.ts', line: 5, side: 'RIGHT' }),
+      'body',
+      farDiff,
+    );
+    expect(near).toEqual({ path: 'src/far.ts', body: 'body', line: 5, side: 'RIGHT' });
   });
 
   it('returns null for a line outside the diff (guards GitHub 422)', () => {
@@ -304,6 +343,51 @@ describe('GitHubPlatform', () => {
     expect(payload.event).toBe('COMMENT');
     expect(payload.comments).toHaveLength(1);
     expect(payload.comments[0]).toMatchObject({ path: 'src/index.ts', line: 3, side: 'RIGHT' });
+  });
+
+  it('retries comments individually when the batched review 422s, dropping the rejected', async () => {
+    const calls: { method: string; url: string; body?: string }[] = [];
+    const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
+      const method = init.method ?? 'GET';
+      const body = init.body as string | undefined;
+      calls.push({ method, url, body });
+      if (method === 'POST' && url.includes('/pulls/7/reviews')) {
+        const payload = JSON.parse(body ?? '{}');
+        // The batched review (>1 comment) 422s; on the per-comment retry, the
+        // off-diff context comment (line 1) is still rejected but line 3 lands.
+        if (payload.comments.length > 1) return new Response('unprocessable', { status: 422 });
+        if (payload.comments[0].line === 1) return new Response('bad line', { status: 422 });
+        return new Response(JSON.stringify({ id: 1 }));
+      }
+      return new Response('not found', { status: 404 });
+    });
+    const platform = makePlatform(fetchImpl);
+
+    // buildComments captures the commit id, so no getRefs()/PR fetch is needed.
+    const generated = platform.buildComments(
+      [comment(), comment({ body: 'context finding', line: 1 })],
+      DIFF,
+      REFS,
+      new Set(),
+    );
+    const result = await platform.postComments(generated, 'direct');
+
+    expect(result.posted).toBe(1);
+    const reviewPosts = calls.filter((c) => c.method === 'POST' && c.url.includes('/reviews'));
+    // 1 batched attempt + 2 single-comment retries.
+    expect(reviewPosts).toHaveLength(3);
+  });
+
+  it('rethrows the batch 422 when every individual retry also fails', async () => {
+    const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
+      if ((init.method ?? 'GET') === 'POST' && url.includes('/reviews')) {
+        return new Response('unprocessable', { status: 422 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    const platform = makePlatform(fetchImpl);
+    const generated = platform.buildComments([comment()], DIFF, REFS, new Set());
+    await expect(platform.postComments(generated, 'direct')).rejects.toThrow();
   });
 
   it('upsertSummary creates a new issue comment when none exists', async () => {
