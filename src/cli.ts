@@ -19,21 +19,16 @@ import { extractExistingFingerprints } from './fingerprints.js';
 import { getMergeCommitLog, getMergeDiff, prepareGitHistory, summarizeDiff } from './git.js';
 import type { ReviewUsage } from './gitlab-review.js';
 import { runReview } from './gitlab-review.js';
-import { GitLabClient, type GitLabResponseInfo } from './gitlab.js';
 import { createLogger } from './logger.js';
 import type { OtelBridge } from './otel.js';
 import { startOtelBridge } from './otel.js';
 import { parseReviewMarkdownWithWarnings } from './parser.js';
-import { buildGeneratedComments } from './payloads.js';
+import { createPlatform, type ScmResponseInfo } from './platform.js';
 import type { SummaryResult } from './posting.js';
-import {
-  findExistingReviewedCommitSha,
-  postGeneratedComments,
-  upsertSummaryNote,
-} from './posting.js';
+import { findExistingReviewedCommitSha } from './posting.js';
 import { extractChangedFiles, extractPriorThreads } from './prior-threads.js';
 import { withCarriedOverFindings } from './summary-carryover.js';
-import type { DiffRefs, GeneratedComment, Severity, ThinkingLevel } from './types.js';
+import type { GeneratedComment, Severity, ThinkingLevel } from './types.js';
 
 export type {
   DiagnosticContext,
@@ -146,18 +141,6 @@ function assertNodeVersion(): void {
   }
 }
 
-function refsFromVersion(version: {
-  base_commit_sha: string;
-  start_commit_sha: string;
-  head_commit_sha: string;
-}): DiffRefs {
-  return {
-    base_sha: version.base_commit_sha,
-    start_sha: version.start_commit_sha,
-    head_sha: version.head_commit_sha,
-  };
-}
-
 export interface RunBridges {
   /** Pre-started OTel bridge for per-turn and per-tool-call agent telemetry. */
   otel?: OtelBridge;
@@ -190,41 +173,30 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
   const logger = createLogger(config.verbose ? 'debug' : 'info');
   const runId = createDiagnosticRunId();
   return traceDiagnosticPhase('run', config, runId, async (runContext) => {
-    // Captures the most recent GitLab HTTP response so each traced read phase
-    // can stamp HTTP semconv attributes onto its span. Each request reports a
-    // fresh object, so a phase compares the holder against its pre-call value
-    // and only stamps when its own request actually produced a response.
-    let lastHttp: GitLabResponseInfo | undefined;
-    const gitlab = new GitLabClient({
-      gitlabUrl: config.gitlabUrl,
-      token: config.gitlabToken,
-      authHeader: config.gitlabAuthHeader,
-      onResponse: (info) => {
-        lastHttp = info;
-      },
-    });
-    // Wraps a single-request (or paginated) GitLab read so the phase span gets
-    // HTTP attributes on both success and error paths.
+    // The platform owns all source-control API access (target identification,
+    // reading existing comments, posting). `run()` talks only to this seam, so
+    // it is agnostic to whether the backend is GitLab or GitHub.
+    const platform = createPlatform(config);
+    // Wraps a single-request (or paginated) platform read so the phase span gets
+    // HTTP attributes on both success and error paths. The platform exposes its
+    // most recent HTTP response; a phase compares the holder against its pre-call
+    // value and only stamps when its own request actually produced a response.
     const tracedRead = <T>(phase: DiagnosticPhase, fn: () => Promise<T>): Promise<T> =>
       traceDiagnosticPhase(
         phase,
         config,
         runId,
         withHttpStamping(
-          () => lastHttp,
+          () => platform.lastResponse(),
           () => fn(),
         ),
       );
 
     logger.info('Fetching MR info...');
-    const mr = await tracedRead('gitlab.get_merge_request', () =>
-      gitlab.getMergeRequest(config.project, config.mr),
-    );
-    const version = await tracedRead('gitlab.get_latest_version', () =>
-      gitlab.getLatestVersion(config.project, config.mr),
-    );
-    const initialDiscussions = await tracedRead('gitlab.get_discussions', () =>
-      gitlab.getDiscussions(config.project, config.mr),
+    const mr = await tracedRead('scm.get_merge_request', () => platform.getMergeRequest());
+    const refs = await tracedRead('scm.get_latest_version', () => platform.getRefs());
+    const initialDiscussions = await tracedRead('scm.get_discussions', () =>
+      platform.getDiscussions(),
     );
 
     const reviewedCommitSha = findExistingReviewedCommitSha(initialDiscussions);
@@ -232,7 +204,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
       !config.forceReview &&
       !config.dryRun &&
       !config.noPost &&
-      reviewedCommitSha === version.head_commit_sha
+      reviewedCommitSha === refs.head_sha
     ) {
       const usage = zeroReviewUsage(config.model, config.thinkingLevel);
       runContext.usage = usage;
@@ -246,7 +218,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
         await writeSkipArtifacts(
           config,
           usage,
-          `Skipped review: commit ${version.head_commit_sha} was already reviewed.\n`,
+          `Skipped review: commit ${refs.head_sha} was already reviewed.\n`,
         );
         context.generated = 0;
         context.newComments = 0;
@@ -255,7 +227,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
       });
 
       console.log(
-        `Skipping review: commit ${version.head_commit_sha} was already reviewed. Use --force-review to run again.`,
+        `Skipping review: commit ${refs.head_sha} was already reviewed. Use --force-review to run again.`,
       );
       return { generated: [], posted: 0, usage, summary: null, skipped: true };
     }
@@ -365,21 +337,14 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
     );
     for (const warning of parsed.warnings) console.warn(`[gitlab-review] ${warning}`);
 
-    const discussions = await tracedRead('gitlab.get_discussions', () =>
-      gitlab.getDiscussions(config.project, config.mr),
-    );
+    const discussions = await tracedRead('scm.get_discussions', () => platform.getDiscussions());
     const existing = extractExistingFingerprints(discussions);
     const generated = await traceDiagnosticPhase(
       'comments.build',
       config,
       runId,
       async (context) => {
-        const comments = buildGeneratedComments(
-          parsed.comments,
-          diff,
-          refsFromVersion(version),
-          existing,
-        );
+        const comments = platform.buildComments(parsed.comments, diff, refs, existing);
         recordCommentCounts(context, comments);
         return comments;
       },
@@ -414,11 +379,11 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
     let summary: SummaryResult | null = null;
     if (config.postSummary && parsed.summary) {
       summary = await traceDiagnosticPhase(
-        'gitlab.upsert_summary',
+        'scm.upsert_summary',
         config,
         runId,
         withHttpStamping(
-          () => lastHttp,
+          () => platform.lastResponse(),
           async (context) => {
             // Carry still-open prior findings into the summary so an unresolved
             // inline thread never vanishes from the issue list when this run
@@ -433,22 +398,15 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
               discussions,
               currentFingerprints,
             );
-            const result = await upsertSummaryNote(
-              gitlab,
-              config.project,
-              config.mr,
-              summaryBody,
-              discussions,
-              {
-                costFooter: [formatUsageLine(usage), formatPerModelUsage(usage)]
-                  .filter(Boolean)
-                  .join('\n\n'),
-                skillsFooter: formatSkillsFooter(usage.skills),
-                reviewedCommitSha: version.head_commit_sha,
-                runId,
-                sizeNotice: usage.sizeNotice,
-              },
-            );
+            const result = await platform.upsertSummary(summaryBody, discussions, {
+              costFooter: [formatUsageLine(usage), formatPerModelUsage(usage)]
+                .filter(Boolean)
+                .join('\n\n'),
+              skillsFooter: formatSkillsFooter(usage.skills),
+              reviewedCommitSha: refs.head_sha,
+              runId,
+              sizeNotice: usage.sizeNotice,
+            });
             context.summaryAction = result.action;
             context.summaryNoteId = result.noteId;
             return result;
@@ -469,19 +427,13 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
     let draftsPublishFailed = 0;
     let raceLost = 0;
     const posted = await traceDiagnosticPhase(
-      'gitlab.post_comments',
+      'scm.post_comments',
       config,
       runId,
       withHttpStamping(
-        () => lastHttp,
+        () => platform.lastResponse(),
         async (context) => {
-          const result = await postGeneratedComments(
-            gitlab,
-            config.project,
-            config.mr,
-            generated,
-            config.postingMode,
-          );
+          const result = await platform.postComments(generated, config.postingMode);
           recordCommentCounts(context, generated);
           context.posted = result.posted;
           if (result.drafts) {
@@ -581,18 +533,18 @@ function recordCommentCounts(context: DiagnosticContext, generated: GeneratedCom
 
 /**
  * Wraps a phase operation so the phase context gets HTTP semantic-convention
- * attributes stamped from the most recent GitLab response — on both success and
- * error paths. `readLastHttp` returns the holder updated by the client's
- * `onResponse` callback; the wrapper snapshots it before the operation and only
- * stamps when the operation's own request produced a *new* response, so a phase
- * that threw before any HTTP call never inherits a previous phase's URL/status.
+ * attributes stamped from the most recent platform response — on both success
+ * and error paths. `readLastHttp` returns the platform's latest response holder;
+ * the wrapper snapshots it before the operation and only stamps when the
+ * operation's own request produced a *new* response, so a phase that threw
+ * before any HTTP call never inherits a previous phase's URL/status.
  *
- * Used by every traced GitLab phase, including the write phases
- * (`gitlab.post_comments`, `gitlab.upsert_summary`) so a failure like a 500 on
+ * Used by every traced platform phase, including the write phases
+ * (`scm.post_comments`, `scm.upsert_summary`) so a failure like a 500 on
  * `bulk_publish` carries http.response.status_code / url.full / server.address.
  */
 export function withHttpStamping<T>(
-  readLastHttp: () => GitLabResponseInfo | undefined,
+  readLastHttp: () => ScmResponseInfo | undefined,
   operation: (context: DiagnosticContext) => Promise<T>,
 ): (context: DiagnosticContext) => Promise<T> {
   return async (context) => {
@@ -607,11 +559,11 @@ export function withHttpStamping<T>(
 }
 
 /**
- * Stamp HTTP semantic-convention fields from a captured GitLab response onto a
+ * Stamp HTTP semantic-convention fields from a captured platform response onto a
  * diagnostic phase context. The OTel bridge maps these to http.* / url.full /
  * server.address span attributes. No-op when no response was captured.
  */
-function applyHttpContext(context: DiagnosticContext, info: GitLabResponseInfo | undefined): void {
+function applyHttpContext(context: DiagnosticContext, info: ScmResponseInfo | undefined): void {
   if (!info) return;
   context.httpRequestMethod = info.method;
   context.httpUrl = info.url;

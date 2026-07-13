@@ -62,11 +62,17 @@ export interface Fingerprints {
   secondary: string;
 }
 
-export interface GeneratedComment {
+/**
+ * A parsed reviewer finding paired with its dedup fingerprints and the
+ * platform-specific posting payload. `payload` is generic (defaulting to
+ * `unknown`) so the seam stays platform-agnostic: only the platform that built
+ * a payload reads it back. GitLab builds a {@link GitLabDiscussionPayload}.
+ */
+export interface GeneratedComment<Payload = unknown> {
   comment: ReviewComment;
   fingerprints: Fingerprints;
   duplicate: boolean;
-  payload: GitLabDiscussionPayload;
+  payload: Payload;
 }
 
 export interface GitLabDiscussionPayload {
