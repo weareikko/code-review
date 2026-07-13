@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { getEnvApiKey } from '@earendil-works/pi-ai';
 import { ConfigError } from './errors.js';
+import { DEFAULT_GITHUB_API_URL } from './github.js';
 import { POSTING_MODES, type PostingMode } from './posting.js';
 import {
   REVIEW_DEPTHS,
@@ -11,6 +13,13 @@ import {
 } from './types.js';
 
 export type GitLabAuthHeader = 'PRIVATE-TOKEN' | 'JOB-TOKEN';
+
+/** Source-control backends the reviewer can target. */
+export const PLATFORMS = ['gitlab', 'github'] as const;
+export type Platform = (typeof PLATFORMS)[number];
+
+/** Default GitHub server (web) URL, honoring `GITHUB_SERVER_URL` on Enterprise. */
+export const DEFAULT_GITHUB_SERVER_URL = 'https://github.com';
 
 /**
  * The single source of truth for the tool's own `GITLAB_REVIEW_*` settings.
@@ -31,6 +40,7 @@ export const RESERVED_ENV_SUFFIXES = [
   'MIN_SEVERITY',
   'MODEL',
   'MODEL_POOL',
+  'PLATFORM',
   'OTEL',
   'OTEL_CAPTURE_CONTENT',
   'POSTING_MODE',
@@ -103,11 +113,27 @@ export function applyDefaultCacheRetention(env = process.env): NodeJS.ProcessEnv
 }
 
 export interface Config {
+  /**
+   * The source-control backend to review against. Auto-detected from the
+   * environment by default (see {@link detectPlatform}); `--platform` /
+   * `GITLAB_REVIEW_PLATFORM` is an explicit override that always wins.
+   */
+  platform: Platform;
   project: string;
   mr: string;
   gitlabUrl: string;
   gitlabToken: string;
   gitlabAuthHeader: GitLabAuthHeader;
+  /** `owner/repo` slug of the GitHub repository (`GITHUB_REPOSITORY`). */
+  githubRepository: string;
+  /** Pull-request number as a string, mirroring {@link Config.mr}. */
+  githubPr: string;
+  /** Token used for the GitHub REST API (`GITHUB_TOKEN` / `--github-token`). */
+  githubToken: string;
+  /** GitHub REST API base; defaults to {@link DEFAULT_GITHUB_API_URL}. */
+  githubApiUrl: string;
+  /** GitHub server (web) URL; defaults to {@link DEFAULT_GITHUB_SERVER_URL}. */
+  githubServerUrl: string;
   model: string;
   /**
    * Optional pool of `provider/modelId` models for heterogeneous `full`-depth
@@ -350,14 +376,130 @@ function resolveGitLabToken(
   return { token: '', header: 'PRIVATE-TOKEN' };
 }
 
+/**
+ * Extract a pull-request number from a GitHub Actions event payload JSON string
+ * (the file `GITHUB_EVENT_PATH` points at). Prefers `.pull_request.number`, then
+ * the top-level `.number` (present on `issue_comment` events). Returns `''` when
+ * the JSON is unparsable or carries no number.
+ */
+export function parsePrNumberFromEvent(json: string): string {
+  try {
+    const data = JSON.parse(json) as {
+      pull_request?: { number?: unknown } | null;
+      number?: unknown;
+    };
+    const value = data.pull_request?.number ?? data.number;
+    if (typeof value === 'number' && Number.isInteger(value)) return String(value);
+    if (typeof value === 'string' && /^\d+$/.test(value.trim())) return value.trim();
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Extract a pull-request number from a `GITHUB_REF` of the form
+ * `refs/pull/<N>/merge` (or `/head`). Returns `''` for any other ref shape.
+ */
+export function parsePrNumberFromRef(ref: string | undefined): string {
+  const match = /^refs\/pull\/(\d+)\/(?:merge|head)$/.exec(ref ?? '');
+  return match ? match[1] : '';
+}
+
+function readEventFileSync(path: string): string | undefined {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Resolve the GitHub pull-request number, in priority order: `--pr` flag, then
+ * the `GITHUB_EVENT_PATH` payload (`.pull_request.number` ?? `.number`), then a
+ * `refs/pull/<N>/merge` `GITHUB_REF`. Returns `''` when none apply.
+ */
+export function resolveGitHubPr(
+  args: ParsedArgs,
+  env: NodeJS.ProcessEnv,
+  readEventFile: (path: string) => string | undefined = readEventFileSync,
+): string {
+  if (typeof args.pr === 'string' && args.pr.length > 0) return args.pr;
+  const eventPath = env.GITHUB_EVENT_PATH;
+  if (eventPath) {
+    const json = readEventFile(eventPath);
+    if (json) {
+      const fromEvent = parsePrNumberFromEvent(json);
+      if (fromEvent) return fromEvent;
+    }
+  }
+  return parsePrNumberFromRef(env.GITHUB_REF);
+}
+
+/**
+ * Determine the review platform for this run.
+ *
+ * Precedence:
+ *   1. Explicit `--platform` / `GITLAB_REVIEW_PLATFORM` (throws on an unknown value).
+ *   2. CI markers: `GITHUB_ACTIONS === 'true'` → github; `GITLAB_CI === 'true'`
+ *      or a present `CI_PROJECT_ID` / `CI_SERVER_URL` → gitlab.
+ *   3. Inference from which platform's required identifiers are present
+ *      (`GITHUB_REPOSITORY` + a PR number vs. `CI_PROJECT_ID` + `CI_MERGE_REQUEST_IID`).
+ *
+ * Throws a {@link ConfigError} when both platforms' identifiers are present
+ * (ambiguous) or neither is (undetectable), with a hint to set `--platform`.
+ */
+export function detectPlatform(
+  args: ParsedArgs,
+  env: NodeJS.ProcessEnv,
+  readEventFile: (path: string) => string | undefined = readEventFileSync,
+): Platform {
+  const explicit = normalizeChoice(args.platform ?? env.GITLAB_REVIEW_PLATFORM);
+  if (explicit) {
+    if (explicit === 'github' || explicit === 'gitlab') return explicit;
+    throw new ConfigError(`Unknown platform "${explicit}".`, {
+      hint: `--platform (or GITLAB_REVIEW_PLATFORM) must be one of: ${PLATFORMS.join(', ')}.`,
+    });
+  }
+
+  if (env.GITHUB_ACTIONS === 'true') return 'github';
+  if (env.GITLAB_CI === 'true' || env.CI_PROJECT_ID || env.CI_SERVER_URL) return 'gitlab';
+
+  const hasGitHub = Boolean(
+    (args.githubRepository ?? env.GITHUB_REPOSITORY) && resolveGitHubPr(args, env, readEventFile),
+  );
+  const hasGitLab = Boolean(
+    (args.project ?? env.CI_PROJECT_ID) && (args.mr ?? env.CI_MERGE_REQUEST_IID),
+  );
+  if (hasGitHub && !hasGitLab) return 'github';
+  if (hasGitLab && !hasGitHub) return 'gitlab';
+
+  throw new ConfigError(
+    hasGitHub && hasGitLab
+      ? 'Ambiguous review platform: both GitHub and GitLab identifiers are present.'
+      : 'Could not detect the review platform from the environment.',
+    {
+      hint: `Set --platform (or GITLAB_REVIEW_PLATFORM) to one of: ${PLATFORMS.join(', ')}.`,
+    },
+  );
+}
+
 export function resolveConfig(argv = process.argv.slice(2), env = process.env): Config {
   const args = parseArgs(argv);
+  const platform = detectPlatform(args, env);
   const gitlabUrl = String(
     args.gitlabUrl ??
       first(env.CI_SERVER_URL, env.CI_SERVER_HOST ? `https://${env.CI_SERVER_HOST}` : undefined) ??
       '',
   ).replace(/\/$/, '');
   const token = resolveGitLabToken(args, env);
+
+  const githubApiUrl = String(
+    args.githubApiUrl ?? env.GITHUB_API_URL ?? DEFAULT_GITHUB_API_URL,
+  ).replace(/\/$/, '');
+  const githubServerUrl = String(
+    args.githubServerUrl ?? env.GITHUB_SERVER_URL ?? DEFAULT_GITHUB_SERVER_URL,
+  ).replace(/\/$/, '');
 
   // Model and API key are both required — there is no implicit default model.
   // The model is `provider/modelId`; supply it via --model or GITLAB_REVIEW_MODEL.
@@ -398,11 +540,17 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     Number.isFinite(rawDiffContext) && rawDiffContext >= 0 ? Math.floor(rawDiffContext) : 0;
 
   return {
+    platform,
     project: String(args.project ?? env.CI_PROJECT_ID ?? ''),
     mr: String(args.mr ?? env.CI_MERGE_REQUEST_IID ?? ''),
     gitlabUrl,
     gitlabToken: token.token,
     gitlabAuthHeader: token.header,
+    githubRepository: String(args.githubRepository ?? env.GITHUB_REPOSITORY ?? ''),
+    githubPr: resolveGitHubPr(args, env),
+    githubToken: String(args.githubToken ?? env.GITHUB_TOKEN ?? ''),
+    githubApiUrl,
+    githubServerUrl,
     model,
     modelPool: resolveModelPool(args, env),
     minSeverity: normalizeChoice(
@@ -448,11 +596,25 @@ export function validateConfig(config: Config): void {
   const provider = parseModelProvider(config.model);
   const requiresApiKey = provider !== 'ollama';
 
+  // Target identification and the write token are platform-specific; the model
+  // and its API key are shared. GitHub's api-url has a built-in default, so it
+  // is never listed as missing.
+  const targetFields: Array<[string, string]> =
+    config.platform === 'github'
+      ? [
+          ['github-repository', config.githubRepository],
+          ['pr', config.githubPr],
+          ['github-token', config.githubToken],
+        ]
+      : [
+          ['project', config.project],
+          ['mr', config.mr],
+          ['gitlab-url', config.gitlabUrl],
+          ['gitlab-token', config.gitlabToken],
+        ];
+
   const missing = [
-    ['project', config.project],
-    ['mr', config.mr],
-    ['gitlab-url', config.gitlabUrl],
-    ['gitlab-token', config.gitlabToken],
+    ...targetFields,
     ['model', config.model],
     ...(requiresApiKey ? [['api-key', config.apiKey]] : []),
   ]
@@ -477,7 +639,18 @@ export function validateConfig(config: Config): void {
         "Set the provider's standard API key env var (e.g. ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY) or pass --api-key.",
       );
     }
-    if (hints.length === 0) {
+    if (config.platform === 'github') {
+      if (missing.includes('--github-token')) {
+        hints.push(
+          'Set GITHUB_TOKEN (or pass --github-token) with a token that can read the repo and write pull-request reviews; in GitHub Actions expose `${{ secrets.GITHUB_TOKEN }}` via env.',
+        );
+      }
+      if (missing.includes('--github-repository') || missing.includes('--pr')) {
+        hints.push(
+          'Set GITHUB_REPOSITORY (owner/repo) and the pull-request number — the latter comes from the pull_request event payload, GITHUB_REF (refs/pull/N/merge), or --pr.',
+        );
+      }
+    } else if (hints.length === 0) {
       hints.push('Provide CLI flags or the corresponding GitLab CI environment variables.');
     }
     throw new ConfigError(`Missing required configuration: ${missing.join(', ')}.`, {

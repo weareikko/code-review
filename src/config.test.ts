@@ -2,11 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   applyDefaultCacheRetention,
   applyGitLabReviewEnvPrefix,
+  detectPlatform,
   parseArgs,
   parseModelProvider,
+  parsePrNumberFromEvent,
+  parsePrNumberFromRef,
+  PLATFORMS,
   RESERVED_ENV_SUFFIXES,
   resolveConfig,
+  resolveGitHubPr,
   validateConfig,
+  type Config,
   type Severity,
   type ThinkingLevel,
 } from './config.js';
@@ -174,13 +180,299 @@ describe('config env defaults', () => {
   });
 });
 
+describe('parsePrNumberFromEvent', () => {
+  it('reads .pull_request.number', () => {
+    expect(parsePrNumberFromEvent('{"pull_request":{"number":42}}')).toBe('42');
+  });
+
+  it('falls back to the top-level .number (issue_comment events)', () => {
+    expect(parsePrNumberFromEvent('{"number":7}')).toBe('7');
+  });
+
+  it('prefers .pull_request.number over the top-level .number', () => {
+    expect(parsePrNumberFromEvent('{"pull_request":{"number":42},"number":7}')).toBe('42');
+  });
+
+  it('accepts a numeric string number', () => {
+    expect(parsePrNumberFromEvent('{"number":"13"}')).toBe('13');
+  });
+
+  it('returns empty string for unparsable JSON', () => {
+    expect(parsePrNumberFromEvent('not json')).toBe('');
+  });
+
+  it('returns empty string when there is no number', () => {
+    expect(parsePrNumberFromEvent('{"pull_request":{}}')).toBe('');
+    expect(parsePrNumberFromEvent('{}')).toBe('');
+  });
+});
+
+describe('parsePrNumberFromRef', () => {
+  it('extracts the number from refs/pull/N/merge', () => {
+    expect(parsePrNumberFromRef('refs/pull/123/merge')).toBe('123');
+  });
+
+  it('extracts the number from refs/pull/N/head', () => {
+    expect(parsePrNumberFromRef('refs/pull/9/head')).toBe('9');
+  });
+
+  it('returns empty string for a branch ref', () => {
+    expect(parsePrNumberFromRef('refs/heads/main')).toBe('');
+    expect(parsePrNumberFromRef(undefined)).toBe('');
+  });
+});
+
+describe('resolveGitHubPr', () => {
+  it('prefers the --pr flag', () => {
+    const read = () => '{"pull_request":{"number":99}}';
+    expect(
+      resolveGitHubPr(
+        { pr: '5' },
+        { GITHUB_EVENT_PATH: '/e', GITHUB_REF: 'refs/pull/8/merge' },
+        read,
+      ),
+    ).toBe('5');
+  });
+
+  it('reads the event payload before GITHUB_REF', () => {
+    const read = () => '{"pull_request":{"number":42}}';
+    expect(
+      resolveGitHubPr({}, { GITHUB_EVENT_PATH: '/e', GITHUB_REF: 'refs/pull/8/merge' }, read),
+    ).toBe('42');
+  });
+
+  it('falls back to GITHUB_REF when the event has no number', () => {
+    const read = () => '{}';
+    expect(
+      resolveGitHubPr({}, { GITHUB_EVENT_PATH: '/e', GITHUB_REF: 'refs/pull/8/merge' }, read),
+    ).toBe('8');
+  });
+
+  it('falls back to GITHUB_REF when the event file is unreadable', () => {
+    const read = () => undefined;
+    expect(
+      resolveGitHubPr({}, { GITHUB_EVENT_PATH: '/missing', GITHUB_REF: 'refs/pull/3/merge' }, read),
+    ).toBe('3');
+  });
+
+  it('returns empty string when nothing resolves', () => {
+    expect(resolveGitHubPr({}, {}, () => undefined)).toBe('');
+  });
+});
+
+describe('detectPlatform', () => {
+  const noRead = () => undefined;
+
+  it('honors an explicit --platform override', () => {
+    expect(detectPlatform({ platform: 'github' }, { GITLAB_CI: 'true' }, noRead)).toBe('github');
+    expect(detectPlatform({ platform: 'gitlab' }, { GITHUB_ACTIONS: 'true' }, noRead)).toBe(
+      'gitlab',
+    );
+  });
+
+  it('honors GITLAB_REVIEW_PLATFORM as an override and trims case', () => {
+    expect(detectPlatform({}, { GITLAB_REVIEW_PLATFORM: '  GitHub  ' }, noRead)).toBe('github');
+  });
+
+  it('throws on an unknown explicit platform', () => {
+    expect(() => detectPlatform({ platform: 'bitbucket' }, {}, noRead)).toThrow(ConfigError);
+    expect(() => detectPlatform({ platform: 'bitbucket' }, {}, noRead)).toThrow('Unknown platform');
+  });
+
+  it('detects github from GITHUB_ACTIONS before GitLab markers', () => {
+    expect(
+      detectPlatform({}, { GITHUB_ACTIONS: 'true', CI_PROJECT_ID: '1', GITLAB_CI: 'true' }, noRead),
+    ).toBe('github');
+  });
+
+  it('detects gitlab from GITLAB_CI', () => {
+    expect(detectPlatform({}, { GITLAB_CI: 'true' }, noRead)).toBe('gitlab');
+  });
+
+  it('detects gitlab from CI_PROJECT_ID / CI_SERVER_URL', () => {
+    expect(detectPlatform({}, { CI_PROJECT_ID: '1' }, noRead)).toBe('gitlab');
+    expect(detectPlatform({}, { CI_SERVER_URL: 'https://gl' }, noRead)).toBe('gitlab');
+  });
+
+  it('infers github from GITHUB_REPOSITORY plus a PR number', () => {
+    expect(
+      detectPlatform({}, { GITHUB_REPOSITORY: 'o/r', GITHUB_REF: 'refs/pull/1/merge' }, noRead),
+    ).toBe('github');
+  });
+
+  it('infers gitlab from project + MR identifiers', () => {
+    expect(detectPlatform({ project: 'p', mr: '2' }, {}, noRead)).toBe('gitlab');
+  });
+
+  it('throws when neither platform is detectable', () => {
+    expect(() => detectPlatform({}, {}, noRead)).toThrow('Could not detect the review platform');
+  });
+
+  it('throws (ambiguous) when both platforms identifiers are present without a CI marker', () => {
+    expect(() =>
+      detectPlatform(
+        { project: 'p', mr: '2', githubRepository: 'o/r' },
+        { GITHUB_REF: 'refs/pull/1/merge' },
+        noRead,
+      ),
+    ).toThrow('Ambiguous review platform');
+  });
+});
+
+describe('GitHub config resolution', () => {
+  const ghEnv = {
+    GITHUB_ACTIONS: 'true',
+    GITHUB_REPOSITORY: 'ikko-dev/gitlab-review',
+    GITHUB_REF: 'refs/pull/57/merge',
+    GITHUB_TOKEN: 'gh-token',
+    GITLAB_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
+  };
+
+  it('resolves GitHub env defaults', () => {
+    const cfg = resolveConfig([], ghEnv);
+    expect(cfg).toMatchObject({
+      platform: 'github',
+      githubRepository: 'ikko-dev/gitlab-review',
+      githubPr: '57',
+      githubToken: 'gh-token',
+      githubApiUrl: 'https://api.github.com',
+      githubServerUrl: 'https://github.com',
+    });
+  });
+
+  it('honors GITHUB_API_URL and GITHUB_SERVER_URL (GHE) and strips trailing slashes', () => {
+    const cfg = resolveConfig([], {
+      ...ghEnv,
+      GITHUB_API_URL: 'https://ghe.example.com/api/v3/',
+      GITHUB_SERVER_URL: 'https://ghe.example.com/',
+    });
+    expect(cfg.githubApiUrl).toBe('https://ghe.example.com/api/v3');
+    expect(cfg.githubServerUrl).toBe('https://ghe.example.com');
+  });
+
+  it('prefers CLI flags over GitHub env', () => {
+    const cfg = resolveConfig(
+      [
+        '--platform',
+        'github',
+        '--github-repository',
+        'cli/repo',
+        '--pr',
+        '3',
+        '--github-token',
+        'cli-token',
+      ],
+      ghEnv,
+    );
+    expect(cfg).toMatchObject({
+      platform: 'github',
+      githubRepository: 'cli/repo',
+      githubPr: '3',
+      githubToken: 'cli-token',
+    });
+  });
+
+  it('leaves GitLab fields resolvable independently (GitLab env unchanged)', () => {
+    const cfg = resolveConfig([], {
+      CI_PROJECT_ID: '123',
+      CI_MERGE_REQUEST_IID: '45',
+      CI_SERVER_URL: 'https://gitlab.example.com',
+      GITLAB_TOKEN: 'private-token',
+      GITLAB_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
+    });
+    expect(cfg.platform).toBe('gitlab');
+    expect(cfg.githubRepository).toBe('');
+    expect(cfg.githubPr).toBe('');
+  });
+});
+
+describe('per-platform validateConfig', () => {
+  const gitHubConfig: Config = {
+    platform: 'github',
+    project: '',
+    mr: '',
+    gitlabUrl: '',
+    gitlabToken: '',
+    gitlabAuthHeader: 'PRIVATE-TOKEN',
+    githubRepository: 'o/r',
+    githubPr: '7',
+    githubToken: 'gh-token',
+    githubApiUrl: 'https://api.github.com',
+    githubServerUrl: 'https://github.com',
+    model: 'anthropic/claude-sonnet-4-5',
+    minSeverity: 'info',
+    thinkingLevel: 'off',
+    postingMode: 'direct',
+    reviewDepth: 'single',
+    verifyModel: '',
+    apiKey: 'key',
+    baseUrl: '',
+    maxTokens: 0,
+    maxDiffChars: 100_000,
+    decomposeHintLines: 0,
+    diffContext: 0,
+    retrieveSkipped: false,
+    reviewFile: 'gitlab-review.md',
+    output: 'review-comments.json',
+    dryRun: false,
+    noPost: false,
+    postSummary: false,
+    forceReview: false,
+    verbose: false,
+    cwd: '/tmp',
+    skills: [],
+    refreshGitSkills: false,
+    modelPool: [],
+  };
+
+  it('accepts a complete GitHub config', () => {
+    expect(() => validateConfig(gitHubConfig)).not.toThrow();
+  });
+
+  it('does not require GitLab fields when platform is github', () => {
+    expect(() => validateConfig(gitHubConfig)).not.toThrow();
+  });
+
+  it('lists missing GitHub target/token fields with a hint', () => {
+    let caught: unknown;
+    try {
+      validateConfig({ ...gitHubConfig, githubRepository: '', githubPr: '', githubToken: '' });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ConfigError);
+    const err = caught as ConfigError;
+    expect(err.message).toContain('--github-repository');
+    expect(err.message).toContain('--pr');
+    expect(err.message).toContain('--github-token');
+    expect(err.hint).toContain('GITHUB_TOKEN');
+    expect(err.hint).toContain('GITHUB_REPOSITORY');
+  });
+
+  it('still requires the model API key on github', () => {
+    expect(() => validateConfig({ ...gitHubConfig, apiKey: '' })).toThrow('--api-key');
+  });
+});
+
+describe('platform constants', () => {
+  it('lists gitlab and github', () => {
+    expect([...PLATFORMS]).toEqual(['gitlab', 'github']);
+  });
+});
+
 describe('validateConfig', () => {
   const minimalConfig: Config = {
+    platform: 'gitlab',
     project: 'proj',
     mr: '1',
     gitlabUrl: 'https://gitlab.example.com',
     gitlabToken: 'tok',
     gitlabAuthHeader: 'PRIVATE-TOKEN',
+    githubRepository: '',
+    githubPr: '',
+    githubToken: '',
+    githubApiUrl: 'https://api.github.com',
+    githubServerUrl: 'https://github.com',
     model: 'anthropic/claude-sonnet-4-5',
     minSeverity: 'info',
     thinkingLevel: 'off',
@@ -952,6 +1244,7 @@ describe('applyGitLabReviewEnvPrefix', () => {
         'MODEL_POOL',
         'OTEL',
         'OTEL_CAPTURE_CONTENT',
+        'PLATFORM',
         'POSTING_MODE',
         'POST_SUMMARY',
         'REFRESH_SKILLS',
