@@ -90,7 +90,7 @@ export function buildGeneratedComments(
   diff: string,
   refs: DiffRefs,
   existingFingerprints: Set<string>,
-): GeneratedComment[] {
+): GeneratedComment<GitLabDiscussionPayload>[] {
   const seen = new Set(existingFingerprints);
 
   return comments.map((comment) => {
