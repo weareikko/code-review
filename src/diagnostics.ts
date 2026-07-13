@@ -6,18 +6,18 @@ import type { Severity } from './types.js';
 
 export type DiagnosticPhase =
   | 'run'
-  | 'gitlab.get_merge_request'
-  | 'gitlab.get_latest_version'
+  | 'scm.get_merge_request'
+  | 'scm.get_latest_version'
   | 'git.prepare_history'
   | 'git.get_merge_diff'
   | 'git.get_commit_log'
   | 'reviewer.run'
   | 'review.parse'
-  | 'gitlab.get_discussions'
+  | 'scm.get_discussions'
   | 'comments.build'
   | 'artifact.write_output'
-  | 'gitlab.post_comments'
-  | 'gitlab.upsert_summary';
+  | 'scm.post_comments'
+  | 'scm.upsert_summary';
 
 export interface DiagnosticError {
   name?: string;
@@ -155,18 +155,18 @@ export const DIAGNOSTIC_CHANNEL_PREFIX = '@ikko-dev/gitlab-review';
 
 export const DIAGNOSTIC_CHANNEL_NAMES = {
   run: `${DIAGNOSTIC_CHANNEL_PREFIX}:run`,
-  getMergeRequest: `${DIAGNOSTIC_CHANNEL_PREFIX}:gitlab.get_merge_request`,
-  getLatestVersion: `${DIAGNOSTIC_CHANNEL_PREFIX}:gitlab.get_latest_version`,
+  getMergeRequest: `${DIAGNOSTIC_CHANNEL_PREFIX}:scm.get_merge_request`,
+  getLatestVersion: `${DIAGNOSTIC_CHANNEL_PREFIX}:scm.get_latest_version`,
   prepareGitHistory: `${DIAGNOSTIC_CHANNEL_PREFIX}:git.prepare_history`,
   getMergeDiff: `${DIAGNOSTIC_CHANNEL_PREFIX}:git.get_merge_diff`,
   getCommitLog: `${DIAGNOSTIC_CHANNEL_PREFIX}:git.get_commit_log`,
   runReviewer: `${DIAGNOSTIC_CHANNEL_PREFIX}:reviewer.run`,
   parseReview: `${DIAGNOSTIC_CHANNEL_PREFIX}:review.parse`,
-  getDiscussions: `${DIAGNOSTIC_CHANNEL_PREFIX}:gitlab.get_discussions`,
+  getDiscussions: `${DIAGNOSTIC_CHANNEL_PREFIX}:scm.get_discussions`,
   buildComments: `${DIAGNOSTIC_CHANNEL_PREFIX}:comments.build`,
   writeOutput: `${DIAGNOSTIC_CHANNEL_PREFIX}:artifact.write_output`,
-  postComments: `${DIAGNOSTIC_CHANNEL_PREFIX}:gitlab.post_comments`,
-  upsertSummary: `${DIAGNOSTIC_CHANNEL_PREFIX}:gitlab.upsert_summary`,
+  postComments: `${DIAGNOSTIC_CHANNEL_PREFIX}:scm.post_comments`,
+  upsertSummary: `${DIAGNOSTIC_CHANNEL_PREFIX}:scm.upsert_summary`,
 } as const;
 
 export const diagnosticChannels = Object.fromEntries(

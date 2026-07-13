@@ -463,7 +463,7 @@ describe('OpenTelemetry bridge', () => {
     const runId = 'run-http-attrs';
     const runContext = createDiagnosticContext('run', config, runId);
     await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
-      const mrCtx = createDiagnosticContext('gitlab.get_merge_request', config, runId);
+      const mrCtx = createDiagnosticContext('scm.get_merge_request', config, runId);
       await traceDiagnostic(diagnosticChannels.getMergeRequest, mrCtx, async (ctx) => {
         ctx.httpRequestMethod = 'GET';
         ctx.httpUrl =
@@ -475,7 +475,7 @@ describe('OpenTelemetry bridge', () => {
     });
     await bridge!.shutdown();
 
-    const span = fake.spans.find((s) => s.name === 'gitlab-review.gitlab.get_merge_request');
+    const span = fake.spans.find((s) => s.name === 'gitlab-review.scm.get_merge_request');
     expect(span).toBeDefined();
     const attrs = Object.fromEntries(span!.attributes.map((a) => [a.key, a.value]));
     expect(attrs).toMatchObject({
@@ -487,7 +487,7 @@ describe('OpenTelemetry bridge', () => {
     });
   });
 
-  it('opens a fresh span for a phase that runs twice per run (gitlab.get_discussions)', async () => {
+  it('opens a fresh span for a phase that runs twice per run (scm.get_discussions)', async () => {
     // get_discussions is fetched before and after the review; the second
     // occurrence must get its own span (and its own HTTP attributes), not be
     // dropped because the first (now-closed) entry still sits in the phase map.
@@ -502,18 +502,18 @@ describe('OpenTelemetry bridge', () => {
     const runId = 'run-discussions-twice';
     const runContext = createDiagnosticContext('run', config, runId);
     await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
-      const first = createDiagnosticContext('gitlab.get_discussions', config, runId);
+      const first = createDiagnosticContext('scm.get_discussions', config, runId);
       await traceDiagnostic(diagnosticChannels.getDiscussions, first, async (ctx) => {
         ctx.httpStatusCode = 200;
       });
-      const second = createDiagnosticContext('gitlab.get_discussions', config, runId);
+      const second = createDiagnosticContext('scm.get_discussions', config, runId);
       await traceDiagnostic(diagnosticChannels.getDiscussions, second, async (ctx) => {
         ctx.httpStatusCode = 404;
       });
     });
     await bridge!.shutdown();
 
-    const spans = fake.spans.filter((s) => s.name === 'gitlab-review.gitlab.get_discussions');
+    const spans = fake.spans.filter((s) => s.name === 'gitlab-review.scm.get_discussions');
     expect(spans).toHaveLength(2);
     const statuses = spans
       .map((s) => Object.fromEntries(s.attributes.map((a) => [a.key, a.value])))
@@ -1733,7 +1733,7 @@ describe('OpenTelemetry bridge', () => {
     const runContext = createDiagnosticContext('run', config, runId);
     await traceDiagnostic(diagnosticChannels.run, runContext, async (ctx) => {
       // Simulate the post_comments phase populating draftsPublished.
-      const postContext = createDiagnosticContext('gitlab.post_comments', config, runId);
+      const postContext = createDiagnosticContext('scm.post_comments', config, runId);
       await traceDiagnostic(diagnosticChannels.postComments, postContext, async (pCtx) => {
         pCtx.draftsPublished = 4;
       });

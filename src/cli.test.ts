@@ -54,7 +54,7 @@ describe('withHttpStamping', () => {
   };
 
   function emptyContext(): DiagnosticContext {
-    return { phase: 'gitlab.post_comments' } as DiagnosticContext;
+    return { phase: 'scm.post_comments' } as DiagnosticContext;
   }
 
   it('stamps HTTP attributes when the wrapped operation throws (e.g. a 500 on bulk_publish)', async () => {

@@ -125,7 +125,7 @@ export interface OtelBridgeOptions {
 
 const ROOT_PHASE: DiagnosticPhase = 'run';
 const GEN_AI_PHASE: DiagnosticPhase = 'reviewer.run';
-const POST_COMMENTS_PHASE: DiagnosticPhase = 'gitlab.post_comments';
+const POST_COMMENTS_PHASE: DiagnosticPhase = 'scm.post_comments';
 const SERVICE_NAME = '@ikko-dev/gitlab-review';
 
 // Added as a data-point attribute on every gitlab_review_* metric so that
@@ -267,7 +267,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     }
     // A still-open span for this phase means a duplicate start — ignore it. A
     // *closed* entry means the phase legitimately runs more than once per run
-    // (e.g. gitlab.get_discussions, fetched before and after the review); let it
+    // (e.g. scm.get_discussions, fetched before and after the review); let it
     // re-open so the second occurrence gets its own span and HTTP attributes.
     const existing = phases.get(ctx.phase);
     if (existing && !existing.closed) return;
@@ -929,7 +929,7 @@ interface RunMeta {
    */
   model?: string;
   usage?: DiagnosticUsage;
-  /** Cached from the `gitlab.post_comments` phase for the drafts-published metric. */
+  /** Cached from the `scm.post_comments` phase for the drafts-published metric. */
   draftsPublished?: number;
 }
 

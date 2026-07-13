@@ -9,21 +9,21 @@
 Base tracing channel names:
 
 - `@ikko-dev/gitlab-review:run`
-- `@ikko-dev/gitlab-review:gitlab.get_merge_request`
-- `@ikko-dev/gitlab-review:gitlab.get_latest_version`
+- `@ikko-dev/gitlab-review:scm.get_merge_request`
+- `@ikko-dev/gitlab-review:scm.get_latest_version`
 - `@ikko-dev/gitlab-review:git.prepare_history`
 - `@ikko-dev/gitlab-review:git.get_merge_diff`
 - `@ikko-dev/gitlab-review:reviewer.run`
 - `@ikko-dev/gitlab-review:review.parse`
-- `@ikko-dev/gitlab-review:gitlab.get_discussions`
+- `@ikko-dev/gitlab-review:scm.get_discussions`
 - `@ikko-dev/gitlab-review:comments.build`
 - `@ikko-dev/gitlab-review:artifact.write_output`
-- `@ikko-dev/gitlab-review:gitlab.post_comments`
-- `@ikko-dev/gitlab-review:gitlab.upsert_summary`
+- `@ikko-dev/gitlab-review:scm.post_comments`
+- `@ikko-dev/gitlab-review:scm.upsert_summary`
 
 Node emits tracing subchannels as `tracing:<base>:start`, `:end`, `:asyncStart`, `:asyncEnd`, and `:error`. Payloads include safe run metadata (`runId`, phase, project, MR, GitLab URL, model, severity, timings, comment counts, and sanitized `errorInfo`) and intentionally exclude tokens/API keys.
 
-When `--posting-mode draft` is used, the `gitlab.post_comments` payload also exposes `draftsAbandoned`, `draftsCreated`, `draftsDeletedPrePublish`, and `draftsPublished` counters describing the draft lifecycle within the run.
+When `--posting-mode draft` is used, the `scm.post_comments` payload also exposes `draftsAbandoned`, `draftsCreated`, `draftsDeletedPrePublish`, and `draftsPublished` counters describing the draft lifecycle within the run.
 
 The `git.get_merge_diff` payload exposes `diffFilesChanged`, `diffLinesAdded`, and `diffLinesRemoved`; the GitLab read phases expose `httpRequestMethod`, `httpUrl`, `httpStatusCode`, `httpResponseBodySize`, and `serverAddress` (no secrets — the token is sent in a request header, not the URL); and the top-level `run` payload exposes `postedBySeverity`, a per-severity breakdown of posted comments.
 
@@ -68,9 +68,9 @@ invoke_workflow gitlab-review
 - `invoke_agent gitlab-review` — wraps the full agent call. Tagged with `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.operation.name=invoke_agent`, aggregate token and cost attributes.
 - `gen_ai.agent.turn` — one child span per agent turn with per-turn token counts, cost, model, and stop reason.
 - `execute_tool <name>` — one grandchild span per tool call (`gen_ai.tool.name`, `gen_ai.tool.call.id`). Error status is set on failed calls; failed calls also carry `process.exit_code`, and (only with content capture) `tool.stderr` and `tool.command`.
-- `gitlab-review.<phase>` — one span per remaining phase (`gitlab.get_merge_request`, `git.get_merge_diff`, `gitlab.post_comments`, …) for latency and error rates.
+- `gitlab-review.<phase>` — one span per remaining phase (`scm.get_merge_request`, `git.get_merge_diff`, `scm.post_comments`, …) for latency and error rates.
 
-GitLab API read spans (`gitlab.get_merge_request`, `gitlab.get_latest_version`, `gitlab.get_discussions`) carry stable OTel HTTP semantic-convention attributes — `http.request.method`, `http.response.status_code`, `url.full`, `http.response.body.size`, `server.address` — so API rate limits and 4xx/5xx responses are visible at the span level (the failing request's status is recorded even when the call throws). The `git.get_merge_diff` span carries `diff.files_changed`, `diff.lines_added`, and `diff.lines_removed` so duration and cost can be correlated with change size. The root `invoke_workflow` span carries `gitlab_review.run_id` (and `gen_ai.conversation.id`) so a trace can be joined to its metric series and log stream.
+Source-control API read spans (`scm.get_merge_request`, `scm.get_latest_version`, `scm.get_discussions`) carry stable OTel HTTP semantic-convention attributes — `http.request.method`, `http.response.status_code`, `url.full`, `http.response.body.size`, `server.address` — so API rate limits and 4xx/5xx responses are visible at the span level (the failing request's status is recorded even when the call throws). The `git.get_merge_diff` span carries `diff.files_changed`, `diff.lines_added`, and `diff.lines_removed` so duration and cost can be correlated with change size. The root `invoke_workflow` span carries `gitlab_review.run_id` (and `gen_ai.conversation.id`) so a trace can be joined to its metric series and log stream.
 
 #### Metrics
 
