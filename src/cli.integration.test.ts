@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { run } from './cli.js';
 import type { Config } from './config.js';
+import { buildGitHubComments, type GitHubReviewCommentPayload } from './platforms/github.js';
+import type { DiffRefs } from './types.js';
 
 // Deterministic diff + reviewer output shared with the mocked git/reviewer
 // layers. The single added line (`const b = 2;`) is new-file line 2 on the RIGHT
@@ -29,7 +31,9 @@ const fixtures = vi.hoisted(() => {
     '```',
     '',
   ].join('\n');
-  return { diff, review };
+  // Mutable so an individual test can inject a different diff/review before a run
+  // (off-diff findings, carryover fixtures); reset to the defaults in beforeEach.
+  return { diff, review, defaultDiff: diff, defaultReview: review };
 });
 
 // The review core reads the diff and commit log from LOCAL git; stub those I/O
@@ -69,6 +73,10 @@ vi.mock('./gitlab-review.js', async (importOriginal) => {
 // A 40-hex commit SHA so the reviewed-commit footer regex (which requires 40 hex
 // chars) matches on the re-run and triggers the skip.
 const HEAD_SHA = '0123456789abcdef0123456789abcdef01234567';
+
+// Refs matching the in-memory backend's head SHA, used to pre-build a realistic
+// prior bot comment body (footer + fingerprint markers) for the carryover test.
+const REFS: DiffRefs = { base_sha: 'basesha', start_sha: 'basesha', head_sha: HEAD_SHA };
 
 interface GitHubComment {
   id: number;
@@ -175,6 +183,8 @@ let cwd: string;
 
 beforeEach(async () => {
   cwd = await mkdtemp(join(tmpdir(), 'gh-review-'));
+  fixtures.diff = fixtures.defaultDiff;
+  fixtures.review = fixtures.defaultReview;
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
@@ -220,5 +230,115 @@ describe('run() over an in-memory GitHubPlatform', () => {
     expect(third.skipped).toBe(true);
     expect(third.posted).toBe(0);
     expect(backend.reviewsPosted).toHaveLength(1);
+  });
+});
+
+describe('run() over GitHub in dry-run mode', () => {
+  it('writes the artifacts but never posts to GitHub', async () => {
+    const backend = makeGitHubBackend();
+    vi.stubGlobal('fetch', backend.fetchImpl);
+
+    const result = await run(makeConfig(cwd, { dryRun: true }));
+
+    // Posting is disabled: no batched review, no summary issue comment, and the
+    // returned summary is null even though the reviewer emitted one.
+    expect(result.posted).toBe(0);
+    expect(result.summary).toBeNull();
+    expect(backend.reviewsPosted).toHaveLength(0);
+    expect(backend.issueComments).toHaveLength(0);
+
+    // The comment + usage artifacts are still written (dry-run contract).
+    const artifact = JSON.parse(await readFile(join(cwd, 'review-comments.json'), 'utf8'));
+    expect(artifact).toHaveLength(1);
+    const usage = JSON.parse(await readFile(join(cwd, 'review-usage.json'), 'utf8'));
+    expect(usage.model).toBe('anthropic/claude-sonnet-4-5');
+  });
+});
+
+describe('run() over GitHub with an off-diff finding', () => {
+  it('drops the un-anchorable comment from the batched review (guards 422)', async () => {
+    // One on-diff finding (new-file line 2) and one on a line outside the diff.
+    // resolveDiffLine returns null for the latter, so the poster drops it rather
+    // than let GitHub 422 the whole review.
+    fixtures.review = [
+      '```json',
+      JSON.stringify({
+        summary: '**Overall:** two findings.',
+        comments: [
+          { file: 'src/foo.ts', line: 2, side: 'RIGHT', body: 'On the diff.' },
+          { file: 'src/foo.ts', line: 999, side: 'RIGHT', body: 'Off the diff.' },
+        ],
+      }),
+      '```',
+      '',
+    ].join('\n');
+
+    const backend = makeGitHubBackend();
+    vi.stubGlobal('fetch', backend.fetchImpl);
+
+    const result = await run(makeConfig(cwd, { forceReview: true }));
+
+    // Only the anchorable finding posts; the batched review carries one comment.
+    expect(result.posted).toBe(1);
+    expect(backend.reviewsPosted).toHaveLength(1);
+    expect(backend.reviewsPosted[0].comments).toHaveLength(1);
+    expect(backend.reviewsPosted[0].comments?.[0]).toEqual(
+      expect.objectContaining({ path: 'src/foo.ts', line: 2, side: 'RIGHT' }),
+    );
+
+    // Both findings are still recorded in the artifact; the off-diff one has a
+    // null payload so a reader can see it was generated but not placed.
+    const artifact = JSON.parse(await readFile(join(cwd, 'review-comments.json'), 'utf8'));
+    expect(artifact).toHaveLength(2);
+    expect(artifact.filter((entry: { payload: unknown }) => entry.payload === null)).toHaveLength(
+      1,
+    );
+  });
+});
+
+describe('run() over GitHub with an unresolved prior finding', () => {
+  it('carries the still-open finding into the summary note', async () => {
+    const backend = makeGitHubBackend();
+
+    // Seed an unresolved bot inline finding from an earlier run on a changed file.
+    // Its body carries real footer + fingerprint markers, and this run does NOT
+    // re-emit it (the current finding is on a different line), so it must be
+    // carried into the summary's "Still open" block (#92).
+    const [prior] = buildGitHubComments(
+      [
+        {
+          file: 'src/foo.ts',
+          line: 3,
+          side: 'RIGHT',
+          severity: 'warn',
+          confidence: 'high',
+          body: 'issue: an earlier unresolved concern',
+        },
+      ],
+      fixtures.defaultDiff,
+      REFS,
+      new Set(),
+    );
+    const priorBody = (prior.payload as GitHubReviewCommentPayload).body;
+    backend.reviewComments.push({
+      id: 500,
+      path: 'src/foo.ts',
+      line: 3,
+      side: 'RIGHT',
+      body: priorBody,
+    });
+
+    vi.stubGlobal('fetch', backend.fetchImpl);
+
+    const result = await run(makeConfig(cwd, { forceReview: true }));
+
+    // The current finding still posts, and a fresh summary is created.
+    expect(result.posted).toBe(1);
+    expect(result.summary?.action).toBe('created');
+
+    // The upserted summary lists the carried-over finding with its location.
+    expect(backend.issueComments).toHaveLength(1);
+    expect(backend.issueComments[0].body).toContain('Still open from earlier reviews');
+    expect(backend.issueComments[0].body).toContain('src/foo.ts:3');
   });
 });
