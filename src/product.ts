@@ -4,7 +4,7 @@
  * the tool, not the backend. Kept as a single source of truth so the inline and
  * summary footers can never drift apart.
  */
-export const PRODUCT_NAME = '@ikko-dev/gitlab-review';
+export const PRODUCT_NAME = '@ikko-dev/code-review';
 
 /** Canonical project URL used in the footer's markdown link. */
 export const PRODUCT_URL = 'https://github.com/ikko-dev/gitlab-review';
