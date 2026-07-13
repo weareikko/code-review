@@ -452,7 +452,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
     const duplicates = generated.length - newCount;
     const raceExtra = raceLost > 0 ? `, ${raceLost} dropped by pre-publish re-check` : '';
     console.log(
-      `Posted ${posted} new GitLab MR discussions (${duplicates} duplicates skipped${raceExtra}).`,
+      `Posted ${posted} new review comment(s) (${duplicates} duplicates skipped${raceExtra}).`,
     );
     if (draftsPublishFailed > 0) {
       console.warn(

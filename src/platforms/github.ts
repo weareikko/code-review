@@ -1,5 +1,5 @@
 import { resolveDiffLine } from '../diff-lines.js';
-import { GitHubApiError } from '../errors.js';
+import { ConfigError, GitHubApiError } from '../errors.js';
 import { appendFingerprintMarkers, extractDiffHunkContext, fingerprints } from '../fingerprints.js';
 import {
   GitHubClient,
@@ -30,6 +30,44 @@ export interface GitHubReviewCommentPayload {
   body: string;
   line: number;
   side: Side;
+}
+
+/** The `owner` and `repo` halves of a GitHub `owner/repo` slug. */
+export interface GitHubRepository {
+  owner: string;
+  repo: string;
+}
+
+/**
+ * Split a `GITHUB_REPOSITORY` slug into its `owner` and `repo` halves. GitHub
+ * repository slugs contain exactly one `/` (neither owner nor repo may be empty
+ * or contain a slash), so anything else is a configuration error surfaced with an
+ * actionable hint rather than a confusing 404 from the API.
+ */
+export function parseGitHubRepository(slug: string): GitHubRepository {
+  const trimmed = slug.trim();
+  const slash = trimmed.indexOf('/');
+  if (slash <= 0 || slash !== trimmed.lastIndexOf('/') || slash === trimmed.length - 1) {
+    throw new ConfigError(`Invalid GitHub repository "${slug}"; expected "owner/repo".`, {
+      hint: 'Set GITHUB_REPOSITORY (or --github-repository) to an "owner/repo" slug, e.g. octocat/hello-world.',
+    });
+  }
+  return { owner: trimmed.slice(0, slash), repo: trimmed.slice(slash + 1) };
+}
+
+/**
+ * Parse a pull-request number from its string form. Rejects non-integer or
+ * non-positive values so a malformed `--pr`/`GITHUB_REF` fails fast with a hint
+ * instead of hitting `/pulls/NaN`.
+ */
+export function parseGitHubPullNumber(value: string): number {
+  const pull = Number(value.trim());
+  if (!Number.isInteger(pull) || pull <= 0) {
+    throw new ConfigError(`Invalid GitHub pull-request number "${value}".`, {
+      hint: 'The pull-request number comes from the pull_request event payload, GITHUB_REF (refs/pull/N/merge), or --pr; it must be a positive integer.',
+    });
+  }
+  return pull;
 }
 
 /** What a {@link GitHubPlatform} needs to talk to one pull request. */

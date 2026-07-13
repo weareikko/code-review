@@ -1,5 +1,10 @@
 import type { Config } from './config.js';
 import type { Discussion } from './gitlab.js';
+import {
+  GitHubPlatform,
+  parseGitHubPullNumber,
+  parseGitHubRepository,
+} from './platforms/github.js';
 import { GitLabPlatform } from './platforms/gitlab.js';
 import type { PostingMode, PostResult, SummaryResult, UpsertSummaryOptions } from './posting.js';
 import type { DiffRefs, GeneratedComment, ReviewComment } from './types.js';
@@ -75,10 +80,22 @@ export interface ReviewPlatform {
 }
 
 /**
- * Build the {@link ReviewPlatform} for this run. A placeholder for now: it
- * always returns the GitLab backend. Platform selection (auto-detection and an
- * explicit `--platform` override) arrives in a later milestone.
+ * Build the {@link ReviewPlatform} for this run from the resolved config. The
+ * platform was already selected (auto-detected from the environment or forced by
+ * `--platform`/`GITLAB_REVIEW_PLATFORM`) during config resolution; this only
+ * constructs the matching backend. GitHub target identifiers are parsed here so a
+ * malformed `owner/repo` or pull number fails fast with an actionable hint.
  */
 export function createPlatform(config: Config): ReviewPlatform {
+  if (config.platform === 'github') {
+    const { owner, repo } = parseGitHubRepository(config.githubRepository);
+    return new GitHubPlatform({
+      apiUrl: config.githubApiUrl,
+      token: config.githubToken,
+      owner,
+      repo,
+      pull: parseGitHubPullNumber(config.githubPr),
+    });
+  }
   return new GitLabPlatform(config);
 }

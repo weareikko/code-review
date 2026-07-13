@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ConfigError } from '../errors.js';
 import { extractExistingFingerprints } from '../fingerprints.js';
 import { findExistingReviewedCommitSha, findExistingSummaryNote } from '../posting.js';
 import { extractPriorThreads } from '../prior-threads.js';
@@ -9,6 +10,8 @@ import {
   GitHubPlatform,
   type GitHubReviewCommentPayload,
   normalizeGitHubDiscussions,
+  parseGitHubPullNumber,
+  parseGitHubRepository,
 } from './github.js';
 
 const DIFF = [
@@ -321,5 +324,39 @@ describe('GitHubPlatform', () => {
     expect(result).toEqual({ action: 'updated', noteId: 99 });
     const patch = calls.find((c) => c.method === 'PATCH');
     expect(patch?.url).toBe('https://api.github.com/repos/octo/repo/issues/comments/99');
+  });
+});
+
+describe('parseGitHubRepository', () => {
+  it('splits a valid owner/repo slug', () => {
+    expect(parseGitHubRepository('octocat/hello-world')).toEqual({
+      owner: 'octocat',
+      repo: 'hello-world',
+    });
+  });
+
+  it('trims surrounding whitespace', () => {
+    expect(parseGitHubRepository('  octo/repo  ')).toEqual({ owner: 'octo', repo: 'repo' });
+  });
+
+  it.each(['norepo', '/repo', 'owner/', 'a/b/c', '', '   '])(
+    'rejects the malformed slug %j',
+    (slug) => {
+      expect(() => parseGitHubRepository(slug)).toThrow(ConfigError);
+    },
+  );
+});
+
+describe('parseGitHubPullNumber', () => {
+  it('parses a positive integer string', () => {
+    expect(parseGitHubPullNumber('42')).toBe(42);
+  });
+
+  it('trims surrounding whitespace', () => {
+    expect(parseGitHubPullNumber(' 7 ')).toBe(7);
+  });
+
+  it.each(['0', '-1', '1.5', 'abc', '', ' '])('rejects %j', (value) => {
+    expect(() => parseGitHubPullNumber(value)).toThrow(ConfigError);
   });
 });
