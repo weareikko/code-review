@@ -49,9 +49,9 @@ export {
 export type { OtelBridge, OtelBridgeOptions, OtelRuntime } from './otel.js';
 export { isOtelEnabled, startOtelBridge } from './otel.js';
 
-const HELP = `Usage: gitlab-review [options]
+const HELP = `Usage: code-review [options]
 
-Run gitlab-review in GitLab CI and post deduplicated merge request discussions.
+Run code-review in GitLab CI and post deduplicated merge request discussions.
 
 Options:
   --project <id>          GitLab project ID/path (default: CI_PROJECT_ID)
@@ -307,7 +307,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
       });
       const detail = error instanceof Error ? error.message : String(error);
       console.warn(
-        `[gitlab-review] Skipping review: model provider out of credits/quota — not failing the pipeline. (${detail})`,
+        `[code-review] Skipping review: model provider out of credits/quota — not failing the pipeline. (${detail})`,
       );
       return { generated: [], posted: 0, usage: skipUsage, summary: null, skipped: true };
     }
@@ -335,7 +335,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
         return { parsed: result };
       },
     );
-    for (const warning of parsed.warnings) console.warn(`[gitlab-review] ${warning}`);
+    for (const warning of parsed.warnings) console.warn(`[code-review] ${warning}`);
 
     const discussions = await tracedRead('scm.get_discussions', () => platform.getDiscussions());
     const existing = extractExistingFingerprints(discussions);
@@ -456,7 +456,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
     );
     if (draftsPublishFailed > 0) {
       console.warn(
-        `[gitlab-review] ${draftsPublishFailed} comment(s) could not be published individually after bulk_publish failed and were dropped.`,
+        `[code-review] ${draftsPublishFailed} comment(s) could not be published individually after bulk_publish failed and were dropped.`,
       );
     }
     runContext.posted = posted;
@@ -607,7 +607,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
 
-  process.stderr.write(`[gitlab-review] ${__PKG_NAME__} v${__PKG_VERSION__}\n`);
+  process.stderr.write(`[code-review] ${__PKG_NAME__} v${__PKG_VERSION__}\n`);
   assertNodeVersion();
   // Expose any GITLAB_REVIEW_<NAME> provider/infra vars as <NAME> before
   // resolving config: getEnvApiKey and pi-ai's request-time reads both read

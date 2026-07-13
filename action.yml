@@ -1,8 +1,8 @@
-name: gitlab-review
+name: code-review
 description: >-
   Agent-driven code review for GitHub pull requests. Posts deduplicated inline
-  review comments and an upserted summary. (Same engine as the GitLab CI flow;
-  the package name stays @ikko-dev/gitlab-review.)
+  review comments and an upserted summary. (Same engine as the GitLab CI flow,
+  published as @ikko-dev/code-review.)
 author: ikko-dev
 branding:
   icon: git-pull-request
@@ -29,7 +29,7 @@ inputs:
     required: false
     default: ${{ github.token }}
   version:
-    description: npm version or dist-tag of @ikko-dev/gitlab-review to run.
+    description: npm version or dist-tag of @ikko-dev/code-review to run.
     required: false
     default: latest
   node-version:
@@ -54,7 +54,7 @@ runs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node-version }}
-    - name: Run gitlab-review
+    - name: Run code-review
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
@@ -69,4 +69,4 @@ runs:
         if [ -n "${INPUT_API_KEY}" ]; then
           flags+=(--api-key "${INPUT_API_KEY}")
         fi
-        npx --yes "@ikko-dev/gitlab-review@${INPUT_VERSION}" "${flags[@]}" ${INPUT_ARGS}
+        npx --yes "@ikko-dev/code-review@${INPUT_VERSION}" "${flags[@]}" ${INPUT_ARGS}

@@ -20,7 +20,7 @@
     "url": "git+ssh://git@github.com/ikko-dev/gitlab-review.git"
   },
   "bin": {
-    "gitlab-review": "./bin/gitlab-review.js"
+    "code-review": "./bin/code-review.js"
   },
   "files": [
     "bin/",

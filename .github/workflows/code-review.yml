@@ -1,4 +1,4 @@
-name: gitlab-review
+name: code-review
 
 on:
   pull_request:
@@ -35,4 +35,4 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_GATEWAY_ID: ${{ secrets.CLOUDFLARE_GATEWAY_ID }}
           GITLAB_REVIEW_MODEL: ${{ secrets.GITLAB_REVIEW_MODEL }}
-        run: node bin/gitlab-review.js
+        run: node bin/code-review.js

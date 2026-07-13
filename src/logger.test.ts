@@ -58,11 +58,11 @@ describe('logger', () => {
     logger.warn('w');
     logger.error('only-this');
     vi.restoreAllMocks();
-    expect(lines.filter((l) => l.includes('[gitlab-review]'))).toHaveLength(1);
+    expect(lines.filter((l) => l.includes('[code-review]'))).toHaveLength(1);
     expect(lines.some((l) => l.includes('only-this'))).toBe(true);
   });
 
-  it('prefixes every line with [gitlab-review]', () => {
+  it('prefixes every line with [code-review]', () => {
     const lines: string[] = [];
     vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => {
       lines.push(String(chunk));
@@ -71,7 +71,7 @@ describe('logger', () => {
     const logger = createLogger('debug');
     logger.info('hello');
     vi.restoreAllMocks();
-    expect(lines[0]).toBe('[gitlab-review] hello\n');
+    expect(lines[0]).toBe('[code-review] hello\n');
   });
 
   it('createLogger defaults to info level when no argument is passed', () => {
