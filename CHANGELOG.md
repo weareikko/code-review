@@ -15,9 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Diagnostics phase/channel names renamed `gitlab.* → scm.*` (`get_merge_request`, `get_latest_version`, `get_discussions`, `post_comments`, `upsert_summary`) ([#118]).
 - `GeneratedComment.payload` is now generic (platform-specific payload; GitLab keeps `GitLabDiscussionPayload`) ([#118]).
+- Renamed the npm package to `@ikko-dev/code-review` (was `@ikko-dev/gitlab-review`) to reflect dual-platform support; the CLI command, review footer, and diagnostics-channel prefix are unchanged ([#121]).
 
 [Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.6...HEAD
 [#118]: https://github.com/ikko-dev/gitlab-review/pull/118
+[#121]: https://github.com/ikko-dev/gitlab-review/pull/121
 
 ## [0.7.6] - 2026-07-09
 

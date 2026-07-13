@@ -1,13 +1,14 @@
 {
-  "name": "@ikko-dev/gitlab-review",
+  "name": "@ikko-dev/code-review",
   "version": "0.7.6",
-  "description": "Run gitlab-review in GitLab CI and post deduplicated MR discussions.",
+  "description": "Agent-driven code review for GitLab merge requests and GitHub pull requests, with deduplicated inline comments and summary notes.",
   "keywords": [
     "ci",
     "code-review",
+    "github",
     "gitlab",
-    "gitlab-review",
-    "merge-request"
+    "merge-request",
+    "pull-request"
   ],
   "homepage": "https://github.com/ikko-dev/gitlab-review#readme",
   "bugs": {
