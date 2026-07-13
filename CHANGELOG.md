@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Diagnostics phase/channel names renamed `gitlab.* → scm.*` (`get_merge_request`, `get_latest_version`, `get_discussions`, `post_comments`, `upsert_summary`) ([#118]).
 - `GeneratedComment.payload` is now generic (platform-specific payload; GitLab keeps `GitLabDiscussionPayload`) ([#118]).
-- Renamed the npm package to `@ikko-dev/code-review` (was `@ikko-dev/gitlab-review`) to reflect dual-platform support; the CLI command, review footer, and diagnostics-channel prefix are unchanged ([#121]).
+- **BREAKING**: renamed the product identity from `gitlab-review` to `code-review` to reflect dual-platform support — the npm package (`@ikko-dev/code-review`), the CLI command (`code-review`, run via `bin/code-review.js`), the review footer name, the `diagnostics_channel`/OpenTelemetry name prefix (`@ikko-dev/code-review:*`), and the hidden dedup/summary/fingerprint marker prefixes (`code-review:`) all change; readers stay backward-compatible (summary notes and fingerprints posted under the old identity are still matched and deduplicated, so the first post-upgrade run upserts rather than duplicating), and the GitHub repository URL is unchanged ([#121]).
 
 [Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.6...HEAD
 [#118]: https://github.com/ikko-dev/gitlab-review/pull/118
