@@ -20,7 +20,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = resolve(HERE, '..', 'tests', 'evals', 'fixtures');
 
 const FINGERPRINT_MARKER_RE =
-  /<!--\s*(?:gitlab-review|pi-reviewer):fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->/i;
+  /<!--\s*(?:code-review|gitlab-review|pi-reviewer):fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->/i;
 
 function parseArgs(argv) {
   const out = {};
