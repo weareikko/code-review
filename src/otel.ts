@@ -2,7 +2,7 @@
  * Optional OpenTelemetry bridge over `diagnostics_channel` and the agent
  * event stream.
  *
- * Subscribes to every `@ikko-dev/gitlab-review:*` tracing channel, opens an
+ * Subscribes to every `@ikko-dev/code-review:*` tracing channel, opens an
  * OTel span on `start`, and closes it on `asyncEnd`/`error`. The `reviewer.run`
  * phase additionally carries OpenTelemetry GenAI semantic-convention
  * attributes (`gen_ai.*`) and emits the standardized GenAI client metrics
@@ -12,7 +12,7 @@
  *
  * Per-turn and per-tool-call telemetry is captured via `createAgentTelemetry`,
  * which subscribes to the agent's live event stream and emits:
- *   - `gen_ai.agent.turn` child spans under `invoke_agent gitlab-review`
+ *   - `gen_ai.agent.turn` child spans under `invoke_agent code-review`
  *   - `execute_tool <name>` grandchild spans under each turn
  *   - Per-turn `gen_ai.client.token.usage` and `gen_ai.client.cost` metrics
  *   - `gen_ai.client.time_to_first_token` when streaming events fire
@@ -126,7 +126,7 @@ export interface OtelBridgeOptions {
 const ROOT_PHASE: DiagnosticPhase = 'run';
 const GEN_AI_PHASE: DiagnosticPhase = 'reviewer.run';
 const POST_COMMENTS_PHASE: DiagnosticPhase = 'scm.post_comments';
-const SERVICE_NAME = '@ikko-dev/gitlab-review';
+const SERVICE_NAME = '@ikko-dev/code-review';
 
 // Added as a data-point attribute on every gitlab_review_* metric so that
 // Prometheus/Mimir surfaces it as a label (service_name="…"). The SDK-level
@@ -727,7 +727,7 @@ function buildAgentSubscriber(
           reviewerSpanCtx,
         );
         span.setAttribute('gen_ai.operation.name', 'invoke_agent');
-        span.setAttribute('gen_ai.agent.name', 'gitlab-review');
+        span.setAttribute('gen_ai.agent.name', 'code-review');
         if (runId) span.setAttribute('gen_ai.conversation.id', runId);
         if (typeof turnIndex === 'number') span.setAttribute('gen_ai.agent.turn.index', turnIndex);
         currentTurn = { span, startMs: Date.now() };
@@ -858,7 +858,7 @@ async function loadDefaultRuntime(): Promise<OtelRuntime> {
     // means the install is corrupt or a bundler stripped the modules.
     throw new Error(
       `Failed to load the bundled OpenTelemetry runtime (${OTEL_SDK_PACKAGES.join(', ')}). ` +
-        `Reinstall @ikko-dev/gitlab-review or pass startOtelBridge({ runtime }) explicitly.`,
+        `Reinstall @ikko-dev/code-review or pass startOtelBridge({ runtime }) explicitly.`,
       { cause },
     );
   }
@@ -1031,9 +1031,9 @@ function emitReviewCompletedLog(
 function spanNameFor(phase: DiagnosticPhase): string {
   // OTel GenAI semconv reserves invoke_workflow / invoke_agent / execute_tool
   // as well-known operation names; other phases stay namespaced.
-  if (phase === ROOT_PHASE) return 'invoke_workflow gitlab-review';
-  if (phase === GEN_AI_PHASE) return 'invoke_agent gitlab-review';
-  return `gitlab-review.${phase}`;
+  if (phase === ROOT_PHASE) return 'invoke_workflow code-review';
+  if (phase === GEN_AI_PHASE) return 'invoke_agent code-review';
+  return `code-review.${phase}`;
 }
 
 interface ReviewInstruments {
@@ -1051,47 +1051,47 @@ interface ReviewInstruments {
 function createReviewInstruments(meter: Meter): ReviewInstruments {
   return {
     reviewRunsTotal: meter.createCounter('gitlab_review_runs_total', {
-      description: 'Total number of gitlab-review runs, labelled by terminal status',
+      description: 'Total number of code-review runs, labelled by terminal status',
     }),
     reviewErrorsTotal: meter.createCounter('gitlab_review_errors_total', {
-      description: 'Total number of failed gitlab-review runs, labelled by error type',
+      description: 'Total number of failed code-review runs, labelled by error type',
     }),
     reviewLlmTokens: {
       input: meter.createCounter('gitlab_review_llm_input_tokens_total', {
-        description: 'Total non-cached LLM input tokens consumed across gitlab-review runs',
+        description: 'Total non-cached LLM input tokens consumed across code-review runs',
         unit: '{token}',
       }),
       output: meter.createCounter('gitlab_review_llm_output_tokens_total', {
-        description: 'Total LLM output tokens generated across gitlab-review runs',
+        description: 'Total LLM output tokens generated across code-review runs',
         unit: '{token}',
       }),
       cache_read: meter.createCounter('gitlab_review_llm_cache_read_tokens_total', {
-        description: 'Total LLM cache-read input tokens across gitlab-review runs',
+        description: 'Total LLM cache-read input tokens across code-review runs',
         unit: '{token}',
       }),
       cache_creation: meter.createCounter('gitlab_review_llm_cache_creation_tokens_total', {
-        description: 'Total LLM cache-creation input tokens across gitlab-review runs',
+        description: 'Total LLM cache-creation input tokens across code-review runs',
         unit: '{token}',
       }),
     },
     reviewRunDuration: meter.createHistogram('gitlab_review_run_duration_seconds', {
-      description: 'Duration of a complete gitlab-review run',
+      description: 'Duration of a complete code-review run',
       unit: 's',
       advice: { explicitBucketBoundaries: REVIEW_RUN_DURATION_BUCKETS_S },
     }),
     reviewTotalCost: meter.createHistogram('gitlab_review_total_cost_usd', {
-      description: 'Total LLM cost in USD for a complete gitlab-review run',
+      description: 'Total LLM cost in USD for a complete code-review run',
       unit: '{usd}',
       advice: { explicitBucketBoundaries: REVIEW_TOTAL_COST_BUCKETS_USD },
     }),
     reviewCommentsTotal: meter.createCounter('gitlab_review_comments_total', {
-      description: 'Total number of MR comments posted by gitlab-review',
+      description: 'Total number of MR comments posted by code-review',
     }),
     reviewDraftsPublishedTotal: meter.createCounter('gitlab_review_drafts_published_total', {
-      description: 'Total number of draft notes published by gitlab-review',
+      description: 'Total number of draft notes published by code-review',
     }),
     reviewPhaseDuration: meter.createHistogram('gitlab_review_phase_duration_seconds', {
-      description: 'Duration of individual gitlab-review workflow phases',
+      description: 'Duration of individual code-review workflow phases',
       unit: 's',
       advice: { explicitBucketBoundaries: REVIEW_PHASE_DURATION_BUCKETS_S },
     }),
@@ -1234,7 +1234,7 @@ function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
     span.setAttribute('gen_ai.response.model', modelId);
   }
   span.setAttribute('gen_ai.operation.name', 'invoke_agent');
-  span.setAttribute('gen_ai.agent.name', 'gitlab-review');
+  span.setAttribute('gen_ai.agent.name', 'code-review');
 
   const usage = ctx.usage;
   if (!usage) return;
