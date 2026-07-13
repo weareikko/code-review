@@ -5,9 +5,12 @@ import {
   buildSummaryBody,
   buildSummaryHistoryEntries,
   extractReviewedCommitSha,
+  extractSummaryHistoryEntries,
   findExistingReviewedCommitSha,
   findExistingSummaryNoteId,
   postGeneratedComments,
+  stripSummaryHistory,
+  SUMMARY_HISTORY_ENTRY_END,
   SUMMARY_HISTORY_ENTRY_START,
   SUMMARY_HISTORY_LIMIT,
   SUMMARY_HISTORY_START,
@@ -293,6 +296,58 @@ describe('summary note upsert', () => {
     expect(entries.join('\n').split(SUMMARY_HISTORY_ENTRY_START)).toHaveLength(
       SUMMARY_HISTORY_LIMIT + 1,
     );
+  });
+});
+
+describe('legacy summary history markers', () => {
+  const LEGACY_HISTORY_START = '<!-- gitlab-review:summary-history:start -->';
+  const LEGACY_HISTORY_END = '<!-- gitlab-review:summary-history:end -->';
+  const LEGACY_ENTRY_START = '<!-- gitlab-review:summary-history-entry:start -->';
+  const LEGACY_ENTRY_END = '<!-- gitlab-review:summary-history-entry:end -->';
+
+  it('extracts legacy summary-history entries and re-emits them under the current markers', () => {
+    const body = [
+      LEGACY_HISTORY_START,
+      LEGACY_ENTRY_START,
+      '### Previous run archived 2026-05-19T14:00:00Z',
+      '',
+      'legacy archived summary',
+      LEGACY_ENTRY_END,
+      LEGACY_HISTORY_END,
+    ].join('\n');
+
+    const entries = extractSummaryHistoryEntries(body);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].startsWith(SUMMARY_HISTORY_ENTRY_START)).toBe(true);
+    expect(entries[0].endsWith(SUMMARY_HISTORY_ENTRY_END)).toBe(true);
+    expect(entries[0]).toContain('legacy archived summary');
+    expect(entries[0]).not.toContain(LEGACY_ENTRY_START);
+    expect(entries[0]).not.toContain(LEGACY_ENTRY_END);
+  });
+
+  it('strips a legacy summary-history block from the body', () => {
+    const body = [
+      `${SUMMARY_MARKER}`,
+      '',
+      'latest summary',
+      '',
+      '<details>',
+      '<summary>Previous review runs</summary>',
+      LEGACY_HISTORY_START,
+      LEGACY_ENTRY_START,
+      'legacy archived summary',
+      LEGACY_ENTRY_END,
+      LEGACY_HISTORY_END,
+      '</details>',
+    ].join('\n');
+
+    const stripped = stripSummaryHistory(body);
+
+    expect(stripped).toContain('latest summary');
+    expect(stripped).not.toContain(LEGACY_HISTORY_START);
+    expect(stripped).not.toContain('legacy archived summary');
+    expect(stripped).not.toContain('<details>');
   });
 });
 
