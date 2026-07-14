@@ -32,20 +32,20 @@ Point `OLLAMA_HOST` at your Ollama server. No API key is required:
 
 ```bash
 OLLAMA_HOST=http://localhost:11434 \
-GITLAB_REVIEW_MODEL=ollama/qwen2.5-coder:32b \
+CODE_REVIEW_MODEL=ollama/qwen2.5-coder:32b \
 npx @ikko-dev/code-review
 ```
 
-`OLLAMA_HOST` defaults to `http://localhost:11434` when not set. Use `GITLAB_REVIEW_MAX_TOKENS`
+`OLLAMA_HOST` defaults to `http://localhost:11434` when not set. Use `CODE_REVIEW_MAX_TOKENS`
 to override the maximum output tokens when Ollama returns fewer tokens than expected.
 
 ## Generic OpenAI-compatible endpoint
 
-Use `GITLAB_REVIEW_BASE_URL` to point the provider at any OpenAI-compatible API:
+Use `CODE_REVIEW_BASE_URL` to point the provider at any OpenAI-compatible API:
 
 ```bash
 OPENAI_API_KEY=my-key \
-GITLAB_REVIEW_BASE_URL=https://my-gateway.example.com/v1 \
+CODE_REVIEW_BASE_URL=https://my-gateway.example.com/v1 \
 npx @ikko-dev/code-review --model openai/gpt-4o
 ```
 

@@ -68,9 +68,9 @@ Reviewed by [@ikko-dev/code-review](https://github.com/ikko-dev/gitlab-review) f
 
 The `Review usage:` line names the model and records the `--thinking` level the run used (`thinking: off` by default). The `Skills:` line is only present when one or more skills were active for the run.
 
-If a later CI job sees that the current MR head commit already appears in that footer, it skips the agent run to avoid producing a different review for the same diff. Use `--force-review` or `GITLAB_REVIEW_FORCE_REVIEW=true` to bypass the guard. The summary upsert runs in both `direct` and `draft` posting modes (it always uses the regular notes endpoints — the atomic bulk-publish flow is reserved for inline comments).
+If a later CI job sees that the current MR head commit already appears in that footer, it skips the agent run to avoid producing a different review for the same diff. Use `--force-review` or `CODE_REVIEW_FORCE_REVIEW=true` to bypass the guard. The summary upsert runs in both `direct` and `draft` posting modes (it always uses the regular notes endpoints — the atomic bulk-publish flow is reserved for inline comments).
 
-Disable with `--no-summary` or `GITLAB_REVIEW_POST_SUMMARY=false`. With `--dry-run`/`--no-post`, the summary is parsed but not posted, and the reviewed-commit skip guard is not applied.
+Disable with `--no-summary` or `CODE_REVIEW_POST_SUMMARY=false`. With `--dry-run`/`--no-post`, the summary is parsed but not posted, and the reviewed-commit skip guard is not applied.
 
 ## Inline comment footer
 

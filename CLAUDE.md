@@ -14,7 +14,7 @@
 - Coverage: `npm run test:ci`
 - Build: `npm run build`
 - Full local check: `npm run check`
-- Evals: `npm run test:evals` (requires `ANTHROPIC_API_KEY` or `GITLAB_REVIEW_API_KEY`; calls real LLMs)
+- Evals: `npm run test:evals` (requires `ANTHROPIC_API_KEY` or `CODE_REVIEW_API_KEY`; calls real LLMs)
 
 ## Architecture map
 

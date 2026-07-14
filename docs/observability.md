@@ -45,7 +45,7 @@ await run(config);
 
 ### OpenTelemetry bridge
 
-`GITLAB_REVIEW_OTEL=1` enables a bridge that subscribes to the diagnostics channels and emits **OTLP** spans, GenAI client metrics, and structured log records. The OTel runtime is bundled — no extra installs required.
+`CODE_REVIEW_OTEL=1` enables a bridge that subscribes to the diagnostics channels and emits **OTLP** spans, GenAI client metrics, and structured log records. The OTel runtime is bundled — no extra installs required.
 
 Exporter selection follows the standard `OTEL_*` env vars (`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_PROTOCOL`, …). Anything that ingests OTLP works: Tempo, Mimir, Loki, Jaeger, Datadog, Honeycomb, SigNoz, and so on.
 
@@ -149,7 +149,7 @@ A token missing any of these scopes will get a silent `401 Unauthorized: invalid
 
 #### Disabling the bridge
 
-When `GITLAB_REVIEW_OTEL` is not set, the bridge is a no-op and `@opentelemetry/*` is never imported (dynamic-loaded behind the env check, so unsetting the flag pays no startup cost).
+When `CODE_REVIEW_OTEL` is not set, the bridge is a no-op and `@opentelemetry/*` is never imported (dynamic-loaded behind the env check, so unsetting the flag pays no startup cost).
 
 #### Library injection
 

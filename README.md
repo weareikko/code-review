@@ -68,7 +68,7 @@ review:
     GIT_DEPTH: '0'
     # A model is required (no default). Provide its provider's key as a masked
     # CI/CD variable, e.g. ANTHROPIC_API_KEY.
-    GITLAB_REVIEW_MODEL: anthropic/claude-sonnet-4-5
+    CODE_REVIEW_MODEL: anthropic/claude-sonnet-4-5
   script:
     - npx @ikko-dev/code-review
   artifacts:
@@ -124,7 +124,7 @@ Prefer to run the CLI directly (no composite action)? `GITHUB_TOKEN`, `GITHUB_RE
 - run: npx @ikko-dev/code-review
   env:
     GITHUB_TOKEN: ${{ github.token }}
-    GITLAB_REVIEW_MODEL: anthropic/claude-sonnet-4-5
+    CODE_REVIEW_MODEL: anthropic/claude-sonnet-4-5
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
@@ -132,7 +132,7 @@ Prefer to run the CLI directly (no composite action)? `GITHUB_TOKEN`, `GITHUB_RE
 
 The README covers getting started. Reference material lives in [`docs/`](https://github.com/ikko-dev/gitlab-review/tree/main/docs):
 
-- [Configuration](https://github.com/ikko-dev/gitlab-review/blob/main/docs/configuration.md) — full environment-variable and CLI-flag reference, plus the `GITLAB_REVIEW_` namespacing convention.
+- [Configuration](https://github.com/ikko-dev/gitlab-review/blob/main/docs/configuration.md) — full environment-variable and CLI-flag reference, plus the `CODE_REVIEW_` namespacing convention.
 - [Providers](https://github.com/ikko-dev/gitlab-review/blob/main/docs/providers.md) — Anthropic, OpenRouter, Gemini, Ollama, and OpenAI-compatible endpoints, plus heterogeneous review with a model pool.
 - [Skills](https://github.com/ikko-dev/gitlab-review/blob/main/docs/skills.md) — built-in, external (`npm:`/`file:`/`git:`), and project auto-discovered review skills.
 - [Multi-stage review](https://github.com/ikko-dev/gitlab-review/blob/main/docs/multi-stage-review.md) — the staged Find / Verify / Synthesize pipeline behind `--review-depth`.
@@ -147,7 +147,7 @@ The CLI auto-resolves most values from GitLab CI variables and provider-standard
 code-review --model anthropic/claude-sonnet-4-5 --api-key "$ANTHROPIC_API_KEY"
 ```
 
-Equivalently, set `GITLAB_REVIEW_MODEL` and the provider's key (e.g. `ANTHROPIC_API_KEY`) as CI/CD variables. Common knobs include `--min-severity`, `--thinking`, `--posting-mode draft`, `--no-summary`, and `--dry-run`. See the full [environment-variable and flag reference](https://github.com/ikko-dev/gitlab-review/blob/main/docs/configuration.md).
+Equivalently, set `CODE_REVIEW_MODEL` and the provider's key (e.g. `ANTHROPIC_API_KEY`) as CI/CD variables. Common knobs include `--min-severity`, `--thinking`, `--posting-mode draft`, `--no-summary`, and `--dry-run`. See the full [environment-variable and flag reference](https://github.com/ikko-dev/gitlab-review/blob/main/docs/configuration.md).
 
 ## Providers
 
@@ -178,7 +178,7 @@ Use these files for CI debugging and auditing.
 - **`Missing required configuration`**
   - Provide required flags or ensure CI vars are available (`CI_PROJECT_ID`, `CI_MERGE_REQUEST_IID`, token, API key).
 - **`--min-severity must be one of: info, warn, critical`**
-  - Fix `--min-severity` or `GITLAB_REVIEW_MIN_SEVERITY`.
+  - Fix `--min-severity` or `CODE_REVIEW_MIN_SEVERITY`.
 - **Git history errors / merge-base failures**
   - Set `GIT_DEPTH: 0`.
   - Ensure source and target branches are fetchable from `origin`.
@@ -198,7 +198,7 @@ npm run build
 npm pack --dry-run
 ```
 
-Eval tests call the real LLM and require `ANTHROPIC_API_KEY` (or `GITLAB_REVIEW_API_KEY`) in a local `.env` file:
+Eval tests call the real LLM and require `ANTHROPIC_API_KEY` (or `CODE_REVIEW_API_KEY`) in a local `.env` file:
 
 ```bash
 npm run test:evals
@@ -207,7 +207,7 @@ npm run test:evals
 Override the model for cheaper/faster eval runs:
 
 ```bash
-GITLAB_REVIEW_EVAL_MODEL=anthropic/claude-haiku-4-5-20251001 npm run test:evals
+CODE_REVIEW_EVAL_MODEL=anthropic/claude-haiku-4-5-20251001 npm run test:evals
 ```
 
 The review agent runs against pinned `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and `@earendil-works/pi-coding-agent` versions, so published builds keep a deterministic reviewer runtime.

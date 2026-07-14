@@ -12,7 +12,7 @@ inputs:
   model:
     description: >-
       Model to review with, as `provider/modelId` (e.g.
-      `anthropic/claude-sonnet-4-5`). Sets `GITLAB_REVIEW_MODEL`. Required.
+      `anthropic/claude-sonnet-4-5`). Sets `CODE_REVIEW_MODEL`. Required.
     required: true
   api-key:
     description: >-
@@ -58,7 +58,7 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
-        GITLAB_REVIEW_MODEL: ${{ inputs.model }}
+        CODE_REVIEW_MODEL: ${{ inputs.model }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         INPUT_API_KEY: ${{ inputs.api-key }}
         INPUT_VERSION: ${{ inputs.version }}
