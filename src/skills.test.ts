@@ -309,7 +309,7 @@ describe('resolveSkillCacheDir', () => {
   it('honours XDG_CACHE_HOME', () => {
     vi.stubEnv('XDG_CACHE_HOME', '/custom/cache');
     try {
-      expect(resolveSkillCacheDir()).toBe(join('/custom/cache', 'gitlab-review', 'skills'));
+      expect(resolveSkillCacheDir()).toBe(join('/custom/cache', 'code-review', 'skills'));
     } finally {
       vi.unstubAllEnvs();
     }
@@ -318,7 +318,7 @@ describe('resolveSkillCacheDir', () => {
   it('falls back to ~/.cache when XDG_CACHE_HOME is unset', () => {
     vi.stubEnv('XDG_CACHE_HOME', '');
     try {
-      expect(resolveSkillCacheDir()).toBe(join(homedir(), '.cache', 'gitlab-review', 'skills'));
+      expect(resolveSkillCacheDir()).toBe(join(homedir(), '.cache', 'code-review', 'skills'));
     } finally {
       vi.unstubAllEnvs();
     }

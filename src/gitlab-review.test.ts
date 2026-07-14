@@ -324,7 +324,7 @@ describe('runReview pipeline', () => {
   });
 
   it('with retrieveSkipped: stages dropped-file diffs on disk, feeds them to the prompt, then cleans up', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const bigBody = '+x\n'.repeat(50);
     const raw = [
       'diff --git a/src/big-a.ts b/src/big-a.ts',
@@ -377,7 +377,7 @@ describe('runReview pipeline', () => {
     expect(capturedPrompt).toContain('src/big-b.ts');
     // Staging dir is cleaned up after the run.
     await expect(
-      readFile(join(cwd, '.gitlab-review-skipped', 'src__big-b.ts.diff')),
+      readFile(join(cwd, '.code-review-skipped', 'src__big-b.ts.diff')),
     ).rejects.toThrow();
   });
 
@@ -400,7 +400,7 @@ describe('runReview pipeline', () => {
   });
 
   it('accumulates usage across multiple assistant messages and writes gitlab-review.md', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const messages = [
       makeAssistant('partial thought', {
         input: 100,
@@ -446,7 +446,7 @@ describe('runReview pipeline', () => {
   });
 
   it('passes the systemPrompt with minSeverity rule and tools scoped to cwd', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const captured = vi.fn();
     const messages = [makeAssistant('ok', { input: 1, output: 1 })];
 
@@ -471,7 +471,7 @@ describe('runReview pipeline', () => {
   });
 
   it('forwards config.thinkingLevel to the agent factory', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const captured = vi.fn();
     const messages = [makeAssistant('ok', { input: 1, output: 1 })];
 
@@ -491,7 +491,7 @@ describe('runReview pipeline', () => {
   });
 
   it('throws ReviewerError when the agent returns no text', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const messages = [makeAssistant('', { input: 1, output: 0 })];
 
     await expect(
@@ -507,7 +507,7 @@ describe('runReview pipeline', () => {
   });
 
   it('emits turn_start and tool_execution_start debug lines to the logger', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const messages = [makeAssistant('Done.', { input: 1, output: 1 })];
     const debugLines: string[] = [];
     const logger: Logger = {
@@ -564,7 +564,7 @@ describe('runReview pipeline', () => {
   });
 
   it('counts multiple turns and tool calls correctly', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const msg1 = makeAssistant('', { input: 1, output: 1 });
     const msg2 = makeAssistant('Final.', { input: 1, output: 1 });
     const debugLines: string[] = [];
@@ -607,7 +607,7 @@ describe('runReview pipeline', () => {
   });
 
   it('uses noopLogger when no logger is provided', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const messages = [makeAssistant('ok.', { input: 1, output: 1 })];
     await expect(
       runReview(
@@ -634,7 +634,7 @@ describe('runReview pipeline', () => {
   });
 
   it('single depth writes the find output verbatim and never spawns a verifier', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     let verifierCalls = 0;
     const createAgent: CreateAgent = (params) => {
       if (params.systemPrompt.includes('adversarial verifier')) {
@@ -653,7 +653,7 @@ describe('runReview pipeline', () => {
   });
 
   it('verify depth drops a finding the verifier refutes', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const createAgent: CreateAgent = (params) =>
       params.systemPrompt.includes('adversarial verifier')
         ? fakeAgent([makeAssistant('{"decision":"drop","reason":"not reachable from the diff"}')])
@@ -672,7 +672,7 @@ describe('runReview pipeline', () => {
   });
 
   it('verify depth keeps a finding the verifier confirms', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const createAgent: CreateAgent = (params) =>
       params.systemPrompt.includes('adversarial verifier')
         ? fakeAgent([makeAssistant('{"decision":"keep","reason":"proven reachable"}')])
@@ -692,7 +692,7 @@ describe('runReview pipeline', () => {
   });
 
   it('full depth runs angle finders, triages duplicates, then verifies', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     // correctness and state-async-data both surface "Bug A" (must dedup to one);
     // state adds "Bug B"; failure-security adds an INFO nit.
     const correctness = poolAngleJson([
@@ -855,7 +855,7 @@ describe('resolveModel (via runReview createAgent)', () => {
   };
 
   it('builds an openai-completions model for ollama provider', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const captured: { model?: unknown } = {};
 
     await runReview(
@@ -873,7 +873,7 @@ describe('resolveModel (via runReview createAgent)', () => {
   });
 
   it('uses custom baseUrl for ollama model from config', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const captured: { model?: unknown } = {};
 
     await runReview(
@@ -887,7 +887,7 @@ describe('resolveModel (via runReview createAgent)', () => {
   });
 
   it('applies maxTokens to the ollama model', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const captured: { model?: unknown } = {};
 
     await runReview(
@@ -899,7 +899,7 @@ describe('resolveModel (via runReview createAgent)', () => {
   });
 
   it('uses model id with slash for openrouter multi-slash models', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const captured: { model?: unknown } = {};
 
     // openrouter/ai21/jamba-large-1.7 is a registered model in pi-ai
@@ -914,7 +914,7 @@ describe('resolveModel (via runReview createAgent)', () => {
   });
 
   it('throws ReviewerError for an unknown model', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
 
     await expect(
       runReview(
@@ -925,7 +925,7 @@ describe('resolveModel (via runReview createAgent)', () => {
   });
 
   it('throws ReviewerError when model string has no slash', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
 
     await expect(
       runReview(
@@ -936,7 +936,7 @@ describe('resolveModel (via runReview createAgent)', () => {
   });
 
   it('applies baseUrl override to a registered non-Ollama model', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const captured: { model?: unknown } = {};
 
     await runReview(
@@ -956,7 +956,7 @@ describe('resolveModel (via runReview createAgent)', () => {
   });
 
   it('applies maxTokens override to a registered non-Ollama model', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const captured: { model?: unknown } = {};
 
     await runReview(
@@ -974,7 +974,7 @@ describe('resolveModel (via runReview createAgent)', () => {
   });
 
   it('uses contextWindow 131072 for ollama model regardless of maxTokens', async () => {
-    const cwd = await mkdtemp(join(tmpdir(), 'gitlab-review-'));
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const captured: { model?: unknown } = {};
 
     await runReview(

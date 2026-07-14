@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseReviewMarkdown, parseReviewMarkdownWithWarnings } from './parser.js';
 
-describe('gitlab-review parsing', () => {
+describe('code-review parsing', () => {
   it('parses inline comment blocks with body normalization', () => {
     const markdown = [
       'Review summary',

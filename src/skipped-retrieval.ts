@@ -2,7 +2,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /** Directory (relative to cwd) where dropped-file diffs are staged for retrieval. */
-export const SKIPPED_DIFF_DIR = '.gitlab-review-skipped';
+export const SKIPPED_DIFF_DIR = '.code-review-skipped';
 
 export interface SkippedDiffFile {
   /** Original repository path of the dropped file. */
@@ -17,7 +17,7 @@ function slugify(path: string): string {
 }
 
 /**
- * Write each size-dropped file's diff to `<cwd>/.gitlab-review-skipped/` so an
+ * Write each size-dropped file's diff to `<cwd>/.code-review-skipped/` so an
  * agentic reviewer can read the diffs it deems highest-risk on demand, instead
  * of the diffs being lost to the char budget. Returns the on-disk manifest.
  * Paths are staged under cwd because the reviewer's read tool is cwd-scoped.

@@ -48,10 +48,10 @@ describe('skipped-diff retrieval', () => {
 
   it('renders a retrieval block with on-disk paths and a read instruction', () => {
     const block = renderRetrievableSkippedBlock([
-      { path: 'src/a.ts', diskPath: '.gitlab-review-skipped/src__a.ts.diff' },
+      { path: 'src/a.ts', diskPath: '.code-review-skipped/src__a.ts.diff' },
     ]);
     expect(block).toContain('<skipped_files>');
-    expect(block).toContain('src/a.ts → .gitlab-review-skipped/src__a.ts.diff');
+    expect(block).toContain('src/a.ts → .code-review-skipped/src__a.ts.diff');
     expect(block.toLowerCase()).toContain('read tool');
   });
 });
