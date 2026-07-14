@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 import type { Config } from './config.js';
 import {
   applyDefaultCacheRetention,
-  applyGitLabReviewEnvPrefix,
+  applyCodeReviewEnvPrefix,
   resolveConfig,
   validateConfig,
 } from './config.js';
@@ -65,42 +65,42 @@ Options:
   --model <provider/id>   Model to use. Format: provider/modelId. Multi-slash IDs such as
                           openrouter/anthropic/claude-3-opus are supported by splitting on the
                           first slash. Use ollama/<model> for local Ollama models.
-                          (required; env: GITLAB_REVIEW_MODEL)
+                          (required; env: CODE_REVIEW_MODEL)
   --model-pool <list>     Comma-separated provider/modelId list for heterogeneous full-depth
                           review. Angles map to pool members (angle i → member i % pool size)
                           and each finding is verified by a model other than its author. Each
                           member resolves its own provider key; members without a key are
                           dropped with a warning. Empty (default) = single model = no change.
-                          (env: GITLAB_REVIEW_MODEL_POOL)
+                          (env: CODE_REVIEW_MODEL_POOL)
   --base-url <url>        Override the provider base URL (e.g. a custom OpenAI-compatible
                           endpoint). For Ollama, set OLLAMA_HOST instead.
-                          (env: GITLAB_REVIEW_BASE_URL)
+                          (env: CODE_REVIEW_BASE_URL)
   --max-tokens <n>        Override maximum output tokens for the model. 0 = model default.
-                          (env: GITLAB_REVIEW_MAX_TOKENS)
+                          (env: CODE_REVIEW_MAX_TOKENS)
   --max-diff-chars <n>    Cumulative diff char budget sent to the reviewer. Files past this
                           budget are dropped and surfaced as a size-skip callout. (default: 100000)
-                          (env: GITLAB_REVIEW_MAX_DIFF_CHARS)
+                          (env: CODE_REVIEW_MAX_DIFF_CHARS)
   --decompose-hint-lines <n>
                           When > 0, an MR whose reviewed diff changes more lines than this
                           threshold gets a "consider decomposing this MR" note in the summary.
-                          0 = off (default). (env: GITLAB_REVIEW_DECOMPOSE_HINT_LINES)
+                          0 = off (default). (env: CODE_REVIEW_DECOMPOSE_HINT_LINES)
   --diff-context <n>      Lines of surrounding context per diff hunk (git --unified). More
                           context aids reasoning but inflates tokens and fits fewer files in
                           the budget; less fits more. 0 = built-in default (20).
-                          (env: GITLAB_REVIEW_DIFF_CONTEXT)
+                          (env: CODE_REVIEW_DIFF_CONTEXT)
   --retrieve-skipped      Stage diffs for files dropped by the size budget on disk so the
                           reviewer can read them on demand instead of losing them.
-                          (env: GITLAB_REVIEW_RETRIEVE_SKIPPED=true)
+                          (env: CODE_REVIEW_RETRIEVE_SKIPPED=true)
   --min-severity <level>  info, warn, or critical (default: info)
   --thinking <level>      off, minimal, low, medium, high, or xhigh (default: off).
                           Higher levels add billable thinking tokens at the model output rate.
   --review-depth <depth>  single (one pass), verify (adversarial re-check of each
                           severe finding), or full (multi-angle finders → triage →
-                          verify). (default: single; env: GITLAB_REVIEW_DEPTH)
+                          verify). (default: single; env: CODE_REVIEW_DEPTH)
   --verify-model <p/id>   Model for the Verify stage (verify/full depth). Pairs a cheap
                           finder with a strong, high-precision verifier. Warns if it looks
                           cheaper than --model. Empty (default) = pool selection.
-                          (env: GITLAB_REVIEW_VERIFY_MODEL)
+                          (env: CODE_REVIEW_VERIFY_MODEL)
   --posting-mode <mode>   direct (sequential discussions) or draft (atomic bulk publish)
                           (default: direct)
   --review-file <path>    Raw code-review output file (default: gitlab-review.md)
@@ -109,11 +109,11 @@ Options:
   --dry-run               Generate artifacts and skip posting
   --no-post               Generate artifacts and skip posting
   --no-summary            Skip posting/updating the MR-level summary note
-                          (env: GITLAB_REVIEW_POST_SUMMARY=false)
+                          (env: CODE_REVIEW_POST_SUMMARY=false)
   --force-review          Run even when the current commit was already reviewed
-                          (env: GITLAB_REVIEW_FORCE_REVIEW=true)
+                          (env: CODE_REVIEW_FORCE_REVIEW=true)
   --verbose               Enable debug-level logging
-                          (env: GITLAB_REVIEW_VERBOSE=true)
+                          (env: CODE_REVIEW_VERBOSE=true)
   --help, -h              Show help
   --version, -v           Show version
 `;
@@ -609,13 +609,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
   process.stderr.write(`[code-review] ${__PKG_NAME__} v${__PKG_VERSION__}\n`);
   assertNodeVersion();
-  // Expose any GITLAB_REVIEW_<NAME> provider/infra vars as <NAME> before
+  // Expose any CODE_REVIEW_<NAME> provider/infra vars as <NAME> before
   // resolving config: getEnvApiKey and pi-ai's request-time reads both read
   // process.env directly, so this must mutate the live env first.
-  applyGitLabReviewEnvPrefix();
+  applyCodeReviewEnvPrefix();
   // Prefer long (24h) prompt-cache retention unless the caller set it explicitly,
   // so repeated reviews reuse the cached system-prompt prefix. Runs after the
-  // prefix shim so GITLAB_REVIEW_PI_CACHE_RETENTION still wins.
+  // prefix shim so CODE_REVIEW_PI_CACHE_RETENTION still wins.
   applyDefaultCacheRetention();
   const config = resolveConfig(argv);
   const otel = await startOtelBridge();

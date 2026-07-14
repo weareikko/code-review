@@ -17,11 +17,11 @@
  *   - Per-turn `gen_ai.client.token.usage` and `gen_ai.client.cost` metrics
  *   - `gen_ai.client.time_to_first_token` when streaming events fire
  *
- * Opt-in: set `GITLAB_REVIEW_OTEL=1`. Exporter selection and endpoint follow
+ * Opt-in: set `CODE_REVIEW_OTEL=1`. Exporter selection and endpoint follow
  * the standard `OTEL_*` env vars (`OTEL_EXPORTER_OTLP_ENDPOINT`,
  * `OTEL_EXPORTER_OTLP_HEADERS`, …).
  *
- * **Content capture**: set `GITLAB_REVIEW_OTEL_CAPTURE_CONTENT=1` to attach
+ * **Content capture**: set `CODE_REVIEW_OTEL_CAPTURE_CONTENT=1` to attach
  * LLM output text and tool arguments/results to spans as `gen_ai.output.messages`,
  * `gen_ai.tool.call.arguments`, and `gen_ai.tool.call.result`. These attributes
  * may contain code diffs and review commentary — only enable after confirming
@@ -182,11 +182,11 @@ interface TurnMessage {
 }
 
 export function isOtelEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.GITLAB_REVIEW_OTEL === '1' || env.GITLAB_REVIEW_OTEL === 'true';
+  return env.CODE_REVIEW_OTEL === '1' || env.CODE_REVIEW_OTEL === 'true';
 }
 
 /**
- * Returns true when `GITLAB_REVIEW_OTEL_CAPTURE_CONTENT=1` (or `true`) is set.
+ * Returns true when `CODE_REVIEW_OTEL_CAPTURE_CONTENT=1` (or `true`) is set.
  *
  * When enabled, per-turn assistant output text is attached to turn spans as
  * `gen_ai.output.messages`, and tool arguments / results are attached to
@@ -197,8 +197,7 @@ export function isOtelEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
  */
 export function isContentCaptureEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return (
-    env.GITLAB_REVIEW_OTEL_CAPTURE_CONTENT === '1' ||
-    env.GITLAB_REVIEW_OTEL_CAPTURE_CONTENT === 'true'
+    env.CODE_REVIEW_OTEL_CAPTURE_CONTENT === '1' || env.CODE_REVIEW_OTEL_CAPTURE_CONTENT === 'true'
   );
 }
 
@@ -540,7 +539,7 @@ interface AgentSubscriberOptions {
    * When true, serializes LLM output text and tool call arguments/results onto
    * spans as `gen_ai.output.messages`, `gen_ai.tool.call.arguments`, and
    * `gen_ai.tool.call.result`. Requires explicit opt-in via
-   * `GITLAB_REVIEW_OTEL_CAPTURE_CONTENT=1` or `OtelBridgeOptions.captureContent`.
+   * `CODE_REVIEW_OTEL_CAPTURE_CONTENT=1` or `OtelBridgeOptions.captureContent`.
    */
   captureContent?: boolean;
 }
@@ -771,7 +770,7 @@ function buildAgentSubscriber(
           recordTurnUsage(span, msg.usage, metricAttrs, tokenUsage, operationCost);
         }
 
-        // Optional content capture — requires GITLAB_REVIEW_OTEL_CAPTURE_CONTENT=1.
+        // Optional content capture — requires CODE_REVIEW_OTEL_CAPTURE_CONTENT=1.
         if (captureContent) {
           const outputMsgs = extractOutputMessages(msg);
           if (outputMsgs) span.setAttribute('gen_ai.output.messages', outputMsgs);

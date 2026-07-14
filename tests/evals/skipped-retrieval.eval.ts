@@ -18,7 +18,7 @@ import { parseReviewMarkdownWithWarnings } from '../../src/parser.js';
 const TRIALS = Number(process.env.SKIPPED_RETRIEVAL_TRIALS) || 3;
 // Route through the configured provider (Cloudflare AI Gateway in CI); no direct
 // OpenAI/Anthropic calls. Key resolved per-provider from the model id.
-const MODEL = process.env.GITLAB_REVIEW_EVAL_MODEL ?? 'cloudflare-ai-gateway/claude-3-5-haiku';
+const MODEL = process.env.CODE_REVIEW_EVAL_MODEL ?? 'cloudflare-ai-gateway/claude-3-5-haiku';
 const apiKey = resolveProviderApiKey(MODEL);
 const skip = process.env.SKIPPED_RETRIEVAL_RUN !== '1' || !apiKey;
 

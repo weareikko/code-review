@@ -104,12 +104,12 @@ production failure via `snapshot:mr`.
 
 ## Environment
 
-- `GITLAB_REVIEW_API_KEY` (or `ANTHROPIC_API_KEY` / `CLAUDE_API_KEY`) — required.
-- `GITLAB_REVIEW_EVAL_MODEL` — reviewer model under test. Default:
+- `CODE_REVIEW_API_KEY` (or `ANTHROPIC_API_KEY` / `CLAUDE_API_KEY`) — required.
+- `CODE_REVIEW_EVAL_MODEL` — reviewer model under test. Default:
   `anthropic/claude-sonnet-4-5`.
-- `GITLAB_REVIEW_EVAL_JUDGE_MODEL` — LLM judge model. Default:
+- `CODE_REVIEW_EVAL_JUDGE_MODEL` — LLM judge model. Default:
   `claude-haiku-4-5-20251001` (fast and cheap; the judge task is small).
-- `GITLAB_REVIEW_EVAL_JUDGE_BASE_URL` — override the judge API base URL when
+- `CODE_REVIEW_EVAL_JUDGE_BASE_URL` — override the judge API base URL when
   using a proxy. The judge endpoint is always `/v1/messages`.
-- `GITLAB_REVIEW_BASE_URL`, `GITLAB_REVIEW_MAX_TOKENS` — passed through to
+- `CODE_REVIEW_BASE_URL`, `CODE_REVIEW_MAX_TOKENS` — passed through to
   the reviewer config.

@@ -783,7 +783,7 @@ export function extractLastAssistantText(messages: AssistantMessage[]): string {
  *
  * Ollama exposes an OpenAI-compatible `/v1` endpoint, so we use the
  * `openai-completions` API adapter. The `baseUrl` is taken from the
- * already-resolved config (derived from `OLLAMA_HOST` or `GITLAB_REVIEW_BASE_URL`).
+ * already-resolved config (derived from `OLLAMA_HOST` or `CODE_REVIEW_BASE_URL`).
  * Cost is zero — Ollama runs locally.
  */
 function buildOllamaModel(
@@ -1307,7 +1307,7 @@ async function runBounded(tasks: Array<() => Promise<void>>, limit: number): Pro
   await Promise.all(workers);
 }
 
-const VERIFY_CONCURRENCY = Number(process.env.GITLAB_REVIEW_VERIFY_CONCURRENCY) || 4;
+const VERIFY_CONCURRENCY = Number(process.env.CODE_REVIEW_VERIFY_CONCURRENCY) || 4;
 const FIND_CONCURRENCY = 3;
 
 interface StageDeps {

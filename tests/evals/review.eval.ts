@@ -47,7 +47,7 @@ type EvalOutput = {
 // Cloudflare AI Gateway in CI) — no direct OpenAI/Anthropic calls. The key is
 // therefore resolved per-provider from the model id, exactly as production does,
 // instead of reaching for ANTHROPIC_API_KEY directly.
-const EVAL_MODEL = process.env.GITLAB_REVIEW_EVAL_MODEL ?? 'cloudflare-ai-gateway/gpt-5.4';
+const EVAL_MODEL = process.env.CODE_REVIEW_EVAL_MODEL ?? 'cloudflare-ai-gateway/gpt-5.4';
 
 function makeConfig(overrides: Partial<Config>): Config {
   const model = overrides.model ?? EVAL_MODEL;
@@ -64,8 +64,8 @@ function makeConfig(overrides: Partial<Config>): Config {
     postingMode: 'direct',
     reviewDepth: 'single',
     apiKey: resolveProviderApiKey(model),
-    baseUrl: process.env.GITLAB_REVIEW_BASE_URL ?? '',
-    maxTokens: Number(process.env.GITLAB_REVIEW_MAX_TOKENS ?? 0),
+    baseUrl: process.env.CODE_REVIEW_BASE_URL ?? '',
+    maxTokens: Number(process.env.CODE_REVIEW_MAX_TOKENS ?? 0),
     maxDiffChars: 100_000,
     decomposeHintLines: 0,
     reviewFile: 'gitlab-review.md',
@@ -85,7 +85,7 @@ function makeConfig(overrides: Partial<Config>): Config {
 const reviewHarness = createHarness<EvalInput, EvalOutput, Record<string, unknown>>({
   name: 'code-review',
   run: async ({ input }) => {
-    const dir = await mkdtemp(join(tmpdir(), 'gitlab-review-eval-'));
+    const dir = await mkdtemp(join(tmpdir(), 'code-review-eval-'));
     try {
       const config = makeConfig({
         cwd: dir,

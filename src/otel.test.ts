@@ -201,7 +201,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
     expect(bridge).not.toBeNull();
 
@@ -245,13 +245,13 @@ describe('OpenTelemetry bridge', () => {
     return fake;
   }
 
-  it('is false unless GITLAB_REVIEW_OTEL is explicitly opted in', async () => {
+  it('is false unless CODE_REVIEW_OTEL is explicitly opted in', async () => {
     const { isOtelEnabled } = await import('./otel.js');
     expect(isOtelEnabled({})).toBe(false);
-    expect(isOtelEnabled({ GITLAB_REVIEW_OTEL: '0' })).toBe(false);
-    expect(isOtelEnabled({ GITLAB_REVIEW_OTEL: 'yes' })).toBe(false);
-    expect(isOtelEnabled({ GITLAB_REVIEW_OTEL: '1' })).toBe(true);
-    expect(isOtelEnabled({ GITLAB_REVIEW_OTEL: 'true' })).toBe(true);
+    expect(isOtelEnabled({ CODE_REVIEW_OTEL: '0' })).toBe(false);
+    expect(isOtelEnabled({ CODE_REVIEW_OTEL: 'yes' })).toBe(false);
+    expect(isOtelEnabled({ CODE_REVIEW_OTEL: '1' })).toBe(true);
+    expect(isOtelEnabled({ CODE_REVIEW_OTEL: 'true' })).toBe(true);
   });
 
   it('returns null when disabled without touching the runtime', async () => {
@@ -354,7 +354,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config: Config = {
@@ -413,7 +413,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
     await bridge?.shutdown();
     expect(fake.shutdown).toHaveBeenCalledTimes(1);
@@ -456,7 +456,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig();
@@ -495,7 +495,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig();
@@ -526,7 +526,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig();
@@ -565,7 +565,7 @@ describe('OpenTelemetry bridge', () => {
     vi.stubEnv('OTEL_LOGS_EXPORTER', 'none');
     try {
       const { startOtelBridge } = await import('./otel.js');
-      const bridge = await startOtelBridge({ env: { GITLAB_REVIEW_OTEL: '1' } });
+      const bridge = await startOtelBridge({ env: { CODE_REVIEW_OTEL: '1' } });
       expect(bridge).not.toBeNull();
       await expect(bridge!.shutdown()).resolves.toBeUndefined();
     } finally {
@@ -602,7 +602,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config: Config = {
@@ -650,7 +650,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
     expect(bridge!.createAgentTelemetry('nonexistent-run')).toBeUndefined();
     await bridge!.shutdown();
@@ -884,7 +884,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig({ model: 'anthropic/claude-haiku-4-5' });
@@ -1059,7 +1059,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
       captureContent: true,
     });
 
@@ -1192,7 +1192,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig();
@@ -1229,7 +1229,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig();
@@ -1259,7 +1259,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig();
@@ -1283,7 +1283,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig();
@@ -1348,7 +1348,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config: Config = {
@@ -1454,7 +1454,7 @@ describe('OpenTelemetry bridge', () => {
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
       env: {
-        GITLAB_REVIEW_OTEL: '1',
+        CODE_REVIEW_OTEL: '1',
         CI_PROJECT_PATH: 'my-group/my-project',
         CI_PROJECT_NAMESPACE: 'my-group',
         CI_MERGE_REQUEST_TARGET_BRANCH_NAME: 'main',
@@ -1538,7 +1538,7 @@ describe('OpenTelemetry bridge', () => {
         cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
       };
     });
-    // runWithBridge passes env: { GITLAB_REVIEW_OTEL: '1' } with no CI_* vars.
+    // runWithBridge passes env: { CODE_REVIEW_OTEL: '1' } with no CI_* vars.
     // The operation duration metric (still from recordGenAiMetrics) must have no
     // CI attributes when CI env vars are absent.
     const duration = metricsRecorded.find((m) => m.name === 'gen_ai.client.operation.duration');
@@ -1556,7 +1556,7 @@ describe('OpenTelemetry bridge', () => {
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
       env: {
-        GITLAB_REVIEW_OTEL: '1',
+        CODE_REVIEW_OTEL: '1',
         CI_PROJECT_PATH: 'my-group/my-project',
         CI_JOB_ID: '12345',
         CI_PIPELINE_ID: '67890',
@@ -1605,7 +1605,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
     const config: Config = {
       project: 'p',
@@ -1680,7 +1680,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig();
@@ -1725,7 +1725,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig();
@@ -1776,7 +1776,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig();
@@ -1835,7 +1835,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig();
@@ -1867,7 +1867,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig();
@@ -1905,7 +1905,7 @@ describe('OpenTelemetry bridge', () => {
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
       env: {
-        GITLAB_REVIEW_OTEL: '1',
+        CODE_REVIEW_OTEL: '1',
         CI_PROJECT_PATH: 'corp/svc',
         CI_PIPELINE_SOURCE: 'merge_request_event',
       },
@@ -1956,7 +1956,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig();
@@ -1980,7 +1980,7 @@ describe('OpenTelemetry bridge', () => {
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
       env: {
-        GITLAB_REVIEW_OTEL: '1',
+        CODE_REVIEW_OTEL: '1',
         CI_PROJECT_PATH: 'corp/svc',
         CI_PIPELINE_SOURCE: 'merge_request_event',
       },
@@ -2008,7 +2008,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig();
@@ -2036,7 +2036,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig();
@@ -2065,7 +2065,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig();
@@ -2097,7 +2097,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
     });
 
     const config = makeConfig();
@@ -2206,14 +2206,14 @@ describe('OpenTelemetry bridge', () => {
 
   it('isContentCaptureEnabled returns false unless explicitly opted in', () => {
     expect(isContentCaptureEnabled({})).toBe(false);
-    expect(isContentCaptureEnabled({ GITLAB_REVIEW_OTEL_CAPTURE_CONTENT: '0' })).toBe(false);
-    expect(isContentCaptureEnabled({ GITLAB_REVIEW_OTEL_CAPTURE_CONTENT: 'yes' })).toBe(false);
-    expect(isContentCaptureEnabled({ GITLAB_REVIEW_OTEL_CAPTURE_CONTENT: '1' })).toBe(true);
-    expect(isContentCaptureEnabled({ GITLAB_REVIEW_OTEL_CAPTURE_CONTENT: 'true' })).toBe(true);
+    expect(isContentCaptureEnabled({ CODE_REVIEW_OTEL_CAPTURE_CONTENT: '0' })).toBe(false);
+    expect(isContentCaptureEnabled({ CODE_REVIEW_OTEL_CAPTURE_CONTENT: 'yes' })).toBe(false);
+    expect(isContentCaptureEnabled({ CODE_REVIEW_OTEL_CAPTURE_CONTENT: '1' })).toBe(true);
+    expect(isContentCaptureEnabled({ CODE_REVIEW_OTEL_CAPTURE_CONTENT: 'true' })).toBe(true);
   });
 
   // ---------------------------------------------------------------------------
-  // Content capture — GITLAB_REVIEW_OTEL_CAPTURE_CONTENT
+  // Content capture — CODE_REVIEW_OTEL_CAPTURE_CONTENT
   // ---------------------------------------------------------------------------
 
   it('does not attach gen_ai.output.messages or tool content by default', async () => {
@@ -2258,7 +2258,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
       captureContent: true,
     });
 
@@ -2305,7 +2305,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
       captureContent: true,
     });
 
@@ -2365,7 +2365,7 @@ describe('OpenTelemetry bridge', () => {
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1' },
+      env: { CODE_REVIEW_OTEL: '1' },
       captureContent: true,
     });
 
@@ -2417,12 +2417,12 @@ describe('OpenTelemetry bridge', () => {
     expect((turnAttrs['gen_ai.output.messages'] as string).length).toBeLessThanOrEqual(2000);
   });
 
-  it('GITLAB_REVIEW_OTEL_CAPTURE_CONTENT env var enables content capture via env option', async () => {
+  it('CODE_REVIEW_OTEL_CAPTURE_CONTENT env var enables content capture via env option', async () => {
     const { startOtelBridge } = await import('./otel.js');
     const fake = createFakeRuntime();
     const bridge = await startOtelBridge({
       runtime: fake.runtime,
-      env: { GITLAB_REVIEW_OTEL: '1', GITLAB_REVIEW_OTEL_CAPTURE_CONTENT: '1' },
+      env: { CODE_REVIEW_OTEL: '1', CODE_REVIEW_OTEL_CAPTURE_CONTENT: '1' },
     });
 
     const config = makeConfig({ model: 'anthropic/claude-haiku-4-5' });

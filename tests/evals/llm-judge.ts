@@ -30,7 +30,7 @@ function ensureProviders(): void {
 }
 
 function getModelId(): string {
-  return process.env.GITLAB_REVIEW_EVAL_JUDGE_MODEL ?? DEFAULT_JUDGE_MODEL;
+  return process.env.CODE_REVIEW_EVAL_JUDGE_MODEL ?? DEFAULT_JUDGE_MODEL;
 }
 
 /** Split a `provider/modelId` string on the first slash. */
