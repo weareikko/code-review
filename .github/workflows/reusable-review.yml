@@ -1,0 +1,85 @@
+name: code-review
+
+# Reusable workflow: enable @weareikko/code-review in any repo with a small
+# caller. See the "Reusable workflow" section of the README for the snippet.
+#
+#   jobs:
+#     review:
+#       uses: weareikko/code-review/.github/workflows/reusable-review.yml@0.8.2
+#       with:
+#         model: anthropic/claude-sonnet-4-5
+#       secrets:
+#         api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: 'Model to review with, as `provider/modelId` (e.g. anthropic/claude-sonnet-4-5).'
+        required: true
+        type: string
+      version:
+        description: 'npm version or dist-tag of @weareikko/code-review to run.'
+        required: false
+        type: string
+        default: latest
+      node-version:
+        description: 'Node.js version (the CLI requires >=24).'
+        required: false
+        type: string
+        default: '24'
+      working-directory:
+        description: 'Directory to run the review in.'
+        required: false
+        type: string
+        default: '.'
+      args:
+        description: 'Extra CLI flags forwarded verbatim (e.g. --min-severity warn --posting-mode draft).'
+        required: false
+        type: string
+        default: ''
+      runs-on:
+        description: 'Runner to use.'
+        required: false
+        type: string
+        default: ubuntu-latest
+    secrets:
+      api-key:
+        description: >-
+          API key for the model provider, passed as `--api-key`. Optional when the
+          provider's standard env var is otherwise exposed, or for keyless/ambient
+          providers.
+        required: false
+
+jobs:
+  review:
+    name: Review pull request
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Run code-review
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          CODE_REVIEW_MODEL: ${{ inputs.model }}
+          GITHUB_TOKEN: ${{ github.token }}
+          INPUT_API_KEY: ${{ secrets.api-key }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_ARGS: ${{ inputs.args }}
+        run: |
+          set -euo pipefail
+          flags=()
+          if [ -n "${INPUT_API_KEY}" ]; then
+            flags+=(--api-key "${INPUT_API_KEY}")
+          fi
+          npx --yes "@weareikko/code-review@${INPUT_VERSION}" "${flags[@]}" ${INPUT_ARGS}

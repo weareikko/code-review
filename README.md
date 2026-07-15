@@ -83,7 +83,38 @@ review:
 
 The same reviewer also reviews **GitHub pull requests** — the engine is platform-agnostic and auto-detects GitHub from the Actions environment (`GITHUB_ACTIONS`, `GITHUB_REPOSITORY`, the `pull_request` event). Set `--platform github` to force it.
 
-Use the bundled composite action. It needs:
+### Reusable workflow (easiest)
+
+Enable reviews in any repo by calling the bundled reusable workflow — no checkout, permissions, or run steps to wire up yourself. Drop this in as `.github/workflows/code-review.yml`:
+
+```yml
+name: code-review
+on:
+  pull_request:
+
+# The caller grants the token scope; the reusable workflow uses it.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    uses: weareikko/code-review/.github/workflows/reusable-review.yml@0.8.2 # pin to a release tag
+    with:
+      model: anthropic/claude-sonnet-4-5
+      # version: latest        # npm version/dist-tag of the CLI to run
+      # args: --min-severity warn
+    secrets:
+      api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+Inputs: `model` (required), `version` (default `latest`), `node-version` (default `24`), `working-directory`, `args`, `runs-on`. Secret: `api-key` (optional if the provider's standard env var is otherwise available).
+
+On the `pull_request` event GitHub withholds secrets from fork PRs, so your key is never exposed to external-contributor code — those runs simply skip the review. To also avoid the noise, gate the caller job with an `if` (e.g. `github.event.pull_request.head.repo.full_name == github.repository`).
+
+### Composite action (more control)
+
+Prefer to own the checkout and steps? Use the bundled composite action instead. It needs:
 
 - **Permissions:** `pull-requests: write` (to post the review and summary) and `contents: read` (to check out the code). The default `GITHUB_TOKEN` is enough; the action reads it as `${{ github.token }}` by default.
 - **Full git history:** check out with `fetch-depth: 0` so the merge-base diff and commit log resolve.
