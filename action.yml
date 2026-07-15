@@ -46,12 +46,27 @@ inputs:
       `--min-severity warn --posting-mode draft --dry-run`).
     required: false
     default: ''
+  checkout:
+    description: >-
+      Check out the repository (full history) before reviewing. Set to 'false'
+      if your job already checked out the code with its own options.
+    required: false
+    default: 'true'
+  fetch-depth:
+    description: Checkout depth. 0 (full history) is required for the merge-base diff.
+    required: false
+    default: '0'
 
 runs:
   using: composite
   steps:
+    - name: Check out repository
+      if: ${{ inputs.checkout == 'true' }}
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: ${{ inputs.fetch-depth }}
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v5
       with:
         node-version: ${{ inputs.node-version }}
     - name: Run code-review
