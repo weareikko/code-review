@@ -54,7 +54,7 @@ The reviewer produces one platform-agnostic result — a set of inline comments 
 | Summary         | An upserted non-positional **MR note**       | An upserted **issue comment**                                                                                          |
 | Posting modes   | `direct` or `draft` (atomic bulk publish)    | Always a single batched review; `draft` has no effect                                                                  |
 
-The hidden fingerprint markers, the summary marker, and the reviewed-commit footer are all HTML comments that render identically on both platforms, so deduplication, summary upsert, and the commit-skip guard work the same way on each.
+The hidden fingerprint markers and the summary marker are HTML comments, invisible in the rendered view; the reviewed-commit footer is a visible `<sub>` line (`Reviewed by … for commit <sha>.`) that the commit-skip guard parses. All render identically on both platforms, so deduplication, summary upsert, and the commit-skip guard work the same way on each.
 
 ## Summary note
 
