@@ -30,9 +30,15 @@ jobs:
 
       - name: Run review
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_GATEWAY_ID: ${{ secrets.CLOUDFLARE_GATEWAY_ID }}
-          CODE_REVIEW_MODEL: ${{ secrets.CODE_REVIEW_MODEL }}
+          GITHUB_TOKEN: ${{ github.token }}
+          # Provider credentials (org secrets); the CODE_REVIEW_ prefix is
+          # de-prefixed to CLOUDFLARE_* by the CLI's env shim at startup.
+          CODE_REVIEW_CLOUDFLARE_API_KEY: ${{ secrets.CODE_REVIEW_CLOUDFLARE_API_KEY }}
+          CODE_REVIEW_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CODE_REVIEW_CLOUDFLARE_ACCOUNT_ID }}
+          CODE_REVIEW_CLOUDFLARE_GATEWAY_ID: ${{ secrets.CODE_REVIEW_CLOUDFLARE_GATEWAY_ID }}
+          # Review settings (org variables).
+          CODE_REVIEW_MODEL: ${{ vars.CODE_REVIEW_MODEL }}
+          CODE_REVIEW_DEPTH: ${{ vars.CODE_REVIEW_DEPTH }}
+          CODE_REVIEW_THINKING_LEVEL: ${{ vars.CODE_REVIEW_THINKING_LEVEL }}
+          CODE_REVIEW_VERIFY_MODEL: ${{ vars.CODE_REVIEW_VERIFY_MODEL }}
         run: node bin/code-review.js
