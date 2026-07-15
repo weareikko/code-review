@@ -2,8 +2,8 @@ name: code-review
 description: >-
   Agent-driven code review for GitHub pull requests. Posts deduplicated inline
   review comments and an upserted summary. (Same engine as the GitLab CI flow,
-  published as @ikko-dev/code-review.)
-author: ikko-dev
+  published as @weareikko/code-review.)
+author: weareikko
 branding:
   icon: git-pull-request
   color: blue
@@ -29,7 +29,7 @@ inputs:
     required: false
     default: ${{ github.token }}
   version:
-    description: npm version or dist-tag of @ikko-dev/code-review to run.
+    description: npm version or dist-tag of @weareikko/code-review to run.
     required: false
     default: latest
   node-version:
@@ -69,4 +69,4 @@ runs:
         if [ -n "${INPUT_API_KEY}" ]; then
           flags+=(--api-key "${INPUT_API_KEY}")
         fi
-        npx --yes "@ikko-dev/code-review@${INPUT_VERSION}" "${flags[@]}" ${INPUT_ARGS}
+        npx --yes "@weareikko/code-review@${INPUT_VERSION}" "${flags[@]}" ${INPUT_ARGS}

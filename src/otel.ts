@@ -2,7 +2,7 @@
  * Optional OpenTelemetry bridge over `diagnostics_channel` and the agent
  * event stream.
  *
- * Subscribes to every `@ikko-dev/code-review:*` tracing channel, opens an
+ * Subscribes to every `@weareikko/code-review:*` tracing channel, opens an
  * OTel span on `start`, and closes it on `asyncEnd`/`error`. The `reviewer.run`
  * phase additionally carries OpenTelemetry GenAI semantic-convention
  * attributes (`gen_ai.*`) and emits the standardized GenAI client metrics
@@ -126,7 +126,7 @@ export interface OtelBridgeOptions {
 const ROOT_PHASE: DiagnosticPhase = 'run';
 const GEN_AI_PHASE: DiagnosticPhase = 'reviewer.run';
 const POST_COMMENTS_PHASE: DiagnosticPhase = 'scm.post_comments';
-const SERVICE_NAME = '@ikko-dev/code-review';
+const SERVICE_NAME = '@weareikko/code-review';
 
 // Added as a data-point attribute on every gitlab_review_* metric so that
 // Prometheus/Mimir surfaces it as a label (service_name="…"). The SDK-level
@@ -857,7 +857,7 @@ async function loadDefaultRuntime(): Promise<OtelRuntime> {
     // means the install is corrupt or a bundler stripped the modules.
     throw new Error(
       `Failed to load the bundled OpenTelemetry runtime (${OTEL_SDK_PACKAGES.join(', ')}). ` +
-        `Reinstall @ikko-dev/code-review or pass startOtelBridge({ runtime }) explicitly.`,
+        `Reinstall @weareikko/code-review or pass startOtelBridge({ runtime }) explicitly.`,
       { cause },
     );
   }

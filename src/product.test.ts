@@ -9,6 +9,8 @@ describe('product footer constants', () => {
   // The reviewed-commit footer format is a migration tripwire: this pins the
   // exact rendered link so a rename cannot silently break dedup/skip parsing.
   it('renders the exact link used in review footers', () => {
-    expect(PRODUCT_LINK).toBe('[@ikko-dev/code-review](https://github.com/ikko-dev/gitlab-review)');
+    expect(PRODUCT_LINK).toBe(
+      '[@weareikko/code-review](https://github.com/weareikko/gitlab-review)',
+    );
   });
 });

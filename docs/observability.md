@@ -8,18 +8,18 @@
 
 Base tracing channel names:
 
-- `@ikko-dev/code-review:run`
-- `@ikko-dev/code-review:scm.get_merge_request`
-- `@ikko-dev/code-review:scm.get_latest_version`
-- `@ikko-dev/code-review:git.prepare_history`
-- `@ikko-dev/code-review:git.get_merge_diff`
-- `@ikko-dev/code-review:reviewer.run`
-- `@ikko-dev/code-review:review.parse`
-- `@ikko-dev/code-review:scm.get_discussions`
-- `@ikko-dev/code-review:comments.build`
-- `@ikko-dev/code-review:artifact.write_output`
-- `@ikko-dev/code-review:scm.post_comments`
-- `@ikko-dev/code-review:scm.upsert_summary`
+- `@weareikko/code-review:run`
+- `@weareikko/code-review:scm.get_merge_request`
+- `@weareikko/code-review:scm.get_latest_version`
+- `@weareikko/code-review:git.prepare_history`
+- `@weareikko/code-review:git.get_merge_diff`
+- `@weareikko/code-review:reviewer.run`
+- `@weareikko/code-review:review.parse`
+- `@weareikko/code-review:scm.get_discussions`
+- `@weareikko/code-review:comments.build`
+- `@weareikko/code-review:artifact.write_output`
+- `@weareikko/code-review:scm.post_comments`
+- `@weareikko/code-review:scm.upsert_summary`
 
 Node emits tracing subchannels as `tracing:<base>:start`, `:end`, `:asyncStart`, `:asyncEnd`, and `:error`. Payloads include safe run metadata (`runId`, phase, project, MR, GitLab URL, model, severity, timings, comment counts, and sanitized `errorInfo`) and intentionally exclude tokens/API keys.
 
@@ -30,7 +30,7 @@ The `git.get_merge_diff` payload exposes `diffFilesChanged`, `diffLinesAdded`, a
 The `reviewer.run` payload exposes a `usage` field (`{ model, tokens, cost }`) once the agent has returned. The same `usage` is forwarded onto the top-level `run` payload so a subscriber on `run:asyncEnd` sees the final token and cost totals for the review.
 
 ```js
-import { diagnosticChannels, run } from '@ikko-dev/code-review';
+import { diagnosticChannels, run } from '@weareikko/code-review';
 
 const onStart = (ctx) => console.log('review started', ctx.runId);
 const onEnd = (ctx) => console.log('review completed', ctx.durationMs, ctx.generated);
@@ -158,7 +158,7 @@ Library callers with pre-existing `TracerProvider`/`MeterProvider`/`LoggerProvid
 ```js
 import { metrics, trace } from '@opentelemetry/api';
 import { logs } from '@opentelemetry/api-logs';
-import { startOtelBridge } from '@ikko-dev/code-review';
+import { startOtelBridge } from '@weareikko/code-review';
 
 await startOtelBridge({
   runtime: {

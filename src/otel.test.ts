@@ -335,7 +335,7 @@ describe('OpenTelemetry bridge', () => {
     expect(duration).toBeDefined();
     expect(typeof duration!.value).toBe('number');
     expect(duration!.attributes).toMatchObject({
-      'service.name': '@ikko-dev/code-review',
+      'service.name': '@weareikko/code-review',
       'gen_ai.operation.name': 'invoke_agent',
       'gen_ai.system': 'anthropic',
       'gen_ai.request.model': 'claude-sonnet-4-5',
@@ -399,7 +399,7 @@ describe('OpenTelemetry bridge', () => {
       (m) => m.name === 'gen_ai.client.operation.duration',
     );
     expect(duration?.attributes).toMatchObject({
-      'service.name': '@ikko-dev/code-review',
+      'service.name': '@weareikko/code-review',
       'gen_ai.operation.name': 'invoke_agent',
       'gen_ai.system': 'anthropic',
       // `error.type` prefers the typed-error `code` over the class name —
@@ -763,7 +763,7 @@ describe('OpenTelemetry bridge', () => {
     expect(costByType.get('cache_creation')).toBeUndefined(); // zero — skipped
     for (const metric of costMetrics) {
       expect(metric.attributes).toMatchObject({
-        'service.name': '@ikko-dev/code-review',
+        'service.name': '@weareikko/code-review',
         'gen_ai.system': 'anthropic',
         'gen_ai.request.model': 'claude-haiku-4-5',
       });
@@ -810,7 +810,7 @@ describe('OpenTelemetry bridge', () => {
     // All four token metrics share a consistent label set (gen_ai.system present).
     for (const metric of tokenMetrics) {
       expect(metric.attributes).toMatchObject({
-        'service.name': '@ikko-dev/code-review',
+        'service.name': '@weareikko/code-review',
         'gen_ai.operation.name': 'invoke_agent',
         'gen_ai.system': 'anthropic',
         'gen_ai.request.model': 'claude-sonnet-4-5',
@@ -1138,7 +1138,7 @@ describe('OpenTelemetry bridge', () => {
     expect(completedLog).toBeDefined();
     expect(completedLog!.body).toMatch(/review completed: proj MR#1/);
     expect(completedLog!.attributes).toMatchObject({
-      'service.name': '@ikko-dev/code-review',
+      'service.name': '@weareikko/code-review',
       'event.name': 'gitlab_review.completed',
       'gitlab.project_id': 'proj',
       'gitlab.mr_iid': '1',
@@ -1177,7 +1177,7 @@ describe('OpenTelemetry bridge', () => {
     expect(started.body).toMatch(/review started: proj MR#1/);
     expect(started.context).toBeDefined();
     expect(started.attributes).toMatchObject({
-      'service.name': '@ikko-dev/code-review',
+      'service.name': '@weareikko/code-review',
       'event.name': 'gitlab_review.started',
       'gitlab.project_id': 'proj',
       'gitlab.mr_iid': '1',
@@ -1212,7 +1212,7 @@ describe('OpenTelemetry bridge', () => {
     expect(failed!.body).toMatch(/review failed: mygroup\/myrepo MR#7 — parser blew up/);
     expect(failed!.context).toBeDefined();
     expect(failed!.attributes).toMatchObject({
-      'service.name': '@ikko-dev/code-review',
+      'service.name': '@weareikko/code-review',
       'event.name': 'gitlab_review.failed',
       'error.type': 'REVIEWER_ERROR',
       'error.message': 'parser blew up',
@@ -1436,7 +1436,7 @@ describe('OpenTelemetry bridge', () => {
     const [auth, utils] = commentLogs;
     expect(auth.body).toContain('[critical] src/auth.ts:42');
     expect(auth.attributes).toMatchObject({
-      'service.name': '@ikko-dev/code-review',
+      'service.name': '@weareikko/code-review',
       'gitlab.project_id': 'acme/web',
       'gitlab.mr_iid': '42',
       'gitlab_review.run_id': 'run-logs',
@@ -1705,7 +1705,7 @@ describe('OpenTelemetry bridge', () => {
     expect(typeof runDuration!.value).toBe('number');
     expect(runDuration!.value).toBeGreaterThanOrEqual(0);
     expect(runDuration!.attributes).toMatchObject({
-      'service.name': '@ikko-dev/code-review',
+      'service.name': '@weareikko/code-review',
       'gitlab_review.dry_run': false,
       'gitlab_review.status': 'success',
     });
@@ -1714,7 +1714,7 @@ describe('OpenTelemetry bridge', () => {
     expect(totalCost).toBeDefined();
     expect(totalCost!.value).toBeCloseTo(0.03);
     expect(totalCost!.attributes).toMatchObject({
-      'service.name': '@ikko-dev/code-review',
+      'service.name': '@weareikko/code-review',
       'gitlab_review.dry_run': false,
       'gitlab_review.status': 'success',
     });
@@ -1746,7 +1746,7 @@ describe('OpenTelemetry bridge', () => {
     expect(comments).toBeDefined();
     expect(comments!.value).toBe(6);
     expect(comments!.attributes).toMatchObject({
-      'service.name': '@ikko-dev/code-review',
+      'service.name': '@weareikko/code-review',
       'gitlab_review.dry_run': false,
     });
 
@@ -1756,7 +1756,7 @@ describe('OpenTelemetry bridge', () => {
     expect(drafts).toBeDefined();
     expect(drafts!.value).toBe(4);
     expect(drafts!.attributes).toMatchObject({
-      'service.name': '@ikko-dev/code-review',
+      'service.name': '@weareikko/code-review',
       'gitlab_review.dry_run': false,
     });
   });
@@ -1795,7 +1795,7 @@ describe('OpenTelemetry bridge', () => {
     expect(bySeverity).toEqual({ critical: 2, warn: 1, info: 3 });
     // The per-severity data points still carry the shared review label set.
     expect(comments[0].attributes).toMatchObject({
-      'service.name': '@ikko-dev/code-review',
+      'service.name': '@weareikko/code-review',
       'gitlab_review.dry_run': false,
     });
   });
@@ -1821,12 +1821,12 @@ describe('OpenTelemetry bridge', () => {
     expect(reviewerPhase).toBeDefined();
     expect(typeof reviewerPhase!.value).toBe('number');
     expect(reviewerPhase!.value).toBeGreaterThanOrEqual(0);
-    expect(reviewerPhase!.attributes['service.name']).toBe('@ikko-dev/code-review');
+    expect(reviewerPhase!.attributes['service.name']).toBe('@weareikko/code-review');
     expect(reviewerPhase!.attributes['gitlab_review.status']).toBe('success');
 
     const runPhase = phaseDurations.find((m) => m.attributes['gitlab_review.phase'] === 'run');
     expect(runPhase).toBeDefined();
-    expect(runPhase!.attributes['service.name']).toBe('@ikko-dev/code-review');
+    expect(runPhase!.attributes['service.name']).toBe('@weareikko/code-review');
     expect(runPhase!.attributes['gitlab_review.status']).toBe('success');
   });
 
@@ -1943,7 +1943,7 @@ describe('OpenTelemetry bridge', () => {
     expect(runs).toHaveLength(1);
     expect(runs[0].value).toBe(1);
     expect(runs[0].attributes).toMatchObject({
-      'service.name': '@ikko-dev/code-review',
+      'service.name': '@weareikko/code-review',
       'gitlab_review.dry_run': false,
       'gitlab_review.status': 'success',
     });
@@ -2024,7 +2024,7 @@ describe('OpenTelemetry bridge', () => {
     expect(errors).toHaveLength(1);
     expect(errors[0].value).toBe(1);
     expect(errors[0].attributes).toMatchObject({
-      'service.name': '@ikko-dev/code-review',
+      'service.name': '@weareikko/code-review',
       'gitlab_review.status': 'error',
       // error.type prefers the typed-error code over the class name.
       'error.type': 'REVIEWER_ERROR',
@@ -2170,7 +2170,7 @@ describe('OpenTelemetry bridge', () => {
     expect(byName('gitlab_review_llm_cache_creation_tokens_total')?.value).toBe(50);
 
     expect(byName('gitlab_review_llm_input_tokens_total')?.attributes).toMatchObject({
-      'service.name': '@ikko-dev/code-review',
+      'service.name': '@weareikko/code-review',
       'gen_ai.request.model': 'claude-sonnet-4-5',
     });
   });

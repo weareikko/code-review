@@ -1,9 +1,9 @@
-# @ikko-dev/code-review
+# @weareikko/code-review
 
-[![NPM Version](https://img.shields.io/npm/v/@ikko-dev/code-review.svg?style=flat&colorB=3e63dd&colorA=414853)](https://www.npmjs.com/package/@ikko-dev/code-review/)
-[![Downloads](https://img.shields.io/npm/dm/@ikko-dev/code-review?style=flat&colorB=3e63dd&colorA=414853)](https://www.npmjs.com/package/@ikko-dev/code-review/)
-[![Size](https://img.shields.io/bundlephobia/minzip/@ikko-dev/code-review?style=flat&colorB=3e63dd&colorA=414853&label=size)](https://bundlephobia.com/package/@ikko-dev/code-review)
-![Codecov](https://img.shields.io/codecov/c/github/ikko-dev/gitlab-review?style=flat&colorB=3e63dd&colorA=414853)
+[![NPM Version](https://img.shields.io/npm/v/@weareikko/code-review.svg?style=flat&colorB=3e63dd&colorA=414853)](https://www.npmjs.com/package/@weareikko/code-review/)
+[![Downloads](https://img.shields.io/npm/dm/@weareikko/code-review?style=flat&colorB=3e63dd&colorA=414853)](https://www.npmjs.com/package/@weareikko/code-review/)
+[![Size](https://img.shields.io/bundlephobia/minzip/@weareikko/code-review?style=flat&colorB=3e63dd&colorA=414853&label=size)](https://bundlephobia.com/package/@weareikko/code-review)
+![Codecov](https://img.shields.io/codecov/c/github/weareikko/gitlab-review?style=flat&colorB=3e63dd&colorA=414853)
 
 Run an agent-driven code review in GitLab CI, parse inline comments, post deduplicated merge request discussions, and report per-run token usage and cost.
 
@@ -20,13 +20,13 @@ The reviewer reads the MR **title and description** as the author's declared int
 Run without installing:
 
 ```bash
-npx @ikko-dev/code-review
+npx @weareikko/code-review
 ```
 
 Or install in your project:
 
 ```bash
-npm i -D @ikko-dev/code-review
+npm i -D @weareikko/code-review
 npx code-review --help
 ```
 
@@ -70,7 +70,7 @@ review:
     # CI/CD variable, e.g. ANTHROPIC_API_KEY.
     CODE_REVIEW_MODEL: anthropic/claude-sonnet-4-5
   script:
-    - npx @ikko-dev/code-review
+    - npx @weareikko/code-review
   artifacts:
     when: always
     paths:
@@ -105,7 +105,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: ikko-dev/gitlab-review@main # pin to a release tag in production
+      - uses: weareikko/gitlab-review@main # pin to a release tag in production
         with:
           model: anthropic/claude-sonnet-4-5
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -121,7 +121,7 @@ Prefer to run the CLI directly (no composite action)? `GITHUB_TOKEN`, `GITHUB_RE
 - uses: actions/setup-node@v4
   with:
     node-version: 24
-- run: npx @ikko-dev/code-review
+- run: npx @weareikko/code-review
   env:
     GITHUB_TOKEN: ${{ github.token }}
     CODE_REVIEW_MODEL: anthropic/claude-sonnet-4-5
@@ -130,14 +130,14 @@ Prefer to run the CLI directly (no composite action)? `GITHUB_TOKEN`, `GITHUB_RE
 
 ## Documentation
 
-The README covers getting started. Reference material lives in [`docs/`](https://github.com/ikko-dev/gitlab-review/tree/main/docs):
+The README covers getting started. Reference material lives in [`docs/`](https://github.com/weareikko/gitlab-review/tree/main/docs):
 
-- [Configuration](https://github.com/ikko-dev/gitlab-review/blob/main/docs/configuration.md) — full environment-variable and CLI-flag reference, plus the `CODE_REVIEW_` namespacing convention.
-- [Providers](https://github.com/ikko-dev/gitlab-review/blob/main/docs/providers.md) — Anthropic, OpenRouter, Gemini, Ollama, and OpenAI-compatible endpoints, plus heterogeneous review with a model pool.
-- [Skills](https://github.com/ikko-dev/gitlab-review/blob/main/docs/skills.md) — built-in, external (`npm:`/`file:`/`git:`), and project auto-discovered review skills.
-- [Multi-stage review](https://github.com/ikko-dev/gitlab-review/blob/main/docs/multi-stage-review.md) — the staged Find / Verify / Synthesize pipeline behind `--review-depth`.
-- [Observability](https://github.com/ikko-dev/gitlab-review/blob/main/docs/observability.md) — diagnostics-channel tracing and the opt-in OpenTelemetry bridge (spans, metrics, logs).
-- [Output format](https://github.com/ikko-dev/gitlab-review/blob/main/docs/output-format.md) — inline-comment shape, MR-level summary note, footer, and duplicate prevention.
+- [Configuration](https://github.com/weareikko/gitlab-review/blob/main/docs/configuration.md) — full environment-variable and CLI-flag reference, plus the `CODE_REVIEW_` namespacing convention.
+- [Providers](https://github.com/weareikko/gitlab-review/blob/main/docs/providers.md) — Anthropic, OpenRouter, Gemini, Ollama, and OpenAI-compatible endpoints, plus heterogeneous review with a model pool.
+- [Skills](https://github.com/weareikko/gitlab-review/blob/main/docs/skills.md) — built-in, external (`npm:`/`file:`/`git:`), and project auto-discovered review skills.
+- [Multi-stage review](https://github.com/weareikko/gitlab-review/blob/main/docs/multi-stage-review.md) — the staged Find / Verify / Synthesize pipeline behind `--review-depth`.
+- [Observability](https://github.com/weareikko/gitlab-review/blob/main/docs/observability.md) — diagnostics-channel tracing and the opt-in OpenTelemetry bridge (spans, metrics, logs).
+- [Output format](https://github.com/weareikko/gitlab-review/blob/main/docs/output-format.md) — inline-comment shape, MR-level summary note, footer, and duplicate prevention.
 
 ## Configuration
 
@@ -147,11 +147,11 @@ The CLI auto-resolves most values from GitLab CI variables and provider-standard
 code-review --model anthropic/claude-sonnet-4-5 --api-key "$ANTHROPIC_API_KEY"
 ```
 
-Equivalently, set `CODE_REVIEW_MODEL` and the provider's key (e.g. `ANTHROPIC_API_KEY`) as CI/CD variables. Common knobs include `--min-severity`, `--thinking`, `--posting-mode draft`, `--no-summary`, and `--dry-run`. See the full [environment-variable and flag reference](https://github.com/ikko-dev/gitlab-review/blob/main/docs/configuration.md).
+Equivalently, set `CODE_REVIEW_MODEL` and the provider's key (e.g. `ANTHROPIC_API_KEY`) as CI/CD variables. Common knobs include `--min-severity`, `--thinking`, `--posting-mode draft`, `--no-summary`, and `--dry-run`. See the full [environment-variable and flag reference](https://github.com/weareikko/gitlab-review/blob/main/docs/configuration.md).
 
 ## Providers
 
-`code-review` uses [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi-ai) for model access. Any registered provider can be selected with `--model provider/modelId` (e.g. `anthropic/claude-sonnet-4-5`, `openrouter/anthropic/claude-3-opus-20240229`, `google/gemini-2.0-flash`, `ollama/qwen2.5-coder:32b`). See [Providers](https://github.com/ikko-dev/gitlab-review/blob/main/docs/providers.md) for per-provider setup and the model pool.
+`code-review` uses [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi-ai) for model access. Any registered provider can be selected with `--model provider/modelId` (e.g. `anthropic/claude-sonnet-4-5`, `openrouter/anthropic/claude-3-opus-20240229`, `google/gemini-2.0-flash`, `ollama/qwen2.5-coder:32b`). See [Providers](https://github.com/weareikko/gitlab-review/blob/main/docs/providers.md) for per-provider setup and the model pool.
 
 ## Artifacts
 

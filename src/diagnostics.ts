@@ -151,7 +151,7 @@ export interface DiagnosticContext {
   errorInfo?: DiagnosticError;
 }
 
-export const DIAGNOSTIC_CHANNEL_PREFIX = '@ikko-dev/code-review';
+export const DIAGNOSTIC_CHANNEL_PREFIX = '@weareikko/code-review';
 
 export const DIAGNOSTIC_CHANNEL_NAMES = {
   run: `${DIAGNOSTIC_CHANNEL_PREFIX}:run`,

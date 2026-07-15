@@ -63,7 +63,7 @@ Review usage: 12,345 in / 678 out tokens — $0.0421 (anthropic/claude-sonnet-4-
 
 Skills: `code-review`
 
-Reviewed by [@ikko-dev/code-review](https://github.com/ikko-dev/gitlab-review) for commit <sha>.
+Reviewed by [@weareikko/code-review](https://github.com/weareikko/gitlab-review) for commit <sha>.
 ```
 
 The `Review usage:` line names the model and records the `--thinking` level the run used (`thinking: off` by default). The `Skills:` line is only present when one or more skills were active for the run.
@@ -77,7 +77,7 @@ Disable with `--no-summary` or `CODE_REVIEW_POST_SUMMARY=false`. With `--dry-run
 Each inline comment ends with a compact footer that mirrors the format used in the summary note:
 
 ```md
-<sub>Reviewed by [@ikko-dev/code-review](https://github.com/ikko-dev/gitlab-review) for commit <sha>.</sub>
+<sub>Reviewed by [@weareikko/code-review](https://github.com/weareikko/gitlab-review) for commit <sha>.</sub>
 ```
 
 This lets developers see at a glance whether a comment was posted during the current review pass or an earlier one — useful when a long-lived MR accumulates comments across many commits.
