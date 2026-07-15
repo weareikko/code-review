@@ -49,7 +49,7 @@ The Findings bullets restate only the subject of each inline comment — the dis
 In addition to inline discussions, the reviewer returns an overall `summary` (Markdown). The CLI posts it as a non-positional MR note — the same shape a human reviewer creates when typing in the MR comment box. The note carries a hidden marker:
 
 ```md
-<!-- gitlab-review:summary -->
+<!-- code-review:summary -->
 ```
 
 On subsequent runs the CLI finds the existing note by that marker and **updates it in place** via `PUT /merge_requests/:iid/notes/:id`, so the summary always reflects the latest review without piling up duplicates. The latest summary stays at the top of the note. When a note is updated, the previous latest summary is moved into a collapsed `<details>` section labeled `Previous review runs` instead of being erased; existing history is retained with a bounded limit of 10 previous runs.
@@ -63,21 +63,21 @@ Review usage: 12,345 in / 678 out tokens — $0.0421 (anthropic/claude-sonnet-4-
 
 Skills: `code-review`
 
-Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) for commit <sha>.
+Reviewed by [@weareikko/code-review](https://github.com/weareikko/gitlab-review) for commit <sha>.
 ```
 
 The `Review usage:` line names the model and records the `--thinking` level the run used (`thinking: off` by default). The `Skills:` line is only present when one or more skills were active for the run.
 
-If a later CI job sees that the current MR head commit already appears in that footer, it skips the agent run to avoid producing a different review for the same diff. Use `--force-review` or `GITLAB_REVIEW_FORCE_REVIEW=true` to bypass the guard. The summary upsert runs in both `direct` and `draft` posting modes (it always uses the regular notes endpoints — the atomic bulk-publish flow is reserved for inline comments).
+If a later CI job sees that the current MR head commit already appears in that footer, it skips the agent run to avoid producing a different review for the same diff. Use `--force-review` or `CODE_REVIEW_FORCE_REVIEW=true` to bypass the guard. The summary upsert runs in both `direct` and `draft` posting modes (it always uses the regular notes endpoints — the atomic bulk-publish flow is reserved for inline comments).
 
-Disable with `--no-summary` or `GITLAB_REVIEW_POST_SUMMARY=false`. With `--dry-run`/`--no-post`, the summary is parsed but not posted, and the reviewed-commit skip guard is not applied.
+Disable with `--no-summary` or `CODE_REVIEW_POST_SUMMARY=false`. With `--dry-run`/`--no-post`, the summary is parsed but not posted, and the reviewed-commit skip guard is not applied.
 
 ## Inline comment footer
 
 Each inline comment ends with a compact footer that mirrors the format used in the summary note:
 
 ```md
-<sub>Reviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) for commit <sha>.</sub>
+<sub>Reviewed by [@weareikko/code-review](https://github.com/weareikko/gitlab-review) for commit <sha>.</sub>
 ```
 
 This lets developers see at a glance whether a comment was posted during the current review pass or an earlier one — useful when a long-lived MR accumulates comments across many commits.
@@ -89,8 +89,8 @@ The footer is appended to the **payload body only**. Fingerprints are computed f
 Each generated comment body includes hidden markers:
 
 ```md
-<!-- gitlab-review:fingerprint-primary:<hash> -->
-<!-- gitlab-review:fingerprint-secondary:<hash> -->
+<!-- code-review:fingerprint-primary:<hash> -->
+<!-- code-review:fingerprint-secondary:<hash> -->
 ```
 
 Before posting, the CLI fetches existing MR discussions and skips comments where either fingerprint is already present. This prevents reposting across reruns and also prevents duplicates generated in the same run.

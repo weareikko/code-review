@@ -19,8 +19,8 @@ import { runReview } from '../../src/gitlab-review.js';
 //
 // Driven entirely by env so the same file measures baseline and after:
 //   CACHE_ALIGN_RUN=1                   required — otherwise the harness skips
-//   GITLAB_REVIEW_EVAL_MODEL            reviewer model (default haiku)
-//   GITLAB_REVIEW_VERIFY_CONCURRENCY    1 = serial (best case), 4 = production default
+//   CODE_REVIEW_EVAL_MODEL            reviewer model (default haiku)
+//   CODE_REVIEW_VERIFY_CONCURRENCY    1 = serial (best case), 4 = production default
 //   CACHE_ALIGN_FIXTURE                 fixture diff (default multi-bug.diff)
 //   CACHE_ALIGN_TRIALS                  trials (default 3)
 //   CACHE_ALIGN_LABEL                   tag written into each record
@@ -37,7 +37,7 @@ const RESULTS_FILE = process.env.CACHE_ALIGN_RESULTS ?? join(tmpdir(), 'cache-al
 
 // Route through the configured provider (Cloudflare AI Gateway in CI); no direct
 // OpenAI/Anthropic calls. Key resolved per-provider from the model id.
-const MODEL = process.env.GITLAB_REVIEW_EVAL_MODEL ?? 'cloudflare-ai-gateway/claude-3-5-haiku';
+const MODEL = process.env.CODE_REVIEW_EVAL_MODEL ?? 'cloudflare-ai-gateway/claude-3-5-haiku';
 const apiKey = resolveProviderApiKey(MODEL);
 
 // Skip unless explicitly opted in AND a key is available. The CACHE_ALIGN_RUN
@@ -58,7 +58,7 @@ function makeConfig(cwd: string): Config {
     postingMode: 'direct',
     reviewDepth: 'verify',
     apiKey,
-    baseUrl: process.env.GITLAB_REVIEW_BASE_URL ?? '',
+    baseUrl: process.env.CODE_REVIEW_BASE_URL ?? '',
     maxTokens: 0,
     maxDiffChars: 100_000,
     decomposeHintLines: 0,
@@ -96,7 +96,7 @@ test.skipIf(skip)(
           label: LABEL,
           trial,
           model: usage.model,
-          concurrency: process.env.GITLAB_REVIEW_VERIFY_CONCURRENCY ?? '4',
+          concurrency: process.env.CODE_REVIEW_VERIFY_CONCURRENCY ?? '4',
           tokens: usage.tokens,
           cost: usage.cost,
         };

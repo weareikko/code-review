@@ -1,9 +1,9 @@
-name: gitlab-review
+name: code-review
 description: >-
   Agent-driven code review for GitHub pull requests. Posts deduplicated inline
-  review comments and an upserted summary. (Same engine as the GitLab CI flow;
-  the package name stays @ikko-dev/gitlab-review.)
-author: ikko-dev
+  review comments and an upserted summary. (Same engine as the GitLab CI flow,
+  published as @weareikko/code-review.)
+author: weareikko
 branding:
   icon: git-pull-request
   color: blue
@@ -12,7 +12,7 @@ inputs:
   model:
     description: >-
       Model to review with, as `provider/modelId` (e.g.
-      `anthropic/claude-sonnet-4-5`). Sets `GITLAB_REVIEW_MODEL`. Required.
+      `anthropic/claude-sonnet-4-5`). Sets `CODE_REVIEW_MODEL`. Required.
     required: true
   api-key:
     description: >-
@@ -29,7 +29,7 @@ inputs:
     required: false
     default: ${{ github.token }}
   version:
-    description: npm version or dist-tag of @ikko-dev/gitlab-review to run.
+    description: npm version or dist-tag of @weareikko/code-review to run.
     required: false
     default: latest
   node-version:
@@ -54,11 +54,11 @@ runs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ inputs.node-version }}
-    - name: Run gitlab-review
+    - name: Run code-review
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
-        GITLAB_REVIEW_MODEL: ${{ inputs.model }}
+        CODE_REVIEW_MODEL: ${{ inputs.model }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
         INPUT_API_KEY: ${{ inputs.api-key }}
         INPUT_VERSION: ${{ inputs.version }}
@@ -69,4 +69,4 @@ runs:
         if [ -n "${INPUT_API_KEY}" ]; then
           flags+=(--api-key "${INPUT_API_KEY}")
         fi
-        npx --yes "@ikko-dev/gitlab-review@${INPUT_VERSION}" "${flags[@]}" ${INPUT_ARGS}
+        npx --yes "@weareikko/code-review@${INPUT_VERSION}" "${flags[@]}" ${INPUT_ARGS}

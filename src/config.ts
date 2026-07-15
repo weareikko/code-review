@@ -22,13 +22,13 @@ export type Platform = (typeof PLATFORMS)[number];
 export const DEFAULT_GITHUB_SERVER_URL = 'https://github.com';
 
 /**
- * The single source of truth for the tool's own `GITLAB_REVIEW_*` settings.
+ * The single source of truth for the tool's own `CODE_REVIEW_*` settings.
  *
- * Each entry is the suffix after the `GITLAB_REVIEW_` prefix (e.g. `MODEL` for
- * `GITLAB_REVIEW_MODEL`). These are read directly across `config.ts`/`otel.ts`
- * and must NEVER be de-prefixed by {@link applyGitLabReviewEnvPrefix}.
+ * Each entry is the suffix after the `CODE_REVIEW_` prefix (e.g. `MODEL` for
+ * `CODE_REVIEW_MODEL`). These are read directly across `config.ts`/`otel.ts`
+ * and must NEVER be de-prefixed by {@link applyCodeReviewEnvPrefix}.
  *
- * Note: `API_KEY` is reserved. `GITLAB_REVIEW_API_KEY` was intentionally retired
+ * Note: `API_KEY` is reserved. `CODE_REVIEW_API_KEY` was intentionally retired
  * as the AI provider key and must not be revived as one.
  */
 export const RESERVED_ENV_SUFFIXES = [
@@ -52,22 +52,22 @@ export const RESERVED_ENV_SUFFIXES = [
   'THINKING_LEVEL',
 ] as const;
 
-const GITLAB_REVIEW_PREFIX = 'GITLAB_REVIEW_';
+const CODE_REVIEW_PREFIX = 'CODE_REVIEW_';
 const RESERVED_ENV_SUFFIX_SET = new Set<string>(RESERVED_ENV_SUFFIXES);
 
 /**
  * Optional namespacing shim for provider/infra environment variables.
  *
- * For each `GITLAB_REVIEW_<NAME>` variable whose `<NAME>` is not a reserved tool
+ * For each `CODE_REVIEW_<NAME>` variable whose `<NAME>` is not a reserved tool
  * setting (see {@link RESERVED_ENV_SUFFIXES}), this exposes `<NAME>` in the same
- * env object. The prefixed value wins when both `GITLAB_REVIEW_<NAME>` and a
+ * env object. The prefixed value wins when both `CODE_REVIEW_<NAME>` and a
  * plain `<NAME>` are set — the tool's scoped value should override an unrelated
  * CI-wide variable of the same name.
  *
  * This lets credentials and infra vars that `@earendil-works/pi-ai` reads
  * (`ANTHROPIC_API_KEY`, `CLOUDFLARE_API_KEY`, `CLOUDFLARE_ACCOUNT_ID`,
  * `OLLAMA_HOST`, ambient AWS/Vertex creds, …) — and the GitLab tokens — be
- * scoped under `GITLAB_REVIEW_` in shared CI without enumerating pi-ai's
+ * scoped under `CODE_REVIEW_` in shared CI without enumerating pi-ai's
  * provider list.
  *
  * Must run once at startup BEFORE config/key resolution: `getEnvApiKey` and
@@ -75,16 +75,16 @@ const RESERVED_ENV_SUFFIX_SET = new Set<string>(RESERVED_ENV_SUFFIXES);
  * in-process is what makes those reads pick up the de-prefixed values.
  *
  * Empty prefixed values are ignored (treated as unset). Double-prefixed names
- * (e.g. `GITLAB_REVIEW_GITLAB_REVIEW_MODEL`) are also skipped so a de-prefixed
- * suffix can never clobber the tool's own reserved `GITLAB_REVIEW_*` settings.
+ * (e.g. `CODE_REVIEW_CODE_REVIEW_MODEL`) are also skipped so a de-prefixed
+ * suffix can never clobber the tool's own reserved `CODE_REVIEW_*` settings.
  *
  * @returns the same `env` object it was given, mutated in place.
  */
-export function applyGitLabReviewEnvPrefix(env = process.env): NodeJS.ProcessEnv {
+export function applyCodeReviewEnvPrefix(env = process.env): NodeJS.ProcessEnv {
   for (const key of Object.keys(env)) {
-    if (!key.startsWith(GITLAB_REVIEW_PREFIX)) continue;
-    const suffix = key.slice(GITLAB_REVIEW_PREFIX.length);
-    if (!suffix || RESERVED_ENV_SUFFIX_SET.has(suffix) || suffix.startsWith(GITLAB_REVIEW_PREFIX))
+    if (!key.startsWith(CODE_REVIEW_PREFIX)) continue;
+    const suffix = key.slice(CODE_REVIEW_PREFIX.length);
+    if (!suffix || RESERVED_ENV_SUFFIX_SET.has(suffix) || suffix.startsWith(CODE_REVIEW_PREFIX))
       continue;
     const value = env[key];
     if (typeof value !== 'string' || value.length === 0) continue;
@@ -102,8 +102,8 @@ export function applyGitLabReviewEnvPrefix(env = process.env): NodeJS.ProcessEnv
  * providers/models without long-retention support (e.g. Anthropic), where it
  * behaves exactly like the default `short`.
  *
- * Overridable: an explicit `PI_CACHE_RETENTION` (or `GITLAB_REVIEW_PI_CACHE_RETENTION`,
- * mapped by {@link applyGitLabReviewEnvPrefix} first) is left untouched.
+ * Overridable: an explicit `PI_CACHE_RETENTION` (or `CODE_REVIEW_PI_CACHE_RETENTION`,
+ * mapped by {@link applyCodeReviewEnvPrefix} first) is left untouched.
  */
 export function applyDefaultCacheRetention(env = process.env): NodeJS.ProcessEnv {
   if (!env.PI_CACHE_RETENTION) {
@@ -116,7 +116,7 @@ export interface Config {
   /**
    * The source-control backend to review against. Auto-detected from the
    * environment by default (see {@link detectPlatform}); `--platform` /
-   * `GITLAB_REVIEW_PLATFORM` is an explicit override that always wins.
+   * `CODE_REVIEW_PLATFORM` is an explicit override that always wins.
    */
   platform: Platform;
   project: string;
@@ -141,7 +141,7 @@ export interface Config {
    * the adversarial verifier prefers a member other than the one that authored a
    * finding. Empty (the default) means the effective pool is just `[model]`, which
    * reproduces single-model behaviour byte-for-byte. Sourced from `--model-pool`
-   * or `GITLAB_REVIEW_MODEL_POOL` (comma-separated).
+   * or `CODE_REVIEW_MODEL_POOL` (comma-separated).
    */
   modelPool: string[];
   minSeverity: Severity;
@@ -156,7 +156,7 @@ export interface Config {
    * set, every adversarial verifier runs on this model instead of the pool's
    * cross-family pick — pairing a cheap, high-recall Find model with a strong,
    * high-precision verifier. Empty (default) keeps the pool-based selection.
-   * Sourced from `--verify-model` or `GITLAB_REVIEW_VERIFY_MODEL`.
+   * Sourced from `--verify-model` or `CODE_REVIEW_VERIFY_MODEL`.
    */
   verifyModel: string;
   postingMode: PostingMode;
@@ -179,13 +179,13 @@ export interface Config {
    * Lines of surrounding context per diff hunk (`git diff --unified`). More
    * context helps the model reason about each change but inflates tokens and
    * fits fewer files in the char budget; less context fits more files. 0 uses
-   * the built-in default. Sourced from `--diff-context` / `GITLAB_REVIEW_DIFF_CONTEXT`.
+   * the built-in default. Sourced from `--diff-context` / `CODE_REVIEW_DIFF_CONTEXT`.
    */
   diffContext: number;
   /**
    * When true, diffs for files dropped by the char budget are staged on disk so
    * the reviewer can read them on demand instead of losing them (retrieval mode).
-   * Default false. Sourced from `--retrieve-skipped` / `GITLAB_REVIEW_RETRIEVE_SKIPPED`.
+   * Default false. Sourced from `--retrieve-skipped` / `CODE_REVIEW_RETRIEVE_SKIPPED`.
    */
   retrieveSkipped: boolean;
   reviewFile: string;
@@ -272,7 +272,7 @@ function toBoolean(value: unknown): boolean {
 
 function resolvePostSummary(args: ParsedArgs, env: NodeJS.ProcessEnv): boolean {
   if (args.noSummary === true) return false;
-  const raw = env.GITLAB_REVIEW_POST_SUMMARY;
+  const raw = env.CODE_REVIEW_POST_SUMMARY;
   if (typeof raw === 'string') {
     const normalized = raw.trim().toLowerCase();
     if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
@@ -334,7 +334,7 @@ function resolveSkills(args: ParsedArgs, env: NodeJS.ProcessEnv): string[] {
   const argSkill = args.skill;
   if (Array.isArray(argSkill) && argSkill.length > 0) return argSkill;
   if (typeof argSkill === 'string' && argSkill.length > 0) return [argSkill];
-  const envVal = env.GITLAB_REVIEW_SKILLS;
+  const envVal = env.CODE_REVIEW_SKILLS;
   if (envVal)
     return envVal
       .split(',')
@@ -345,7 +345,7 @@ function resolveSkills(args: ParsedArgs, env: NodeJS.ProcessEnv): string[] {
 
 /**
  * Resolve the model pool from `--model-pool` (preferred) or
- * `GITLAB_REVIEW_MODEL_POOL`. Both are comma-separated `provider/modelId` lists.
+ * `CODE_REVIEW_MODEL_POOL`. Both are comma-separated `provider/modelId` lists.
  * Entries are trimmed and empty entries dropped. Returns `[]` when unset, which
  * downstream treats as "use the single `config.model`".
  */
@@ -353,7 +353,7 @@ function resolveModelPool(args: ParsedArgs, env: NodeJS.ProcessEnv): string[] {
   const raw =
     (typeof args.modelPool === 'string' && args.modelPool.length > 0
       ? args.modelPool
-      : env.GITLAB_REVIEW_MODEL_POOL) ?? '';
+      : env.CODE_REVIEW_MODEL_POOL) ?? '';
   return raw
     .split(',')
     .map((entry) => entry.trim())
@@ -440,7 +440,7 @@ export function resolveGitHubPr(
  * Determine the review platform for this run.
  *
  * Precedence:
- *   1. Explicit `--platform` / `GITLAB_REVIEW_PLATFORM` (throws on an unknown value).
+ *   1. Explicit `--platform` / `CODE_REVIEW_PLATFORM` (throws on an unknown value).
  *   2. CI markers: `GITHUB_ACTIONS === 'true'` → github; `GITLAB_CI === 'true'`
  *      or a present `CI_PROJECT_ID` / `CI_SERVER_URL` → gitlab.
  *   3. Inference from which platform's required identifiers are present
@@ -454,11 +454,11 @@ export function detectPlatform(
   env: NodeJS.ProcessEnv,
   readEventFile: (path: string) => string | undefined = readEventFileSync,
 ): Platform {
-  const explicit = normalizeChoice(args.platform ?? env.GITLAB_REVIEW_PLATFORM);
+  const explicit = normalizeChoice(args.platform ?? env.CODE_REVIEW_PLATFORM);
   if (explicit) {
     if (explicit === 'github' || explicit === 'gitlab') return explicit;
     throw new ConfigError(`Unknown platform "${explicit}".`, {
-      hint: `--platform (or GITLAB_REVIEW_PLATFORM) must be one of: ${PLATFORMS.join(', ')}.`,
+      hint: `--platform (or CODE_REVIEW_PLATFORM) must be one of: ${PLATFORMS.join(', ')}.`,
     });
   }
 
@@ -479,7 +479,7 @@ export function detectPlatform(
       ? 'Ambiguous review platform: both GitHub and GitLab identifiers are present.'
       : 'Could not detect the review platform from the environment.',
     {
-      hint: `Set --platform (or GITLAB_REVIEW_PLATFORM) to one of: ${PLATFORMS.join(', ')}.`,
+      hint: `Set --platform (or CODE_REVIEW_PLATFORM) to one of: ${PLATFORMS.join(', ')}.`,
     },
   );
 }
@@ -502,8 +502,8 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
   ).replace(/\/$/, '');
 
   // Model and API key are both required — there is no implicit default model.
-  // The model is `provider/modelId`; supply it via --model or GITLAB_REVIEW_MODEL.
-  const model = String(args.model ?? env.GITLAB_REVIEW_MODEL ?? '');
+  // The model is `provider/modelId`; supply it via --model or CODE_REVIEW_MODEL.
+  const model = String(args.model ?? env.CODE_REVIEW_MODEL ?? '');
 
   // API key resolution:
   //   1. --api-key flag (explicit override)
@@ -514,28 +514,28 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
 
   // Base URL resolution priority:
   //   1. --base-url flag
-  //   2. GITLAB_REVIEW_BASE_URL (universal override for any OpenAI-compatible endpoint)
+  //   2. CODE_REVIEW_BASE_URL (universal override for any OpenAI-compatible endpoint)
   //   3. OLLAMA_HOST (automatic for ollama provider)
   const baseUrl = String(
-    args.baseUrl ?? first(env.GITLAB_REVIEW_BASE_URL, resolveOllamaBaseUrl(model, env)) ?? '',
+    args.baseUrl ?? first(env.CODE_REVIEW_BASE_URL, resolveOllamaBaseUrl(model, env)) ?? '',
   );
 
-  const maxTokens = Number(args.maxTokens ?? env.GITLAB_REVIEW_MAX_TOKENS ?? 0);
+  const maxTokens = Number(args.maxTokens ?? env.CODE_REVIEW_MAX_TOKENS ?? 0);
 
   const DEFAULT_MAX_DIFF_CHARS = 100_000;
-  const rawMaxDiffChars = Number(args.maxDiffChars ?? env.GITLAB_REVIEW_MAX_DIFF_CHARS);
+  const rawMaxDiffChars = Number(args.maxDiffChars ?? env.CODE_REVIEW_MAX_DIFF_CHARS);
   const maxDiffChars =
     Number.isFinite(rawMaxDiffChars) && rawMaxDiffChars > 0
       ? rawMaxDiffChars
       : DEFAULT_MAX_DIFF_CHARS;
 
   const rawDecomposeHintLines = Number(
-    args.decomposeHintLines ?? env.GITLAB_REVIEW_DECOMPOSE_HINT_LINES ?? 0,
+    args.decomposeHintLines ?? env.CODE_REVIEW_DECOMPOSE_HINT_LINES ?? 0,
   );
   const decomposeHintLines =
     Number.isFinite(rawDecomposeHintLines) && rawDecomposeHintLines > 0 ? rawDecomposeHintLines : 0;
 
-  const rawDiffContext = Number(args.diffContext ?? env.GITLAB_REVIEW_DIFF_CONTEXT);
+  const rawDiffContext = Number(args.diffContext ?? env.CODE_REVIEW_DIFF_CONTEXT);
   const diffContext =
     Number.isFinite(rawDiffContext) && rawDiffContext >= 0 ? Math.floor(rawDiffContext) : 0;
 
@@ -554,17 +554,17 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     model,
     modelPool: resolveModelPool(args, env),
     minSeverity: normalizeChoice(
-      args.minSeverity ?? env.GITLAB_REVIEW_MIN_SEVERITY ?? 'info',
+      args.minSeverity ?? env.CODE_REVIEW_MIN_SEVERITY ?? 'info',
     ) as Severity,
     thinkingLevel: normalizeChoice(
-      args.thinking ?? env.GITLAB_REVIEW_THINKING_LEVEL ?? 'off',
+      args.thinking ?? env.CODE_REVIEW_THINKING_LEVEL ?? 'off',
     ) as ThinkingLevel,
     reviewDepth: normalizeChoice(
-      args.reviewDepth ?? env.GITLAB_REVIEW_DEPTH ?? 'single',
+      args.reviewDepth ?? env.CODE_REVIEW_DEPTH ?? 'single',
     ) as ReviewDepth,
-    verifyModel: String(args.verifyModel ?? env.GITLAB_REVIEW_VERIFY_MODEL ?? ''),
+    verifyModel: String(args.verifyModel ?? env.CODE_REVIEW_VERIFY_MODEL ?? ''),
     postingMode: normalizeChoice(
-      args.postingMode ?? env.GITLAB_REVIEW_POSTING_MODE ?? 'direct',
+      args.postingMode ?? env.CODE_REVIEW_POSTING_MODE ?? 'direct',
     ) as PostingMode,
     apiKey,
     baseUrl,
@@ -572,18 +572,17 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     maxDiffChars,
     decomposeHintLines,
     diffContext,
-    retrieveSkipped:
-      toBoolean(args.retrieveSkipped) || toBoolean(env.GITLAB_REVIEW_RETRIEVE_SKIPPED),
+    retrieveSkipped: toBoolean(args.retrieveSkipped) || toBoolean(env.CODE_REVIEW_RETRIEVE_SKIPPED),
     reviewFile: String(args.reviewFile ?? 'gitlab-review.md'),
     output: String(args.output ?? 'review-comments.json'),
     dryRun: toBoolean(args.dryRun),
     noPost: toBoolean(args.noPost),
     postSummary: resolvePostSummary(args, env),
-    forceReview: toBoolean(args.forceReview) || toBoolean(env.GITLAB_REVIEW_FORCE_REVIEW),
-    verbose: toBoolean(args.verbose) || toBoolean(env.GITLAB_REVIEW_VERBOSE),
+    forceReview: toBoolean(args.forceReview) || toBoolean(env.CODE_REVIEW_FORCE_REVIEW),
+    verbose: toBoolean(args.verbose) || toBoolean(env.CODE_REVIEW_VERBOSE),
     cwd: String(args.cwd ?? process.cwd()),
     skills: resolveSkills(args, env),
-    refreshGitSkills: toBoolean(env.GITLAB_REVIEW_REFRESH_SKILLS),
+    refreshGitSkills: toBoolean(env.CODE_REVIEW_REFRESH_SKILLS),
   };
 }
 
@@ -627,7 +626,7 @@ export function validateConfig(config: Config): void {
     const hints: string[] = [];
     if (missing.includes('--model')) {
       hints.push(
-        'Set --model (or GITLAB_REVIEW_MODEL) to a "provider/modelId" value, e.g. anthropic/claude-sonnet-4-5.',
+        'Set --model (or CODE_REVIEW_MODEL) to a "provider/modelId" value, e.g. anthropic/claude-sonnet-4-5.',
       );
     }
     if (isAmbientProvider) {

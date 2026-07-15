@@ -2,7 +2,7 @@
 
 ## Project
 
-`@ikko-dev/gitlab-review` is a Node.js `>=24`, ESM TypeScript CLI/library. It runs an agent-driven GitLab MR review, parses structured reviewer output, deduplicates inline comments with hidden fingerprints, posts/upserts MR notes, and optionally emits diagnostics/OpenTelemetry data.
+`@weareikko/code-review` is a Node.js `>=24`, ESM TypeScript CLI/library. It runs an agent-driven GitLab MR review, parses structured reviewer output, deduplicates inline comments with hidden fingerprints, posts/upserts MR notes, and optionally emits diagnostics/OpenTelemetry data.
 
 ## Commands
 
@@ -14,7 +14,7 @@
 - Coverage: `npm run test:ci`
 - Build: `npm run build`
 - Full local check: `npm run check`
-- Evals: `npm run test:evals` (requires `ANTHROPIC_API_KEY` or `GITLAB_REVIEW_API_KEY`; calls real LLMs)
+- Evals: `npm run test:evals` (requires `ANTHROPIC_API_KEY` or `CODE_REVIEW_API_KEY`; calls real LLMs)
 
 ## Architecture map
 

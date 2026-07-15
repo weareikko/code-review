@@ -14,7 +14,8 @@ export interface PriorThread {
 }
 
 /**
- * Returns true when the note body contains a gitlab-review fingerprint marker.
+ * Returns true when the note body contains a code-review fingerprint marker
+ * (current or legacy prefix).
  * Used to identify notes posted by the bot without needing a getCurrentUser() call.
  */
 export function isBotNote(note: DiscussionNote): boolean {

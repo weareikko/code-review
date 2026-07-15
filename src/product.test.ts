@@ -10,7 +10,7 @@ describe('product footer constants', () => {
   // exact rendered link so a rename cannot silently break dedup/skip parsing.
   it('renders the exact link used in review footers', () => {
     expect(PRODUCT_LINK).toBe(
-      '[@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review)',
+      '[@weareikko/code-review](https://github.com/weareikko/gitlab-review)',
     );
   });
 });

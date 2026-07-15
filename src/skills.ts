@@ -256,7 +256,7 @@ export async function resolveNpmSkillDir(
 /** Base directory for cached git-skill clones (honours `XDG_CACHE_HOME`). */
 export function resolveSkillCacheDir(): string {
   const base = process.env.XDG_CACHE_HOME?.trim() || join(homedir(), '.cache');
-  return join(base, 'gitlab-review', 'skills');
+  return join(base, 'code-review', 'skills');
 }
 
 /**

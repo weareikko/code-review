@@ -5,7 +5,7 @@ import { parse } from 'yaml';
 import { PRODUCT_NAME } from './product.js';
 
 // The composite action lives at the repo root (referenced as
-// `ikko-dev/gitlab-review@<ref>` from consumer workflows), one level up from
+// `weareikko/gitlab-review@<ref>` from consumer workflows), one level up from
 // this `src/` file.
 const actionPath = fileURLToPath(new URL('../action.yml', import.meta.url));
 const action = parse(readFileSync(actionPath, 'utf8')) as {

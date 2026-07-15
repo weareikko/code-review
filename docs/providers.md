@@ -2,13 +2,13 @@
 
 ← Back to the [README](../README.md)
 
-`gitlab-review` uses [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi-ai) for model
+`code-review` uses [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi-ai) for model
 access. Any registered provider can be selected with `--model provider/modelId`.
 
 ## Anthropic
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-... npx @ikko-dev/gitlab-review --model anthropic/claude-sonnet-4-5
+ANTHROPIC_API_KEY=sk-ant-... npx @weareikko/code-review --model anthropic/claude-sonnet-4-5
 ```
 
 ## OpenRouter
@@ -16,14 +16,14 @@ ANTHROPIC_API_KEY=sk-ant-... npx @ikko-dev/gitlab-review --model anthropic/claud
 Multi-slash model IDs are supported — the provider is taken from the first segment only:
 
 ```bash
-OPENROUTER_API_KEY=sk-or-... npx @ikko-dev/gitlab-review \
+OPENROUTER_API_KEY=sk-or-... npx @weareikko/code-review \
   --model openrouter/anthropic/claude-3-opus-20240229
 ```
 
 ## Google Gemini
 
 ```bash
-GEMINI_API_KEY=... npx @ikko-dev/gitlab-review --model google/gemini-2.0-flash
+GEMINI_API_KEY=... npx @weareikko/code-review --model google/gemini-2.0-flash
 ```
 
 ## Ollama (local)
@@ -32,21 +32,21 @@ Point `OLLAMA_HOST` at your Ollama server. No API key is required:
 
 ```bash
 OLLAMA_HOST=http://localhost:11434 \
-GITLAB_REVIEW_MODEL=ollama/qwen2.5-coder:32b \
-npx @ikko-dev/gitlab-review
+CODE_REVIEW_MODEL=ollama/qwen2.5-coder:32b \
+npx @weareikko/code-review
 ```
 
-`OLLAMA_HOST` defaults to `http://localhost:11434` when not set. Use `GITLAB_REVIEW_MAX_TOKENS`
+`OLLAMA_HOST` defaults to `http://localhost:11434` when not set. Use `CODE_REVIEW_MAX_TOKENS`
 to override the maximum output tokens when Ollama returns fewer tokens than expected.
 
 ## Generic OpenAI-compatible endpoint
 
-Use `GITLAB_REVIEW_BASE_URL` to point the provider at any OpenAI-compatible API:
+Use `CODE_REVIEW_BASE_URL` to point the provider at any OpenAI-compatible API:
 
 ```bash
 OPENAI_API_KEY=my-key \
-GITLAB_REVIEW_BASE_URL=https://my-gateway.example.com/v1 \
-npx @ikko-dev/gitlab-review --model openai/gpt-4o
+CODE_REVIEW_BASE_URL=https://my-gateway.example.com/v1 \
+npx @weareikko/code-review --model openai/gpt-4o
 ```
 
 ## Heterogeneous review with a model pool
@@ -58,7 +58,7 @@ Pass a comma-separated pool of `provider/modelId` models to spread the pipeline 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-... \
 GEMINI_API_KEY=... \
-npx @ikko-dev/gitlab-review \
+npx @weareikko/code-review \
   --review-depth full \
   --model anthropic/claude-sonnet-4-5 \
   --model-pool anthropic/claude-sonnet-4-5,google/gemini-2.5-pro

@@ -56,7 +56,7 @@ are refinements with a poor cost-per-yield ratio for a CI-on-every-MR reviewer:
 
 ## Depth tiers
 
-A `--review-depth` flag (env `GITLAB_REVIEW_DEPTH`) selects how much of the
+A `--review-depth` flag (env `CODE_REVIEW_DEPTH`) selects how much of the
 pipeline runs:
 
 | `--review-depth`  | Stages active                       | Use                                  |
@@ -71,7 +71,7 @@ The current skateboard ships `single` and `verify`. `full` is future work.
 
 At `verify`/`full` depth the Find and Verify stages have different jobs: Find
 casts a wide net (recall), Verify adversarially prunes (precision). `--verify-model`
-(env `GITLAB_REVIEW_VERIFY_MODEL`) routes the Verify stage to its own model so a
+(env `CODE_REVIEW_VERIFY_MODEL`) routes the Verify stage to its own model so a
 **cheap, high-recall finder** can pair with a **strong, high-precision verifier**.
 Measured on the eval fixtures, a cheap-find/strong-verify pairing matched an
 all-strong pipeline on recall and precision at a fraction of the cost.

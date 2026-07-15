@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { fingerprints } from './fingerprints.js';
+import {
+  appendFingerprintMarkers,
+  extractExistingFingerprints,
+  fingerprints,
+} from './fingerprints.js';
 import type { ReviewComment } from './types.js';
 
 function comment(overrides: Partial<ReviewComment> = {}): ReviewComment {
@@ -61,5 +65,33 @@ describe('fingerprints (#91 edit-stable dedup)', () => {
     const ref = fingerprints(base, HUNK_RUN_1);
     expect(otherFile.secondary).not.toBe(ref.secondary);
     expect(otherSide.secondary).not.toBe(ref.secondary);
+  });
+});
+
+describe('fingerprint markers (code-review rename migration)', () => {
+  const fp = { primary: 'aaaa1111', secondary: 'bbbb2222' };
+
+  it('writes markers under the current code-review prefix', () => {
+    const body = appendFingerprintMarkers('A finding.', fp);
+    expect(body).toContain(`<!-- code-review:fingerprint-primary:${fp.primary} -->`);
+    expect(body).toContain(`<!-- code-review:fingerprint-secondary:${fp.secondary} -->`);
+    expect(body).not.toContain('gitlab-review:fingerprint');
+  });
+
+  it('extracts markers written under the current code-review prefix', () => {
+    const body = appendFingerprintMarkers('A finding.', fp);
+    const set = extractExistingFingerprints([{ notes: [{ id: 1, body }] }]);
+    expect(set.has(fp.primary)).toBe(true);
+    expect(set.has(fp.secondary)).toBe(true);
+  });
+
+  // Migration guard: findings posted under the former `gitlab-review` identity
+  // must still be recognised so dedup keeps working across the rename.
+  it('still extracts markers written under the legacy gitlab-review prefix', () => {
+    const legacyBody =
+      'A finding.\n\n<!-- gitlab-review:fingerprint-primary:cafe -->\n<!-- gitlab-review:fingerprint-secondary:f00d -->';
+    const set = extractExistingFingerprints([{ notes: [{ id: 1, body: legacyBody }] }]);
+    expect(set.has('cafe')).toBe(true);
+    expect(set.has('f00d')).toBe(true);
   });
 });

@@ -5,9 +5,12 @@ import {
   buildSummaryBody,
   buildSummaryHistoryEntries,
   extractReviewedCommitSha,
+  extractSummaryHistoryEntries,
   findExistingReviewedCommitSha,
   findExistingSummaryNoteId,
   postGeneratedComments,
+  stripSummaryHistory,
+  SUMMARY_HISTORY_ENTRY_END,
   SUMMARY_HISTORY_ENTRY_START,
   SUMMARY_HISTORY_LIMIT,
   SUMMARY_HISTORY_START,
@@ -113,9 +116,25 @@ describe('summary note upsert', () => {
     const body = buildSummaryBody('Great work.', undefined, { reviewedCommitSha: commit });
 
     expect(body).toContain(
-      `---\n\nReviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) v${__PKG_VERSION__} for commit 27dab603346bcb994190042029ce7368021ff21e.`,
+      `---\n\nReviewed by [@weareikko/code-review](https://github.com/weareikko/gitlab-review) v${__PKG_VERSION__} for commit 27dab603346bcb994190042029ce7368021ff21e.`,
     );
     expect(extractReviewedCommitSha(body)).toBe(commit);
+  });
+
+  // Migration guard: findings/summaries posted under the former
+  // `gitlab-review` product identity must still be recognised on read after
+  // the rename, so a first post-rename run upserts (not duplicates) them.
+  it('still parses a reviewed commit footer written under the legacy identity', () => {
+    const commit = 'abcabcabcabcabcabcabcabcabcabcabcabcabca';
+    const legacyBody = `${SUMMARY_MARKER}\n\nGreat work.\n\n---\n\nReviewed by [@ikko-dev/gitlab-review](https://github.com/ikko-dev/gitlab-review) v0.7.6 for commit ${commit}.`;
+    expect(extractReviewedCommitSha(legacyBody)).toBe(commit);
+  });
+
+  it('finds an existing summary note written under the legacy marker', () => {
+    const discussions = [
+      { notes: [{ id: 7, body: '<!-- gitlab-review:summary -->\n\nlegacy summary' }] },
+    ];
+    expect(findExistingSummaryNoteId(discussions)).toBe(7);
   });
 
   it('finds the reviewed commit from the current summary note', () => {
@@ -277,6 +296,58 @@ describe('summary note upsert', () => {
     expect(entries.join('\n').split(SUMMARY_HISTORY_ENTRY_START)).toHaveLength(
       SUMMARY_HISTORY_LIMIT + 1,
     );
+  });
+});
+
+describe('legacy summary history markers', () => {
+  const LEGACY_HISTORY_START = '<!-- gitlab-review:summary-history:start -->';
+  const LEGACY_HISTORY_END = '<!-- gitlab-review:summary-history:end -->';
+  const LEGACY_ENTRY_START = '<!-- gitlab-review:summary-history-entry:start -->';
+  const LEGACY_ENTRY_END = '<!-- gitlab-review:summary-history-entry:end -->';
+
+  it('extracts legacy summary-history entries and re-emits them under the current markers', () => {
+    const body = [
+      LEGACY_HISTORY_START,
+      LEGACY_ENTRY_START,
+      '### Previous run archived 2026-05-19T14:00:00Z',
+      '',
+      'legacy archived summary',
+      LEGACY_ENTRY_END,
+      LEGACY_HISTORY_END,
+    ].join('\n');
+
+    const entries = extractSummaryHistoryEntries(body);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].startsWith(SUMMARY_HISTORY_ENTRY_START)).toBe(true);
+    expect(entries[0].endsWith(SUMMARY_HISTORY_ENTRY_END)).toBe(true);
+    expect(entries[0]).toContain('legacy archived summary');
+    expect(entries[0]).not.toContain(LEGACY_ENTRY_START);
+    expect(entries[0]).not.toContain(LEGACY_ENTRY_END);
+  });
+
+  it('strips a legacy summary-history block from the body', () => {
+    const body = [
+      `${SUMMARY_MARKER}`,
+      '',
+      'latest summary',
+      '',
+      '<details>',
+      '<summary>Previous review runs</summary>',
+      LEGACY_HISTORY_START,
+      LEGACY_ENTRY_START,
+      'legacy archived summary',
+      LEGACY_ENTRY_END,
+      LEGACY_HISTORY_END,
+      '</details>',
+    ].join('\n');
+
+    const stripped = stripSummaryHistory(body);
+
+    expect(stripped).toContain('latest summary');
+    expect(stripped).not.toContain(LEGACY_HISTORY_START);
+    expect(stripped).not.toContain('legacy archived summary');
+    expect(stripped).not.toContain('<details>');
   });
 });
 

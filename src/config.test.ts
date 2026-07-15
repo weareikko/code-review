@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   applyDefaultCacheRetention,
-  applyGitLabReviewEnvPrefix,
+  applyCodeReviewEnvPrefix,
   detectPlatform,
   parseArgs,
   parseModelProvider,
@@ -25,7 +25,7 @@ describe('config env defaults', () => {
       CI_MERGE_REQUEST_IID: '45',
       CI_SERVER_HOST: 'gitlab.example.com',
       GITLAB_TOKEN: 'private-token',
-      GITLAB_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
+      CODE_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
     });
 
     expect(cfg).toMatchObject({
@@ -103,31 +103,31 @@ describe('config env defaults', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gitlab.example.com',
       GITLAB_TOKEN: 'tok',
-      GITLAB_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
+      CODE_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
     });
     expect(cfg.modelPool).toEqual([]);
   });
 
-  it('parses GITLAB_REVIEW_MODEL_POOL as a comma-separated, trimmed list', () => {
+  it('parses CODE_REVIEW_MODEL_POOL as a comma-separated, trimmed list', () => {
     const cfg = resolveConfig([], {
       CI_PROJECT_ID: '1',
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gitlab.example.com',
       GITLAB_TOKEN: 'tok',
-      GITLAB_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
-      GITLAB_REVIEW_MODEL_POOL: ' anthropic/claude-sonnet-4-5 , google/gemini-2.5-pro ,',
+      CODE_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
+      CODE_REVIEW_MODEL_POOL: ' anthropic/claude-sonnet-4-5 , google/gemini-2.5-pro ,',
     });
     expect(cfg.modelPool).toEqual(['anthropic/claude-sonnet-4-5', 'google/gemini-2.5-pro']);
   });
 
-  it('prefers --model-pool over GITLAB_REVIEW_MODEL_POOL', () => {
+  it('prefers --model-pool over CODE_REVIEW_MODEL_POOL', () => {
     const cfg = resolveConfig(['--model-pool', 'anthropic/claude-opus-4-1,openai/gpt-5'], {
       CI_PROJECT_ID: '1',
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gitlab.example.com',
       GITLAB_TOKEN: 'tok',
-      GITLAB_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
-      GITLAB_REVIEW_MODEL_POOL: 'google/gemini-2.5-pro',
+      CODE_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
+      CODE_REVIEW_MODEL_POOL: 'google/gemini-2.5-pro',
     });
     expect(cfg.modelPool).toEqual(['anthropic/claude-opus-4-1', 'openai/gpt-5']);
   });
@@ -137,25 +137,25 @@ describe('config env defaults', () => {
     CI_MERGE_REQUEST_IID: '2',
     CI_SERVER_URL: 'https://gitlab.example.com',
     GITLAB_TOKEN: 'tok',
-    GITLAB_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
+    CODE_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
   };
 
   it('defaults verifyModel to empty when unset', () => {
     expect(resolveConfig([], { ...baseEnv }).verifyModel).toBe('');
   });
 
-  it('resolves verifyModel from GITLAB_REVIEW_VERIFY_MODEL', () => {
+  it('resolves verifyModel from CODE_REVIEW_VERIFY_MODEL', () => {
     const cfg = resolveConfig([], {
       ...baseEnv,
-      GITLAB_REVIEW_VERIFY_MODEL: 'cloudflare-ai-gateway/gpt-5.4',
+      CODE_REVIEW_VERIFY_MODEL: 'cloudflare-ai-gateway/gpt-5.4',
     });
     expect(cfg.verifyModel).toBe('cloudflare-ai-gateway/gpt-5.4');
   });
 
-  it('prefers --verify-model over GITLAB_REVIEW_VERIFY_MODEL', () => {
+  it('prefers --verify-model over CODE_REVIEW_VERIFY_MODEL', () => {
     const cfg = resolveConfig(['--verify-model', 'openai/gpt-5.4'], {
       ...baseEnv,
-      GITLAB_REVIEW_VERIFY_MODEL: 'cloudflare-ai-gateway/gpt-5.4',
+      CODE_REVIEW_VERIFY_MODEL: 'cloudflare-ai-gateway/gpt-5.4',
     });
     expect(cfg.verifyModel).toBe('openai/gpt-5.4');
   });
@@ -164,18 +164,16 @@ describe('config env defaults', () => {
     expect(resolveConfig([], { ...baseEnv }).diffContext).toBe(0);
   });
 
-  it('resolves diffContext from --diff-context and GITLAB_REVIEW_DIFF_CONTEXT', () => {
+  it('resolves diffContext from --diff-context and CODE_REVIEW_DIFF_CONTEXT', () => {
     expect(resolveConfig(['--diff-context', '8'], { ...baseEnv }).diffContext).toBe(8);
-    expect(resolveConfig([], { ...baseEnv, GITLAB_REVIEW_DIFF_CONTEXT: '12' }).diffContext).toBe(
-      12,
-    );
+    expect(resolveConfig([], { ...baseEnv, CODE_REVIEW_DIFF_CONTEXT: '12' }).diffContext).toBe(12);
   });
 
   it('resolves retrieveSkipped from the flag and env, default false', () => {
     expect(resolveConfig([], { ...baseEnv }).retrieveSkipped).toBe(false);
     expect(resolveConfig(['--retrieve-skipped'], { ...baseEnv }).retrieveSkipped).toBe(true);
     expect(
-      resolveConfig([], { ...baseEnv, GITLAB_REVIEW_RETRIEVE_SKIPPED: '1' }).retrieveSkipped,
+      resolveConfig([], { ...baseEnv, CODE_REVIEW_RETRIEVE_SKIPPED: '1' }).retrieveSkipped,
     ).toBe(true);
   });
 });
@@ -270,8 +268,8 @@ describe('detectPlatform', () => {
     );
   });
 
-  it('honors GITLAB_REVIEW_PLATFORM as an override and trims case', () => {
-    expect(detectPlatform({}, { GITLAB_REVIEW_PLATFORM: '  GitHub  ' }, noRead)).toBe('github');
+  it('honors CODE_REVIEW_PLATFORM as an override and trims case', () => {
+    expect(detectPlatform({}, { CODE_REVIEW_PLATFORM: '  GitHub  ' }, noRead)).toBe('github');
   });
 
   it('throws on an unknown explicit platform', () => {
@@ -322,17 +320,17 @@ describe('detectPlatform', () => {
 describe('GitHub config resolution', () => {
   const ghEnv = {
     GITHUB_ACTIONS: 'true',
-    GITHUB_REPOSITORY: 'ikko-dev/gitlab-review',
+    GITHUB_REPOSITORY: 'weareikko/gitlab-review',
     GITHUB_REF: 'refs/pull/57/merge',
     GITHUB_TOKEN: 'gh-token',
-    GITLAB_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
+    CODE_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
   };
 
   it('resolves GitHub env defaults', () => {
     const cfg = resolveConfig([], ghEnv);
     expect(cfg).toMatchObject({
       platform: 'github',
-      githubRepository: 'ikko-dev/gitlab-review',
+      githubRepository: 'weareikko/gitlab-review',
       githubPr: '57',
       githubToken: 'gh-token',
       githubApiUrl: 'https://api.github.com',
@@ -378,7 +376,7 @@ describe('GitHub config resolution', () => {
       CI_MERGE_REQUEST_IID: '45',
       CI_SERVER_URL: 'https://gitlab.example.com',
       GITLAB_TOKEN: 'private-token',
-      GITLAB_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
+      CODE_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
     });
     expect(cfg.platform).toBe('gitlab');
     expect(cfg.githubRepository).toBe('');
@@ -575,13 +573,13 @@ describe('thinking level resolution', () => {
     expect(cfg.thinkingLevel).toBe('off');
   });
 
-  it('reads from GITLAB_REVIEW_THINKING_LEVEL env var', () => {
+  it('reads from CODE_REVIEW_THINKING_LEVEL env var', () => {
     const cfg = resolveConfig([], {
       CI_PROJECT_ID: '1',
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      GITLAB_REVIEW_THINKING_LEVEL: 'medium',
+      CODE_REVIEW_THINKING_LEVEL: 'medium',
     });
     expect(cfg.thinkingLevel).toBe('medium');
   });
@@ -592,18 +590,18 @@ describe('thinking level resolution', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      GITLAB_REVIEW_THINKING_LEVEL: '  HIGH  ',
+      CODE_REVIEW_THINKING_LEVEL: '  HIGH  ',
     });
     expect(cfg.thinkingLevel).toBe('high');
   });
 
-  it('lets --thinking override GITLAB_REVIEW_THINKING_LEVEL', () => {
+  it('lets --thinking override CODE_REVIEW_THINKING_LEVEL', () => {
     const cfg = resolveConfig(['--thinking', 'xhigh'], {
       CI_PROJECT_ID: '1',
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      GITLAB_REVIEW_THINKING_LEVEL: 'low',
+      CODE_REVIEW_THINKING_LEVEL: 'low',
     });
     expect(cfg.thinkingLevel).toBe('xhigh');
   });
@@ -633,13 +631,13 @@ describe('posting mode resolution', () => {
     expect(cfg.postingMode).toBe('direct');
   });
 
-  it('reads from GITLAB_REVIEW_POSTING_MODE env var and trims case', () => {
+  it('reads from CODE_REVIEW_POSTING_MODE env var and trims case', () => {
     const cfg = resolveConfig([], {
       CI_PROJECT_ID: '1',
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      GITLAB_REVIEW_POSTING_MODE: '  DRAFT  ',
+      CODE_REVIEW_POSTING_MODE: '  DRAFT  ',
     });
     expect(cfg.postingMode).toBe('draft');
   });
@@ -650,7 +648,7 @@ describe('posting mode resolution', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      GITLAB_REVIEW_POSTING_MODE: 'draft',
+      CODE_REVIEW_POSTING_MODE: 'draft',
     });
     expect(cfg.postingMode).toBe('direct');
   });
@@ -678,13 +676,13 @@ describe('posting mode resolution', () => {
     expect(cfg.reviewDepth).toBe('single');
   });
 
-  it('reads review depth from GITLAB_REVIEW_DEPTH env var and trims case', () => {
+  it('reads review depth from CODE_REVIEW_DEPTH env var and trims case', () => {
     const cfg = resolveConfig([], {
       CI_PROJECT_ID: '1',
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      GITLAB_REVIEW_DEPTH: '  VERIFY  ',
+      CODE_REVIEW_DEPTH: '  VERIFY  ',
     });
     expect(cfg.reviewDepth).toBe('verify');
   });
@@ -695,7 +693,7 @@ describe('posting mode resolution', () => {
       CI_MERGE_REQUEST_IID: '2',
       CI_SERVER_URL: 'https://gl.example.com',
       GITLAB_TOKEN: 't',
-      GITLAB_REVIEW_DEPTH: 'verify',
+      CODE_REVIEW_DEPTH: 'verify',
     });
     expect(cfg.reviewDepth).toBe('single');
   });
@@ -804,16 +802,15 @@ describe('summary posting configuration', () => {
     expect(resolveConfig(['--no-summary'], baseEnv).postSummary).toBe(false);
   });
 
-  it('flips postSummary off via GITLAB_REVIEW_POST_SUMMARY=false', () => {
-    expect(resolveConfig([], { ...baseEnv, GITLAB_REVIEW_POST_SUMMARY: 'false' }).postSummary).toBe(
+  it('flips postSummary off via CODE_REVIEW_POST_SUMMARY=false', () => {
+    expect(resolveConfig([], { ...baseEnv, CODE_REVIEW_POST_SUMMARY: 'false' }).postSummary).toBe(
       false,
     );
   });
 
-  it('--no-summary overrides GITLAB_REVIEW_POST_SUMMARY=true', () => {
+  it('--no-summary overrides CODE_REVIEW_POST_SUMMARY=true', () => {
     expect(
-      resolveConfig(['--no-summary'], { ...baseEnv, GITLAB_REVIEW_POST_SUMMARY: 'true' })
-        .postSummary,
+      resolveConfig(['--no-summary'], { ...baseEnv, CODE_REVIEW_POST_SUMMARY: 'true' }).postSummary,
     ).toBe(false);
   });
 
@@ -821,8 +818,8 @@ describe('summary posting configuration', () => {
     expect(resolveConfig(['--force-review'], baseEnv).forceReview).toBe(true);
   });
 
-  it('enables forceReview via GITLAB_REVIEW_FORCE_REVIEW=true', () => {
-    expect(resolveConfig([], { ...baseEnv, GITLAB_REVIEW_FORCE_REVIEW: 'true' }).forceReview).toBe(
+  it('enables forceReview via CODE_REVIEW_FORCE_REVIEW=true', () => {
+    expect(resolveConfig([], { ...baseEnv, CODE_REVIEW_FORCE_REVIEW: 'true' }).forceReview).toBe(
       true,
     );
   });
@@ -831,15 +828,15 @@ describe('summary posting configuration', () => {
     expect(resolveConfig([], baseEnv).refreshGitSkills).toBe(false);
   });
 
-  it('enables refreshGitSkills via GITLAB_REVIEW_REFRESH_SKILLS=1', () => {
+  it('enables refreshGitSkills via CODE_REVIEW_REFRESH_SKILLS=1', () => {
     expect(
-      resolveConfig([], { ...baseEnv, GITLAB_REVIEW_REFRESH_SKILLS: '1' }).refreshGitSkills,
+      resolveConfig([], { ...baseEnv, CODE_REVIEW_REFRESH_SKILLS: '1' }).refreshGitSkills,
     ).toBe(true);
   });
 
-  it('enables refreshGitSkills via GITLAB_REVIEW_REFRESH_SKILLS=true', () => {
+  it('enables refreshGitSkills via CODE_REVIEW_REFRESH_SKILLS=true', () => {
     expect(
-      resolveConfig([], { ...baseEnv, GITLAB_REVIEW_REFRESH_SKILLS: 'true' }).refreshGitSkills,
+      resolveConfig([], { ...baseEnv, CODE_REVIEW_REFRESH_SKILLS: 'true' }).refreshGitSkills,
     ).toBe(true);
   });
 });
@@ -919,10 +916,10 @@ describe('base URL and max tokens overrides', () => {
     GITLAB_TOKEN: 't',
   };
 
-  it('reads baseUrl from GITLAB_REVIEW_BASE_URL', () => {
+  it('reads baseUrl from CODE_REVIEW_BASE_URL', () => {
     const cfg = resolveConfig([], {
       ...baseEnv,
-      GITLAB_REVIEW_BASE_URL: 'https://my-proxy.example.com/v1',
+      CODE_REVIEW_BASE_URL: 'https://my-proxy.example.com/v1',
     });
     expect(cfg.baseUrl).toBe('https://my-proxy.example.com/v1');
   });
@@ -932,16 +929,16 @@ describe('base URL and max tokens overrides', () => {
     expect(cfg.baseUrl).toBe('https://custom.example.com/v1');
   });
 
-  it('--base-url flag overrides GITLAB_REVIEW_BASE_URL', () => {
+  it('--base-url flag overrides CODE_REVIEW_BASE_URL', () => {
     const cfg = resolveConfig(['--base-url', 'https://flag.example.com/v1'], {
       ...baseEnv,
-      GITLAB_REVIEW_BASE_URL: 'https://env.example.com/v1',
+      CODE_REVIEW_BASE_URL: 'https://env.example.com/v1',
     });
     expect(cfg.baseUrl).toBe('https://flag.example.com/v1');
   });
 
-  it('reads maxTokens from GITLAB_REVIEW_MAX_TOKENS', () => {
-    const cfg = resolveConfig([], { ...baseEnv, GITLAB_REVIEW_MAX_TOKENS: '8192' });
+  it('reads maxTokens from CODE_REVIEW_MAX_TOKENS', () => {
+    const cfg = resolveConfig([], { ...baseEnv, CODE_REVIEW_MAX_TOKENS: '8192' });
     expect(cfg.maxTokens).toBe(8192);
   });
 
@@ -955,8 +952,8 @@ describe('base URL and max tokens overrides', () => {
     expect(cfg.maxTokens).toBe(0);
   });
 
-  it('reads maxDiffChars from GITLAB_REVIEW_MAX_DIFF_CHARS', () => {
-    const cfg = resolveConfig([], { ...baseEnv, GITLAB_REVIEW_MAX_DIFF_CHARS: '50000' });
+  it('reads maxDiffChars from CODE_REVIEW_MAX_DIFF_CHARS', () => {
+    const cfg = resolveConfig([], { ...baseEnv, CODE_REVIEW_MAX_DIFF_CHARS: '50000' });
     expect(cfg.maxDiffChars).toBe(50000);
   });
 
@@ -965,10 +962,10 @@ describe('base URL and max tokens overrides', () => {
     expect(cfg.maxDiffChars).toBe(250000);
   });
 
-  it('--max-diff-chars flag overrides GITLAB_REVIEW_MAX_DIFF_CHARS', () => {
+  it('--max-diff-chars flag overrides CODE_REVIEW_MAX_DIFF_CHARS', () => {
     const cfg = resolveConfig(['--max-diff-chars', '250000'], {
       ...baseEnv,
-      GITLAB_REVIEW_MAX_DIFF_CHARS: '50000',
+      CODE_REVIEW_MAX_DIFF_CHARS: '50000',
     });
     expect(cfg.maxDiffChars).toBe(250000);
   });
@@ -979,16 +976,16 @@ describe('base URL and max tokens overrides', () => {
   });
 
   it('falls back to the 100_000 default when maxDiffChars is non-positive or invalid', () => {
-    expect(resolveConfig([], { ...baseEnv, GITLAB_REVIEW_MAX_DIFF_CHARS: '0' }).maxDiffChars).toBe(
+    expect(resolveConfig([], { ...baseEnv, CODE_REVIEW_MAX_DIFF_CHARS: '0' }).maxDiffChars).toBe(
       100_000,
     );
     expect(
-      resolveConfig([], { ...baseEnv, GITLAB_REVIEW_MAX_DIFF_CHARS: 'nonsense' }).maxDiffChars,
+      resolveConfig([], { ...baseEnv, CODE_REVIEW_MAX_DIFF_CHARS: 'nonsense' }).maxDiffChars,
     ).toBe(100_000);
   });
 
-  it('reads decomposeHintLines from GITLAB_REVIEW_DECOMPOSE_HINT_LINES', () => {
-    const cfg = resolveConfig([], { ...baseEnv, GITLAB_REVIEW_DECOMPOSE_HINT_LINES: '1500' });
+  it('reads decomposeHintLines from CODE_REVIEW_DECOMPOSE_HINT_LINES', () => {
+    const cfg = resolveConfig([], { ...baseEnv, CODE_REVIEW_DECOMPOSE_HINT_LINES: '1500' });
     expect(cfg.decomposeHintLines).toBe(1500);
   });
 
@@ -997,10 +994,10 @@ describe('base URL and max tokens overrides', () => {
     expect(cfg.decomposeHintLines).toBe(800);
   });
 
-  it('--decompose-hint-lines flag overrides GITLAB_REVIEW_DECOMPOSE_HINT_LINES', () => {
+  it('--decompose-hint-lines flag overrides CODE_REVIEW_DECOMPOSE_HINT_LINES', () => {
     const cfg = resolveConfig(['--decompose-hint-lines', '800'], {
       ...baseEnv,
-      GITLAB_REVIEW_DECOMPOSE_HINT_LINES: '1500',
+      CODE_REVIEW_DECOMPOSE_HINT_LINES: '1500',
     });
     expect(cfg.decomposeHintLines).toBe(800);
   });
@@ -1012,16 +1009,16 @@ describe('base URL and max tokens overrides', () => {
 
   it('clamps an invalid decomposeHintLines to 0 (off)', () => {
     expect(
-      resolveConfig([], { ...baseEnv, GITLAB_REVIEW_DECOMPOSE_HINT_LINES: 'nonsense' })
+      resolveConfig([], { ...baseEnv, CODE_REVIEW_DECOMPOSE_HINT_LINES: 'nonsense' })
         .decomposeHintLines,
     ).toBe(0);
   });
 
-  it('GITLAB_REVIEW_BASE_URL takes priority over OLLAMA_HOST', () => {
+  it('CODE_REVIEW_BASE_URL takes priority over OLLAMA_HOST', () => {
     const cfg = resolveConfig(['--model', 'ollama/llama3:8b'], {
       ...baseEnv,
       OLLAMA_HOST: 'http://localhost:11434',
-      GITLAB_REVIEW_BASE_URL: 'http://override.example.com/v1',
+      CODE_REVIEW_BASE_URL: 'http://override.example.com/v1',
     });
     expect(cfg.baseUrl).toBe('http://override.example.com/v1');
   });
@@ -1040,10 +1037,10 @@ describe('multi-slash model IDs', () => {
     expect(cfg.model).toBe('openrouter/anthropic/claude-3-opus-20240229');
   });
 
-  it('resolves GITLAB_REVIEW_MODEL with multi-slash ID', () => {
+  it('resolves CODE_REVIEW_MODEL with multi-slash ID', () => {
     const cfg = resolveConfig([], {
       ...baseEnv,
-      GITLAB_REVIEW_MODEL: 'openrouter/meta-llama/llama-3-8b-instruct',
+      CODE_REVIEW_MODEL: 'openrouter/meta-llama/llama-3-8b-instruct',
     });
     expect(cfg.model).toBe('openrouter/meta-llama/llama-3-8b-instruct');
   });
@@ -1073,7 +1070,7 @@ describe('provider-aware key resolution', () => {
     'XAI_API_KEY',
     'MISTRAL_API_KEY',
     'DEEPSEEK_API_KEY',
-    'GITLAB_REVIEW_API_KEY',
+    'CODE_REVIEW_API_KEY',
     'CLAUDE_API_KEY',
   ];
 
@@ -1126,8 +1123,8 @@ describe('provider-aware key resolution', () => {
     expect(() => validateConfig(cfg)).toThrow('--model');
   });
 
-  it('does not treat GITLAB_REVIEW_API_KEY as a provider key', () => {
-    vi.stubEnv('GITLAB_REVIEW_API_KEY', 'legacy-key');
+  it('does not treat CODE_REVIEW_API_KEY as a provider key', () => {
+    vi.stubEnv('CODE_REVIEW_API_KEY', 'legacy-key');
     const cfg = resolveConfig(['--model', 'anthropic/claude-sonnet-4-5'], gitlab);
     expect(cfg.apiKey).toBe('');
     expect(() => validateConfig(cfg)).toThrow('--api-key');
@@ -1147,14 +1144,14 @@ describe('provider-aware key resolution', () => {
   });
 });
 
-describe('applyGitLabReviewEnvPrefix', () => {
-  it('exposes GITLAB_REVIEW_<NAME> as <NAME> for non-reserved names', () => {
+describe('applyCodeReviewEnvPrefix', () => {
+  it('exposes CODE_REVIEW_<NAME> as <NAME> for non-reserved names', () => {
     const env: NodeJS.ProcessEnv = {
-      GITLAB_REVIEW_CLOUDFLARE_API_KEY: 'cf-key',
-      GITLAB_REVIEW_CLOUDFLARE_ACCOUNT_ID: 'acct',
-      GITLAB_REVIEW_GITLAB_TOKEN: 'tok',
+      CODE_REVIEW_CLOUDFLARE_API_KEY: 'cf-key',
+      CODE_REVIEW_CLOUDFLARE_ACCOUNT_ID: 'acct',
+      CODE_REVIEW_GITLAB_TOKEN: 'tok',
     };
-    applyGitLabReviewEnvPrefix(env);
+    applyCodeReviewEnvPrefix(env);
     expect(env.CLOUDFLARE_API_KEY).toBe('cf-key');
     expect(env.CLOUDFLARE_ACCOUNT_ID).toBe('acct');
     expect(env.GITLAB_TOKEN).toBe('tok');
@@ -1163,71 +1160,71 @@ describe('applyGitLabReviewEnvPrefix', () => {
   it('lets the prefixed value win over a plain value of the same name', () => {
     const env: NodeJS.ProcessEnv = {
       CLOUDFLARE_API_KEY: 'project-wide',
-      GITLAB_REVIEW_CLOUDFLARE_API_KEY: 'scoped',
+      CODE_REVIEW_CLOUDFLARE_API_KEY: 'scoped',
     };
-    applyGitLabReviewEnvPrefix(env);
+    applyCodeReviewEnvPrefix(env);
     expect(env.CLOUDFLARE_API_KEY).toBe('scoped');
   });
 
   it('fills in a gap when only the prefixed value is set', () => {
     const env: NodeJS.ProcessEnv = {
-      GITLAB_REVIEW_ANTHROPIC_API_KEY: 'sk-test',
+      CODE_REVIEW_ANTHROPIC_API_KEY: 'sk-test',
     };
-    applyGitLabReviewEnvPrefix(env);
+    applyCodeReviewEnvPrefix(env);
     expect(env.ANTHROPIC_API_KEY).toBe('sk-test');
   });
 
   it('never de-prefixes the tool’s own reserved settings', () => {
     const env: NodeJS.ProcessEnv = {};
     for (const suffix of RESERVED_ENV_SUFFIXES) {
-      env[`GITLAB_REVIEW_${suffix}`] = `reserved-${suffix}`;
+      env[`CODE_REVIEW_${suffix}`] = `reserved-${suffix}`;
     }
-    applyGitLabReviewEnvPrefix(env);
+    applyCodeReviewEnvPrefix(env);
     for (const suffix of RESERVED_ENV_SUFFIXES) {
       expect(env[suffix]).toBeUndefined();
-      expect(env[`GITLAB_REVIEW_${suffix}`]).toBe(`reserved-${suffix}`);
+      expect(env[`CODE_REVIEW_${suffix}`]).toBe(`reserved-${suffix}`);
     }
   });
 
-  it('never revives GITLAB_REVIEW_API_KEY as a provider key', () => {
+  it('never revives CODE_REVIEW_API_KEY as a provider key', () => {
     const env: NodeJS.ProcessEnv = {
-      GITLAB_REVIEW_API_KEY: 'legacy-key',
+      CODE_REVIEW_API_KEY: 'legacy-key',
     };
-    applyGitLabReviewEnvPrefix(env);
+    applyCodeReviewEnvPrefix(env);
     expect(env.API_KEY).toBeUndefined();
   });
 
   it('never lets a double-prefixed name clobber a reserved setting', () => {
     const env: NodeJS.ProcessEnv = {
-      GITLAB_REVIEW_MODEL: 'reserved-model',
-      GITLAB_REVIEW_GITLAB_REVIEW_MODEL: 'attacker-model',
+      CODE_REVIEW_MODEL: 'reserved-model',
+      CODE_REVIEW_CODE_REVIEW_MODEL: 'attacker-model',
     };
-    applyGitLabReviewEnvPrefix(env);
-    expect(env.GITLAB_REVIEW_MODEL).toBe('reserved-model');
-    expect(env.GITLAB_REVIEW_GITLAB_REVIEW_MODEL).toBe('attacker-model');
+    applyCodeReviewEnvPrefix(env);
+    expect(env.CODE_REVIEW_MODEL).toBe('reserved-model');
+    expect(env.CODE_REVIEW_CODE_REVIEW_MODEL).toBe('attacker-model');
   });
 
-  it('is a no-op when no GITLAB_REVIEW_ vars are set', () => {
+  it('is a no-op when no CODE_REVIEW_ vars are set', () => {
     const env: NodeJS.ProcessEnv = {
       ANTHROPIC_API_KEY: 'existing',
       GITLAB_TOKEN: 'tok',
     };
     const before = { ...env };
-    applyGitLabReviewEnvPrefix(env);
+    applyCodeReviewEnvPrefix(env);
     expect(env).toEqual(before);
   });
 
   it('does not introduce a key for an empty prefixed value', () => {
     const env: NodeJS.ProcessEnv = {
-      GITLAB_REVIEW_OLLAMA_HOST: '',
+      CODE_REVIEW_OLLAMA_HOST: '',
     };
-    applyGitLabReviewEnvPrefix(env);
+    applyCodeReviewEnvPrefix(env);
     expect('OLLAMA_HOST' in env).toBe(false);
   });
 
   it('returns the same env object it was given', () => {
-    const env: NodeJS.ProcessEnv = { GITLAB_REVIEW_FOO: 'bar' };
-    expect(applyGitLabReviewEnvPrefix(env)).toBe(env);
+    const env: NodeJS.ProcessEnv = { CODE_REVIEW_FOO: 'bar' };
+    expect(applyCodeReviewEnvPrefix(env)).toBe(env);
   });
 
   it('reserves exactly the documented suffixes', () => {
@@ -1269,9 +1266,9 @@ describe('applyDefaultCacheRetention', () => {
     expect(env.PI_CACHE_RETENTION).toBe('short');
   });
 
-  it('honours a GITLAB_REVIEW_ override once the prefix shim has mapped it', () => {
-    const env: NodeJS.ProcessEnv = { GITLAB_REVIEW_PI_CACHE_RETENTION: 'none' };
-    applyGitLabReviewEnvPrefix(env);
+  it('honours a CODE_REVIEW_ override once the prefix shim has mapped it', () => {
+    const env: NodeJS.ProcessEnv = { CODE_REVIEW_PI_CACHE_RETENTION: 'none' };
+    applyCodeReviewEnvPrefix(env);
     applyDefaultCacheRetention(env);
     expect(env.PI_CACHE_RETENTION).toBe('none');
   });

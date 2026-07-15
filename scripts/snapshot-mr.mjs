@@ -20,7 +20,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = resolve(HERE, '..', 'tests', 'evals', 'fixtures');
 
 const FINGERPRINT_MARKER_RE =
-  /<!--\s*(?:gitlab-review|pi-reviewer):fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->/i;
+  /<!--\s*(?:code-review|gitlab-review|pi-reviewer):fingerprint-(?:primary|secondary):[a-f0-9]+\s*-->/i;
 
 function parseArgs(argv) {
   const out = {};
@@ -228,7 +228,7 @@ async function main() {
     process.env.CI_SERVER_URL ??
     'https://gitlab.com';
   const token =
-    args.token ?? process.env.GITLAB_TOKEN ?? process.env.GITLAB_REVIEW_GITLAB_TOKEN ?? '';
+    args.token ?? process.env.GITLAB_TOKEN ?? process.env.CODE_REVIEW_GITLAB_TOKEN ?? '';
   const authHeader = args['auth-header'] ?? 'PRIVATE-TOKEN';
 
   if (!project) die('--project is required (e.g. --project group/repo)');

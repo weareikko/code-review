@@ -82,7 +82,7 @@ export interface ReviewPlatform {
 /**
  * Build the {@link ReviewPlatform} for this run from the resolved config. The
  * platform was already selected (auto-detected from the environment or forced by
- * `--platform`/`GITLAB_REVIEW_PLATFORM`) during config resolution; this only
+ * `--platform`/`CODE_REVIEW_PLATFORM`) during config resolution; this only
  * constructs the matching backend. GitHub target identifiers are parsed here so a
  * malformed `owner/repo` or pull number fails fast with an actionable hint.
  */

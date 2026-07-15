@@ -1,25 +1,26 @@
 {
-  "name": "@ikko-dev/gitlab-review",
+  "name": "@weareikko/code-review",
   "version": "0.7.6",
-  "description": "Run gitlab-review in GitLab CI and post deduplicated MR discussions.",
+  "description": "Agent-driven code review for GitLab merge requests and GitHub pull requests, with deduplicated inline comments and summary notes.",
   "keywords": [
     "ci",
     "code-review",
+    "github",
     "gitlab",
-    "gitlab-review",
-    "merge-request"
+    "merge-request",
+    "pull-request"
   ],
-  "homepage": "https://github.com/ikko-dev/gitlab-review#readme",
+  "homepage": "https://github.com/weareikko/gitlab-review#readme",
   "bugs": {
-    "url": "https://github.com/ikko-dev/gitlab-review/issues"
+    "url": "https://github.com/weareikko/gitlab-review/issues"
   },
   "license": "FSL-1.1-ALv2",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/ikko-dev/gitlab-review.git"
+    "url": "git+ssh://git@github.com/weareikko/gitlab-review.git"
   },
   "bin": {
-    "gitlab-review": "./bin/gitlab-review.js"
+    "code-review": "./bin/code-review.js"
   },
   "files": [
     "bin/",
