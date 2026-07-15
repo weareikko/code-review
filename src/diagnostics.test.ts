@@ -22,7 +22,7 @@ const diagnosticConfig: Config = {
   postingMode: 'direct',
   reviewDepth: 'single',
   apiKey: 'key',
-  reviewFile: 'gitlab-review.md',
+  reviewFile: 'code-review.md',
   output: 'review-comments.json',
   dryRun: true,
   noPost: false,

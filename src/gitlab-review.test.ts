@@ -39,7 +39,7 @@ describe('runReview pipeline', () => {
     maxTokens: 0,
     maxDiffChars: 100_000,
     decomposeHintLines: 0,
-    reviewFile: 'gitlab-review.md',
+    reviewFile: 'code-review.md',
     output: 'review-comments.json',
     dryRun: false,
     noPost: false,
@@ -399,7 +399,7 @@ describe('runReview pipeline', () => {
     expect(result.reviewedChangedLines).toBe(3);
   });
 
-  it('accumulates usage across multiple assistant messages and writes gitlab-review.md', async () => {
+  it('accumulates usage across multiple assistant messages and writes code-review.md', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const messages = [
       makeAssistant('partial thought', {
@@ -441,7 +441,7 @@ describe('runReview pipeline', () => {
     expect(usage.cost.cacheWrite).toBeCloseTo(0.0002, 10);
     expect(usage.cost.total).toBeCloseTo(0.0068, 10);
 
-    const written = await readFile(join(cwd, 'gitlab-review.md'), 'utf8');
+    const written = await readFile(join(cwd, 'code-review.md'), 'utf8');
     expect(written).toBe('Final review summary.');
   });
 
@@ -647,7 +647,7 @@ describe('runReview pipeline', () => {
       { ...minimalConfig, cwd, reviewDepth: 'single' },
       { cwd, diff: sampleDiff, createAgent },
     );
-    const written = await readFile(join(cwd, 'gitlab-review.md'), 'utf8');
+    const written = await readFile(join(cwd, 'code-review.md'), 'utf8');
     expect(written).toBe(findJson);
     expect(verifierCalls).toBe(0);
   });
@@ -662,7 +662,7 @@ describe('runReview pipeline', () => {
       { ...minimalConfig, cwd, reviewDepth: 'verify' },
       { cwd, diff: sampleDiff, createAgent },
     );
-    const written = await readFile(join(cwd, 'gitlab-review.md'), 'utf8');
+    const written = await readFile(join(cwd, 'code-review.md'), 'utf8');
     const parsed = JSON.parse(written) as { summary: string; comments: unknown[] };
     expect(parsed.comments).toHaveLength(0);
     expect(parsed.summary).toMatch(/^\*\*Risk: Low\*\*/);
@@ -681,7 +681,7 @@ describe('runReview pipeline', () => {
       { ...minimalConfig, cwd, reviewDepth: 'verify' },
       { cwd, diff: sampleDiff, createAgent },
     );
-    const written = await readFile(join(cwd, 'gitlab-review.md'), 'utf8');
+    const written = await readFile(join(cwd, 'code-review.md'), 'utf8');
     const parsed = JSON.parse(written) as {
       summary: string;
       comments: Array<{ severity: string }>;
@@ -760,7 +760,7 @@ describe('runReview pipeline', () => {
       { cwd, diff: sampleDiff, createAgent },
     );
 
-    const parsed = JSON.parse(await readFile(join(cwd, 'gitlab-review.md'), 'utf8')) as {
+    const parsed = JSON.parse(await readFile(join(cwd, 'code-review.md'), 'utf8')) as {
       summary: string;
       comments: Array<{ file: string; line: number; severity: string }>;
     };
@@ -841,7 +841,7 @@ describe('resolveModel (via runReview createAgent)', () => {
     apiKey: 'ollama',
     baseUrl: 'http://localhost:11434/v1',
     maxTokens: 0,
-    reviewFile: 'gitlab-review.md',
+    reviewFile: 'code-review.md',
     output: 'review-comments.json',
     dryRun: false,
     noPost: false,
@@ -1456,7 +1456,7 @@ describe('full depth with a model pool', () => {
     maxTokens: 0,
     maxDiffChars: 100_000,
     decomposeHintLines: 0,
-    reviewFile: 'gitlab-review.md',
+    reviewFile: 'code-review.md',
     output: 'review-comments.json',
     dryRun: false,
     noPost: false,
@@ -1701,7 +1701,7 @@ describe('resolveVerifyMember', () => {
     maxTokens: 0,
     maxDiffChars: 100_000,
     decomposeHintLines: 0,
-    reviewFile: 'gitlab-review.md',
+    reviewFile: 'code-review.md',
     output: 'review-comments.json',
     dryRun: true,
     noPost: true,

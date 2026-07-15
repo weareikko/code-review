@@ -63,7 +63,7 @@ function makeConfig(findModel: string, verifyModel: string, cwd: string): Config
     maxTokens: 0,
     maxDiffChars: 100_000,
     decomposeHintLines: 0,
-    reviewFile: 'gitlab-review.md',
+    reviewFile: 'code-review.md',
     output: 'review-comments.json',
     dryRun: true,
     noPost: true,
@@ -90,7 +90,7 @@ test.skipIf(skip)(
             const usage = await runReview(makeConfig(cfg.findModel, cfg.verifyModel, dir), {
               diff,
             });
-            const raw = await readFile(join(dir, 'gitlab-review.md'), 'utf8');
+            const raw = await readFile(join(dir, 'code-review.md'), 'utf8');
             const severe = parseReviewMarkdownWithWarnings(raw).comments.filter(
               (c) => c.severity === 'critical' || c.severity === 'warn',
             ).length;

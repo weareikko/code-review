@@ -167,7 +167,7 @@ function makeConfig(cwd: string, overrides: Partial<Config> = {}): Config {
     postingMode: 'direct',
     reviewDepth: 'single',
     apiKey: 'k',
-    reviewFile: 'gitlab-review.md',
+    reviewFile: 'code-review.md',
     output: 'review-comments.json',
     dryRun: false,
     noPost: false,

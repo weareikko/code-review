@@ -63,7 +63,7 @@ function makeConfig(cwd: string, retrieveSkipped: boolean): Config {
     decomposeHintLines: 0,
     diffContext: 0,
     retrieveSkipped,
-    reviewFile: 'gitlab-review.md',
+    reviewFile: 'code-review.md',
     output: 'review-comments.json',
     dryRun: true,
     noPost: true,
@@ -88,7 +88,7 @@ async function runOnce(retrieveSkipped: boolean): Promise<{ found: boolean; cost
   const dir = await mkdtemp(join(tmpdir(), 'retr-'));
   try {
     const usage = await runReview(makeConfig(dir, retrieveSkipped), { diff: DIFF });
-    const raw = await readFile(join(dir, 'gitlab-review.md'), 'utf8');
+    const raw = await readFile(join(dir, 'code-review.md'), 'utf8');
     const parsed = parseReviewMarkdownWithWarnings(raw);
     const haystack = [parsed.summary ?? '', ...parsed.comments.map((c) => `${c.file} ${c.body}`)]
       .join('\n')

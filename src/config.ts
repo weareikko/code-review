@@ -573,7 +573,7 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     decomposeHintLines,
     diffContext,
     retrieveSkipped: toBoolean(args.retrieveSkipped) || toBoolean(env.CODE_REVIEW_RETRIEVE_SKIPPED),
-    reviewFile: String(args.reviewFile ?? 'gitlab-review.md'),
+    reviewFile: String(args.reviewFile ?? 'code-review.md'),
     output: String(args.output ?? 'review-comments.json'),
     dryRun: toBoolean(args.dryRun),
     noPost: toBoolean(args.noPost),

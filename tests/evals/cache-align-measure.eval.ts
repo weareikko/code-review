@@ -62,7 +62,7 @@ function makeConfig(cwd: string): Config {
     maxTokens: 0,
     maxDiffChars: 100_000,
     decomposeHintLines: 0,
-    reviewFile: 'gitlab-review.md',
+    reviewFile: 'code-review.md',
     output: 'review-comments.json',
     dryRun: true,
     noPost: true,

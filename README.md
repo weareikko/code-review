@@ -74,7 +74,7 @@ review:
   artifacts:
     when: always
     paths:
-      - gitlab-review.md
+      - code-review.md
       - review-comments.json
       - review-usage.json
 ```
@@ -155,7 +155,7 @@ Equivalently, set `CODE_REVIEW_MODEL` and the provider's key (e.g. `ANTHROPIC_AP
 
 ## Artifacts
 
-- `gitlab-review.md`: raw review text returned by the agent
+- `code-review.md`: raw review text returned by the agent
 - `review-comments.json`: generated comment objects including:
   - parsed comment payload
   - computed fingerprints
@@ -187,7 +187,7 @@ Use these files for CI debugging and auditing.
   - If using `CI_JOB_TOKEN`, ensure your GitLab project settings allow required API access.
 - **No comments posted**
   - Check `review-comments.json` for `duplicate: true` or empty parsed comments.
-  - Run with `--dry-run` and inspect `gitlab-review.md` formatting (`== Inline Comments ==`).
+  - Run with `--dry-run` and inspect `code-review.md` formatting (`== Inline Comments ==`).
 
 ## Development / release
 

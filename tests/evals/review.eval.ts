@@ -68,7 +68,7 @@ function makeConfig(overrides: Partial<Config>): Config {
     maxTokens: Number(process.env.CODE_REVIEW_MAX_TOKENS ?? 0),
     maxDiffChars: 100_000,
     decomposeHintLines: 0,
-    reviewFile: 'gitlab-review.md',
+    reviewFile: 'code-review.md',
     output: 'review-comments.json',
     dryRun: true,
     noPost: true,
