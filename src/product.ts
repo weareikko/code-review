@@ -7,7 +7,7 @@
 export const PRODUCT_NAME = '@weareikko/code-review';
 
 /** Canonical project URL used in the footer's markdown link. */
-export const PRODUCT_URL = 'https://github.com/weareikko/gitlab-review';
+export const PRODUCT_URL = 'https://github.com/weareikko/code-review';
 
 /**
  * The `[name](url)` markdown link used verbatim in both the inline comment footer

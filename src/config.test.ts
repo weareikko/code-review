@@ -320,7 +320,7 @@ describe('detectPlatform', () => {
 describe('GitHub config resolution', () => {
   const ghEnv = {
     GITHUB_ACTIONS: 'true',
-    GITHUB_REPOSITORY: 'weareikko/gitlab-review',
+    GITHUB_REPOSITORY: 'weareikko/code-review',
     GITHUB_REF: 'refs/pull/57/merge',
     GITHUB_TOKEN: 'gh-token',
     CODE_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
@@ -330,7 +330,7 @@ describe('GitHub config resolution', () => {
     const cfg = resolveConfig([], ghEnv);
     expect(cfg).toMatchObject({
       platform: 'github',
-      githubRepository: 'weareikko/gitlab-review',
+      githubRepository: 'weareikko/code-review',
       githubPr: '57',
       githubToken: 'gh-token',
       githubApiUrl: 'https://api.github.com',
