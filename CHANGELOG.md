@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A reusable workflow (`.github/workflows/code-review.yml`, `on: workflow_call`) for one-line setup — callers use `uses: weareikko/code-review/.github/workflows/code-review.yml@<ref>` plus `secrets: inherit`, with review settings read from `CODE_REVIEW_*` variables ([#123]).
+
+### Changed
+
+- The composite action now checks out the repository by default (new `checkout` input, default `true`, plus a `fetch-depth` input); bundled `actions/checkout`/`actions/setup-node` bumped to v5 ([#123]).
+
 ## [0.8.1] - 2026-07-15
 
 ### Changed
@@ -27,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING**: renamed the product-scoped environment-variable prefix `GITLAB_REVIEW_* → CODE_REVIEW_*` (e.g. `GITLAB_REVIEW_MODEL → CODE_REVIEW_MODEL`, and the namespacing shim that de-prefixes provider/infra vars in shared CI) with no backward compatibility — the old names are no longer read, so existing CI configs must rename their variables. Unprefixed GitLab tokens (`GITLAB_TOKEN`, `CI_JOB_TOKEN`, …) are unchanged ([#121]).
 
 [Unreleased]: https://github.com/weareikko/code-review/compare/0.8.1...HEAD
+[#123]: https://github.com/weareikko/code-review/pull/123
 [0.8.1]: https://github.com/weareikko/code-review/compare/0.8.0...0.8.1
 [0.8.0]: https://github.com/weareikko/code-review/compare/0.7.6...0.8.0
 [#118]: https://github.com/weareikko/code-review/pull/118

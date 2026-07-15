@@ -83,10 +83,33 @@ review:
 
 The same reviewer also reviews **GitHub pull requests** — the engine is platform-agnostic and auto-detects GitHub from the Actions environment (`GITHUB_ACTIONS`, `GITHUB_REPOSITORY`, the `pull_request` event). Set `--platform github` to force it.
 
-Use the bundled composite action. It needs:
+### Reusable workflow (simplest)
+
+The quickest way to enable reviews in a repo is the bundled reusable workflow. Add a tiny caller and let it check out the code, install the CLI, and run the review for you:
+
+```yml
+name: code-review
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    uses: weareikko/code-review/.github/workflows/code-review.yml@0.8.3 # pin to a release tag
+    secrets: inherit
+```
+
+It reads review settings from repo/org **variables** (`CODE_REVIEW_MODEL`, `CODE_REVIEW_DEPTH`, `CODE_REVIEW_THINKING_LEVEL`, `CODE_REVIEW_VERIFY_MODEL`) and provider credentials from **secrets** named with the `CODE_REVIEW_` prefix (e.g. `CODE_REVIEW_ANTHROPIC_API_KEY`), which the CLI's env shim de-prefixes for the provider. `secrets: inherit` is required so the reusable workflow can see them. Optional `with:` inputs: `model` (overrides the `CODE_REVIEW_MODEL` variable), `version`, `node-version`, `working-directory`, `args`, and `runs-on`.
+
+### Composite action
+
+For more control, use the bundled composite action directly. It needs:
 
 - **Permissions:** `pull-requests: write` (to post the review and summary) and `contents: read` (to check out the code). The default `GITHUB_TOKEN` is enough; the action reads it as `${{ github.token }}` by default.
-- **Full git history:** check out with `fetch-depth: 0` so the merge-base diff and commit log resolve.
+- **Full git history:** the bundled checkout uses `fetch-depth: 0` so the merge-base diff and commit log resolve (tune with `fetch-depth`, or set `checkout: false` and check out yourself).
 - **A model + its key:** pass the model via the `model` input and the provider's key via the `api-key` input (or expose the provider's standard env var, e.g. `ANTHROPIC_API_KEY`, to the step).
 
 ```yml
@@ -102,9 +125,8 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+      # Checkout (full history) is bundled — opt out with `checkout: false` if
+      # your job already checked out the code with its own options.
       - uses: weareikko/code-review@main # pin to a release tag in production
         with:
           model: anthropic/claude-sonnet-4-5
@@ -113,7 +135,7 @@ jobs:
           # args: --min-severity warn --dry-run
 ```
 
-Inputs: `model` (required), `api-key`, `github-token` (default `${{ github.token }}`), `version` (npm dist-tag/version, default `latest`), `node-version` (default `24`), `working-directory`, and `args` (extra CLI flags forwarded verbatim).
+Inputs: `model` (required), `api-key`, `github-token` (default `${{ github.token }}`), `version` (npm dist-tag/version, default `latest`), `node-version` (default `24`), `working-directory`, `args` (extra CLI flags forwarded verbatim), `checkout` (default `true` — bundled repository checkout), and `fetch-depth` (default `0` — full history, required for the merge-base diff).
 
 Prefer to run the CLI directly (no composite action)? `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, and the PR number are read straight from the Actions environment:
 

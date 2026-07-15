@@ -1,38 +1,82 @@
 name: code-review
 
-on:
-  pull_request:
-    types: [opened, synchronize]
-  workflow_dispatch:
+# Reusable workflow. Enable in any repo with a tiny caller:
+#
+#   name: code-review
+#   on: { pull_request: }
+#   permissions: { contents: read, pull-requests: write }
+#   jobs:
+#     review:
+#       uses: weareikko/code-review/.github/workflows/code-review.yml@0.8.3
+#       secrets: inherit
+#
+# Reads settings from org/repo VARIABLES (CODE_REVIEW_MODEL / CODE_REVIEW_DEPTH /
+# CODE_REVIEW_THINKING_LEVEL / CODE_REVIEW_VERIFY_MODEL) and provider credentials
+# from inherited SECRETS named with the CODE_REVIEW_ prefix (the CLI's env shim
+# de-prefixes them for the provider). Requires `secrets: inherit` in the caller.
 
-permissions:
-  contents: read
-  pull-requests: write
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: 'Model as provider/modelId. Defaults to the CODE_REVIEW_MODEL variable.'
+        required: false
+        type: string
+        default: ''
+      version:
+        description: 'npm version/dist-tag of @weareikko/code-review to run.'
+        required: false
+        type: string
+        default: latest
+      node-version:
+        required: false
+        type: string
+        default: '24'
+      working-directory:
+        required: false
+        type: string
+        default: '.'
+      args:
+        description: 'Extra CLI flags forwarded verbatim.'
+        required: false
+        type: string
+        default: ''
+      runs-on:
+        required: false
+        type: string
+        default: ubuntu-latest
 
 jobs:
   review:
     name: Review pull request
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
+    permissions:
+      contents: read
+      pull-requests: write
+    # Same-repo PRs only: forks don't receive secrets on pull_request.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      # Provider credentials (inherited secrets; CODE_REVIEW_ prefix de-prefixed by the CLI).
+      CODE_REVIEW_CLOUDFLARE_API_KEY: ${{ secrets.CODE_REVIEW_CLOUDFLARE_API_KEY }}
+      CODE_REVIEW_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CODE_REVIEW_CLOUDFLARE_ACCOUNT_ID }}
+      CODE_REVIEW_CLOUDFLARE_GATEWAY_ID: ${{ secrets.CODE_REVIEW_CLOUDFLARE_GATEWAY_ID }}
+      CODE_REVIEW_ANTHROPIC_API_KEY: ${{ secrets.CODE_REVIEW_ANTHROPIC_API_KEY }}
+      CODE_REVIEW_OPENAI_API_KEY: ${{ secrets.CODE_REVIEW_OPENAI_API_KEY }}
+      CODE_REVIEW_GEMINI_API_KEY: ${{ secrets.CODE_REVIEW_GEMINI_API_KEY }}
+      CODE_REVIEW_OPENROUTER_API_KEY: ${{ secrets.CODE_REVIEW_OPENROUTER_API_KEY }}
+      # Review settings (variables).
+      CODE_REVIEW_MODEL: ${{ inputs.model != '' && inputs.model || vars.CODE_REVIEW_MODEL }}
+      CODE_REVIEW_DEPTH: ${{ vars.CODE_REVIEW_DEPTH }}
+      CODE_REVIEW_THINKING_LEVEL: ${{ vars.CODE_REVIEW_THINKING_LEVEL }}
+      CODE_REVIEW_VERIFY_MODEL: ${{ vars.CODE_REVIEW_VERIFY_MODEL }}
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: '24'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build
-        run: npm run build
-
-      - name: Run review
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CLOUDFLARE_API_KEY: ${{ secrets.CLOUDFLARE_API_KEY }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_GATEWAY_ID: ${{ secrets.CLOUDFLARE_GATEWAY_ID }}
-          CODE_REVIEW_MODEL: ${{ secrets.CODE_REVIEW_MODEL }}
-        run: node bin/code-review.js
+          node-version: ${{ inputs.node-version }}
+      - name: Run code-review
+        working-directory: ${{ inputs.working-directory }}
+        run: npx --yes "@weareikko/code-review@${{ inputs.version }}" ${{ inputs.args }}
