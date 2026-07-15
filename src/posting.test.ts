@@ -116,7 +116,7 @@ describe('summary note upsert', () => {
     const body = buildSummaryBody('Great work.', undefined, { reviewedCommitSha: commit });
 
     expect(body).toContain(
-      `---\n\nReviewed by [@ikko-dev/code-review](https://github.com/ikko-dev/gitlab-review) v${__PKG_VERSION__} for commit 27dab603346bcb994190042029ce7368021ff21e.`,
+      `---\n\nReviewed by [@weareikko/code-review](https://github.com/weareikko/gitlab-review) v${__PKG_VERSION__} for commit 27dab603346bcb994190042029ce7368021ff21e.`,
     );
     expect(extractReviewedCommitSha(body)).toBe(commit);
   });

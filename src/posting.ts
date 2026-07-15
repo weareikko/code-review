@@ -21,12 +21,15 @@ const LEGACY_SUMMARY_HISTORY_START = '<!-- gitlab-review:summary-history:start -
 const LEGACY_SUMMARY_HISTORY_END = '<!-- gitlab-review:summary-history:end -->';
 
 /**
- * Matches the reviewed-commit footer on read. The product name segment accepts
- * both the current `@ikko-dev/code-review` and the legacy
- * `@ikko-dev/gitlab-review`; the repo URL is unchanged across the rename.
+ * Matches the reviewed-commit footer on read. Both the scope and the repo URL
+ * host path accept the current `weareikko` org and the legacy `ikko-dev` org,
+ * and the name segment accepts both the current `code-review` and the legacy
+ * `gitlab-review`; the repo name (`gitlab-review`) is unchanged across the
+ * rename. This keeps the reviewed-commit skip working on MRs/PRs already
+ * reviewed under any prior identity.
  */
 export const REVIEWED_COMMIT_FOOTER_PATTERN =
-  /Reviewed by \[@ikko-dev\/(?:code|gitlab)-review\]\(https:\/\/github\.com\/ikko-dev\/gitlab-review\)(?: v\S+)? for commit ([a-f0-9]{40})\./i;
+  /Reviewed by \[@(?:ikko-dev|weareikko)\/(?:code|gitlab)-review\]\(https:\/\/github\.com\/(?:ikko-dev|weareikko)\/gitlab-review\)(?: v\S+)? for commit ([a-f0-9]{40})\./i;
 
 declare const __PKG_VERSION__: string;
 
