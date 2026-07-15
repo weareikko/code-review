@@ -48,11 +48,11 @@ The Findings bullets restate only the subject of each inline comment — the dis
 
 The reviewer produces one platform-agnostic result — a set of inline comments and one `summary`. How it lands depends on the resolved platform:
 
-|                 | **GitLab (merge request)**                   | **GitHub (pull request)**                                                                                              |
-| --------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Inline comments | One positional MR **discussion** per finding | One **batched PR review** (`event: COMMENT`) carrying all inline comments — atomic and free of per-comment rate limits |
-| Summary         | An upserted non-positional **MR note**       | An upserted **issue comment**                                                                                          |
-| Posting modes   | `direct` or `draft` (atomic bulk publish)    | Always a single batched review; `draft` has no effect                                                                  |
+|                 | **GitLab (merge request)**                   | **GitHub (pull request)**                                                                                                                                                                                                             |
+| --------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Inline comments | One positional MR **discussion** per finding | One **batched PR review** (`event: COMMENT`) carrying all inline comments in one call (no per-comment rate limits); on a 422 for an off-diff position it falls back to posting comments individually, dropping only the rejected ones |
+| Summary         | An upserted non-positional **MR note**       | An upserted **issue comment**                                                                                                                                                                                                         |
+| Posting modes   | `direct` or `draft` (atomic bulk publish)    | A single batched review (per-comment fallback on a 422); `draft` has no effect                                                                                                                                                        |
 
 The hidden fingerprint markers and the summary marker are HTML comments, invisible in the rendered view; the reviewed-commit footer is a visible `<sub>` line (`Reviewed by … for commit <sha>.`) that the commit-skip guard parses. All render identically on both platforms, so deduplication, summary upsert, and the commit-skip guard work the same way on each.
 
