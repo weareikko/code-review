@@ -7,7 +7,7 @@ name: code-review
 #   permissions: { contents: read, pull-requests: write }
 #   jobs:
 #     review:
-#       uses: weareikko/code-review/.github/workflows/code-review.yml@0.8.3
+#       uses: weareikko/code-review/.github/workflows/code-review.yml@0.8.2
 #       secrets: inherit
 #
 # Reads settings from org/repo VARIABLES (CODE_REVIEW_MODEL / CODE_REVIEW_DEPTH /

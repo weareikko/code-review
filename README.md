@@ -98,7 +98,7 @@ permissions:
 
 jobs:
   review:
-    uses: weareikko/code-review/.github/workflows/code-review.yml@0.8.3 # pin to a release tag
+    uses: weareikko/code-review/.github/workflows/code-review.yml@0.8.2 # pin to a release tag
     secrets: inherit
 ```
 
