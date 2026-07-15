@@ -15,12 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Diagnostics phase/channel names renamed `gitlab.* → scm.*` (`get_merge_request`, `get_latest_version`, `get_discussions`, `post_comments`, `upsert_summary`) ([#118]).
 - `GeneratedComment.payload` is now generic (platform-specific payload; GitLab keeps `GitLabDiscussionPayload`) ([#118]).
-- **BREAKING**: renamed the product identity from `gitlab-review` to `code-review` to reflect dual-platform support — the npm package (`@ikko-dev/code-review`), the CLI command (`code-review`, run via `bin/code-review.js`), the review footer name, the `diagnostics_channel`/OpenTelemetry name prefix (`@ikko-dev/code-review:*`), and the hidden dedup/summary/fingerprint marker prefixes (`code-review:`) all change; readers stay backward-compatible (summary notes and fingerprints posted under the old identity are still matched and deduplicated, so the first post-upgrade run upserts rather than duplicating), and the GitHub repository URL is unchanged ([#121]).
+- **BREAKING**: renamed the product identity from `gitlab-review` to `code-review` to reflect dual-platform support — the npm package (`@weareikko/code-review`), the CLI command (`code-review`, run via `bin/code-review.js`), the review footer name, the `diagnostics_channel`/OpenTelemetry name prefix (`@weareikko/code-review:*`), and the hidden dedup/summary/fingerprint marker prefixes (`code-review:`) all change; readers stay backward-compatible (summary notes and fingerprints posted under the old identity are still matched and deduplicated, so the first post-upgrade run upserts rather than duplicating); the GitHub org moved `ikko-dev → weareikko` (repository name `gitlab-review` unchanged), and the reviewed-commit footer reader still matches footers written under the former org and product name ([#121]).
 - **BREAKING**: renamed the product-scoped environment-variable prefix `GITLAB_REVIEW_* → CODE_REVIEW_*` (e.g. `GITLAB_REVIEW_MODEL → CODE_REVIEW_MODEL`, and the namespacing shim that de-prefixes provider/infra vars in shared CI) with no backward compatibility — the old names are no longer read, so existing CI configs must rename their variables. Unprefixed GitLab tokens (`GITLAB_TOKEN`, `CI_JOB_TOKEN`, …) are unchanged ([#121]).
 
-[Unreleased]: https://github.com/ikko-dev/gitlab-review/compare/0.7.6...HEAD
-[#118]: https://github.com/ikko-dev/gitlab-review/pull/118
-[#121]: https://github.com/ikko-dev/gitlab-review/pull/121
+[Unreleased]: https://github.com/weareikko/gitlab-review/compare/0.7.6...HEAD
+[#118]: https://github.com/weareikko/gitlab-review/pull/118
+[#121]: https://github.com/weareikko/gitlab-review/pull/121
 
 ## [0.7.6] - 2026-07-09
 
@@ -28,8 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The `Review usage:` footer now records the `--thinking` level (`thinking: <level>`, including the `off` default) alongside the model and cost, so the summary note captures the reasoning effort the run used ([#111]).
 
-[0.7.6]: https://github.com/ikko-dev/gitlab-review/compare/0.7.5...0.7.6
-[#111]: https://github.com/ikko-dev/gitlab-review/pull/111
+[0.7.6]: https://github.com/weareikko/gitlab-review/compare/0.7.5...0.7.6
+[#111]: https://github.com/weareikko/gitlab-review/pull/111
 
 ## [0.7.5] - 2026-07-08
 
@@ -42,10 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The reviewer no longer treats MR description/intent mismatches as first-class inline findings: the `<intent>` block is a lens for reading the diff, unmet/exceeded promises are never CRITICAL or blocking, inline findings must anchor on code (never on README/description prose), and scope-creep is surfaced in one summary line. Keeps the finder focused on demonstrable code defects ([#108]).
 - `verify` depth no longer echoes the verifier's dropped/downgraded findings into the summary Notes; a refuted finding is a non-issue the developer never saw, so only the Find model's own context notes remain. Drop/downgrade counts stay in the run log ([#106]).
 
-[0.7.5]: https://github.com/ikko-dev/gitlab-review/compare/0.7.4...0.7.5
-[#106]: https://github.com/ikko-dev/gitlab-review/pull/106
-[#107]: https://github.com/ikko-dev/gitlab-review/pull/107
-[#108]: https://github.com/ikko-dev/gitlab-review/pull/108
+[0.7.5]: https://github.com/weareikko/gitlab-review/compare/0.7.4...0.7.5
+[#106]: https://github.com/weareikko/gitlab-review/pull/106
+[#107]: https://github.com/weareikko/gitlab-review/pull/107
+[#108]: https://github.com/weareikko/gitlab-review/pull/108
 
 ## [0.7.4] - 2026-07-02
 
@@ -58,10 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Default prompt-cache retention to `long` (24h) so repeated reviews reuse the cached system-prompt prefix on providers that support it (OpenAI, incl. via the Cloudflare AI Gateway); no-op on Anthropic. Override with `PI_CACHE_RETENTION` / `GITLAB_REVIEW_PI_CACHE_RETENTION` ([#102]).
 
-[0.7.4]: https://github.com/ikko-dev/gitlab-review/compare/0.7.3...0.7.4
-[#102]: https://github.com/ikko-dev/gitlab-review/pull/102
-[#103]: https://github.com/ikko-dev/gitlab-review/pull/103
-[#104]: https://github.com/ikko-dev/gitlab-review/pull/104
+[0.7.4]: https://github.com/weareikko/gitlab-review/compare/0.7.3...0.7.4
+[#102]: https://github.com/weareikko/gitlab-review/pull/102
+[#103]: https://github.com/weareikko/gitlab-review/pull/103
+[#104]: https://github.com/weareikko/gitlab-review/pull/104
 
 ## [0.7.3] - 2026-07-02
 
@@ -71,10 +71,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Curb severity inflation: the guard-exclusion gate is now a hard rule in the base prompt (not just the skill), and a CRITICAL that isn't high-confidence is downgraded to WARN at parse time, so an unproven "blocking" claim can't gate a merge — including in `single` depth ([#99]).
 - The summary carries still-open findings across runs: an unresolved prior inline thread the current run doesn't re-emit is retained in the summary and the risk line never drops below it ([#100]).
 
-[0.7.3]: https://github.com/ikko-dev/gitlab-review/compare/0.7.2...0.7.3
-[#98]: https://github.com/ikko-dev/gitlab-review/pull/98
-[#99]: https://github.com/ikko-dev/gitlab-review/pull/99
-[#100]: https://github.com/ikko-dev/gitlab-review/pull/100
+[0.7.3]: https://github.com/weareikko/gitlab-review/compare/0.7.2...0.7.3
+[#98]: https://github.com/weareikko/gitlab-review/pull/98
+[#99]: https://github.com/weareikko/gitlab-review/pull/99
+[#100]: https://github.com/weareikko/gitlab-review/pull/100
 
 ## [0.7.2] - 2026-07-01
 
@@ -91,11 +91,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Inline findings no longer re-post when the author edits nearby lines: the duplicate-prevention secondary fingerprint dropped the diff hunk and now keys on file + side + body only, restoring the edit-stable fallback ([#96]).
 
-[0.7.2]: https://github.com/ikko-dev/gitlab-review/compare/0.7.1...0.7.2
-[#89]: https://github.com/ikko-dev/gitlab-review/pull/89
-[#90]: https://github.com/ikko-dev/gitlab-review/pull/90
-[#95]: https://github.com/ikko-dev/gitlab-review/pull/95
-[#96]: https://github.com/ikko-dev/gitlab-review/pull/96
+[0.7.2]: https://github.com/weareikko/gitlab-review/compare/0.7.1...0.7.2
+[#89]: https://github.com/weareikko/gitlab-review/pull/89
+[#90]: https://github.com/weareikko/gitlab-review/pull/90
+[#95]: https://github.com/weareikko/gitlab-review/pull/95
+[#96]: https://github.com/weareikko/gitlab-review/pull/96
 
 ## [0.7.1] - 2026-06-18
 
@@ -108,10 +108,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Warn and skip (exit 0) instead of failing the pipeline when the model provider is out of credits/quota (e.g. HTTP 402); transient 429 rate limits still fail ([#87]).
 - Split the README into a lean landing page plus dedicated `docs/` reference pages ([#85]).
 
-[0.7.1]: https://github.com/ikko-dev/gitlab-review/compare/0.7.0...0.7.1
-[#85]: https://github.com/ikko-dev/gitlab-review/pull/85
-[#86]: https://github.com/ikko-dev/gitlab-review/pull/86
-[#87]: https://github.com/ikko-dev/gitlab-review/pull/87
+[0.7.1]: https://github.com/weareikko/gitlab-review/compare/0.7.0...0.7.1
+[#85]: https://github.com/weareikko/gitlab-review/pull/85
+[#86]: https://github.com/weareikko/gitlab-review/pull/86
+[#87]: https://github.com/weareikko/gitlab-review/pull/87
 
 ## [0.7.0] - 2026-06-17
 
@@ -128,13 +128,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `full`-depth Triage dedup is now fuzzy and deterministic (proximity + token-set similarity, order-independent, higher severity wins) ([#83]).
 
-[0.7.0]: https://github.com/ikko-dev/gitlab-review/compare/0.6.2...0.7.0
-[#69]: https://github.com/ikko-dev/gitlab-review/pull/69
-[#79]: https://github.com/ikko-dev/gitlab-review/pull/79
-[#80]: https://github.com/ikko-dev/gitlab-review/pull/80
-[#81]: https://github.com/ikko-dev/gitlab-review/pull/81
-[#82]: https://github.com/ikko-dev/gitlab-review/pull/82
-[#83]: https://github.com/ikko-dev/gitlab-review/pull/83
+[0.7.0]: https://github.com/weareikko/gitlab-review/compare/0.6.2...0.7.0
+[#69]: https://github.com/weareikko/gitlab-review/pull/69
+[#79]: https://github.com/weareikko/gitlab-review/pull/79
+[#80]: https://github.com/weareikko/gitlab-review/pull/80
+[#81]: https://github.com/weareikko/gitlab-review/pull/81
+[#82]: https://github.com/weareikko/gitlab-review/pull/82
+[#83]: https://github.com/weareikko/gitlab-review/pull/83
 
 ## [0.6.2] - 2026-06-08
 
@@ -147,7 +147,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `draft_notes/bulk_publish` no longer 500s when a comment lands on an unchanged context line: positions are resolved against the diff so context lines carry both `old_line` and `new_line` (read with `core.quotepath=false` for non-ASCII paths) ([gitlab-org/gitlab#579609](https://gitlab.com/gitlab-org/gitlab/-/issues/579609)).
 - Draft publishing falls back to per-draft publish when `bulk_publish` fails, so one rejected draft no longer sinks the batch; the count of unpublishable drafts is reported.
 
-[0.6.2]: https://github.com/ikko-dev/gitlab-review/compare/0.6.1...0.6.2
+[0.6.2]: https://github.com/weareikko/gitlab-review/compare/0.6.1...0.6.2
 
 ## [0.6.1] - 2026-06-03
 
@@ -162,7 +162,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Internal refactors with no behaviour change (shared `fetchWithTimeout`, derived `diagnosticChannels`, hoisted parser regexes).
 - Internal OTel bridge cleanup with no telemetry change (shared attribute/label helpers).
 
-[0.6.1]: https://github.com/ikko-dev/gitlab-review/compare/0.6.0...0.6.1
+[0.6.1]: https://github.com/weareikko/gitlab-review/compare/0.6.0...0.6.1
 
 ## [0.6.0] - 2026-06-02
 
@@ -178,7 +178,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING:** dropped all `pi-reviewer` backward compatibility — only `gitlab-review:*` markers are read/written, so threads/notes from before the rename are no longer deduplicated.
 - **BREAKING:** dropped severity emoji (🔴/🟡/🔵) handling from reviewer-output parsing; severity comes from the explicit JSON field.
 
-[0.6.0]: https://github.com/ikko-dev/gitlab-review/compare/0.5.0...0.6.0
+[0.6.0]: https://github.com/weareikko/gitlab-review/compare/0.5.0...0.6.0
 
 ## [0.5.0] - 2026-06-02
 
@@ -197,7 +197,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Parser accepts unfenced JSON reviewer output (a bare top-level object or one appended after prose) instead of resolving to zero comments.
 
-[0.5.0]: https://github.com/ikko-dev/gitlab-review/compare/0.4.2...0.5.0
+[0.5.0]: https://github.com/weareikko/gitlab-review/compare/0.4.2...0.5.0
 
 ## [0.4.2] - 2026-06-01
 
@@ -213,7 +213,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Context-suppressed findings must be echoed in the summary Notes section so suppression is auditable.
 - Strengthened the skill-Read instruction (skills are mandatory rule sets; includes a worked `Read(...)` example).
 
-[0.4.2]: https://github.com/ikko-dev/gitlab-review/compare/0.4.1...0.4.2
+[0.4.2]: https://github.com/weareikko/gitlab-review/compare/0.4.1...0.4.2
 
 ## [0.4.1] - 2026-05-29
 
@@ -222,7 +222,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bot comment titles are bolded so the Conventional Comment header stands out.
 - Commit footer includes the package version (`Reviewed by … v<VERSION> for commit <sha>.`); SHA extraction stays backwards-compatible with versionless footers.
 
-[0.4.1]: https://github.com/ikko-dev/gitlab-review/compare/0.4.0...0.4.1
+[0.4.1]: https://github.com/weareikko/gitlab-review/compare/0.4.0...0.4.1
 
 ## [0.4.0] - 2026-05-28
 
@@ -241,7 +241,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Format-conformance eval scenarios (`ConventionalCommentFormatJudge`, `SummarySkeletonJudge`, `NoDuplicationJudge`).
 - `README.md` `## Review output format` section.
 
-[0.4.0]: https://github.com/ikko-dev/gitlab-review/compare/0.3.12...0.4.0
+[0.4.0]: https://github.com/weareikko/gitlab-review/compare/0.3.12...0.4.0
 
 ## [0.3.12] - 2026-05-26
 
@@ -249,7 +249,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `loadAutoDiscoveredSkills` warns (via a `warn` callback wired to `logger.warn`) when a discovered `SKILL.md` is missing required frontmatter, instead of silently dropping it.
 
-[0.3.12]: https://github.com/ikko-dev/gitlab-review/compare/0.3.11...0.3.12
+[0.3.12]: https://github.com/weareikko/gitlab-review/compare/0.3.11...0.3.12
 
 ## [0.3.11] - 2026-05-26
 
@@ -257,23 +257,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Inline review comments end with a `<sub>` commit footer (`Reviewed by … for commit <sha>.`); fingerprints stay computed from the original output so the SHA does not affect dedup.
 
-[0.3.11]: https://github.com/ikko-dev/gitlab-review/compare/0.3.10...0.3.11
+[0.3.11]: https://github.com/weareikko/gitlab-review/compare/0.3.10...0.3.11
 
 ## [0.3.10] - 2026-05-25
 
 ### Changed
 
-- Lazy skill body loading ([#42](https://github.com/ikko-dev/gitlab-review/issues/42)): the prompt emits a `<skill_file>` path reference and the agent reads each `SKILL.md` on demand, avoiding prompt bloat. Adds `Skill.filePath`.
+- Lazy skill body loading ([#42](https://github.com/weareikko/gitlab-review/issues/42)): the prompt emits a `<skill_file>` path reference and the agent reads each `SKILL.md` on demand, avoiding prompt bloat. Adds `Skill.filePath`.
 
 ### Added
 
-- `npm:` and `file:` skill spec protocols ([#38](https://github.com/ikko-dev/gitlab-review/issues/38)), with `parseSkillSpec`, `resolveNpmSkillDir`, and `loadNamedSkill` exports; unresolvable specs throw `ConfigError`. `git:` / `git+ssh:` are parsed but not yet executed.
-- Multi-provider LLM support ([#36](https://github.com/ikko-dev/gitlab-review/issues/36)): `--model` accepts any `@earendil-works/pi-ai` provider (OpenRouter, Gemini, Groq, Mistral, Bedrock, Vertex, …); `provider/modelId` splits on the first `/` only.
+- `npm:` and `file:` skill spec protocols ([#38](https://github.com/weareikko/gitlab-review/issues/38)), with `parseSkillSpec`, `resolveNpmSkillDir`, and `loadNamedSkill` exports; unresolvable specs throw `ConfigError`. `git:` / `git+ssh:` are parsed but not yet executed.
+- Multi-provider LLM support ([#36](https://github.com/weareikko/gitlab-review/issues/36)): `--model` accepts any `@earendil-works/pi-ai` provider (OpenRouter, Gemini, Groq, Mistral, Bedrock, Vertex, …); `provider/modelId` splits on the first `/` only.
 - Built-in Ollama support (`--model ollama/<model>`, no API key, configurable `OLLAMA_HOST`).
 - Provider-specific API key auto-resolution from the provider's env var; ambient Bedrock/Vertex creds detected, with a setup hint when missing.
 - `--base-url` / `GITLAB_REVIEW_BASE_URL` and `--max-tokens` / `GITLAB_REVIEW_MAX_TOKENS`, plus a `parseModelProvider` export.
 
-[0.3.10]: https://github.com/ikko-dev/gitlab-review/compare/0.3.9...0.3.10
+[0.3.10]: https://github.com/weareikko/gitlab-review/compare/0.3.9...0.3.10
 
 ## [0.3.9] - 2026-05-22
 
@@ -285,7 +285,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `gen_ai.usage.input_tokens` reports total input (non-cached + cached) on turn/phase spans and the completed log, matching Sentry's convention; adds the `.cached` subset attribute.
 
-[0.3.9]: https://github.com/ikko-dev/gitlab-review/compare/0.3.8...0.3.9
+[0.3.9]: https://github.com/weareikko/gitlab-review/compare/0.3.8...0.3.9
 
 ## [0.3.8] - 2026-05-21
 
@@ -294,7 +294,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OTel metric correctness (`GITLAB_REVIEW_OTEL=1`): `gen_ai.client.cost` and token usage are emitted exclusively per-turn (no double-count), cache_read/cache_creation token series are added, and `gen_ai.system` is set consistently (falling back to the configured model for bare model IDs).
 - Further OTel fixes: correct the model-string provider split (`indexOf('/')`), correlate log records to traces, split cost by token type, rename `cache_write_usd` → `cache_creation_usd`, drop `gen_ai.response.model` from metric labels, fix the cost histogram unit to `{usd}`, guard zero-value comment increments, and add `gitlab.ci_job_id` / `gitlab.ci_pipeline_id` to spans and logs.
 
-[0.3.8]: https://github.com/ikko-dev/gitlab-review/compare/0.3.7...0.3.8
+[0.3.8]: https://github.com/weareikko/gitlab-review/compare/0.3.7...0.3.8
 
 ## [0.3.7] - 2026-05-21
 
@@ -302,7 +302,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Closed OTel metric/log label gaps (`GITLAB_REVIEW_OTEL=1`): `service.name` on every data point, `gen_ai.system` replacing `gen_ai.provider.name` on spans/metrics (and added to per-turn observations), `gen_ai.agent.name` on turn spans, and the warnings/drafts span attributes.
 
-[0.3.7]: https://github.com/ikko-dev/gitlab-review/compare/0.3.6...0.3.7
+[0.3.7]: https://github.com/weareikko/gitlab-review/compare/0.3.6...0.3.7
 
 ## [0.3.6] - 2026-05-21
 
@@ -311,7 +311,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `gen_ai.conversation.id` (the run UUID) on every OTel span, enabling the Sentry Conversations view.
 - Run ID footnote in MR summary notes so the trace is locatable from the MR.
 
-[0.3.6]: https://github.com/ikko-dev/gitlab-review/compare/0.3.5...0.3.6
+[0.3.6]: https://github.com/weareikko/gitlab-review/compare/0.3.5...0.3.6
 
 ## [0.3.5] - 2026-05-21
 
@@ -319,8 +319,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Five review-level OTel metrics emitted once per run (`GITLAB_REVIEW_OTEL=1`) ([#37]): `gitlab_review_run_duration_seconds`, `gitlab_review_total_cost_usd`, `gitlab_review_comments_total`, `gitlab_review_drafts_published_total`, and `gitlab_review_phase_duration_seconds`, labelled with status (`success`/`error`/`timeout`); `gitlab.mr_iid` is excluded as high-cardinality.
 
-[0.3.5]: https://github.com/ikko-dev/gitlab-review/compare/0.3.4...0.3.5
-[#37]: https://github.com/ikko-dev/gitlab-review/pull/37
+[0.3.5]: https://github.com/weareikko/gitlab-review/compare/0.3.4...0.3.5
+[#37]: https://github.com/weareikko/gitlab-review/pull/37
 
 ## [0.3.4] - 2026-05-21
 
@@ -328,7 +328,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - GitLab CI project attributes (`gitlab.project_path`, `gitlab.project_namespace`, `gitlab.mr_target_branch`, `gitlab.pipeline_source`) on every OTel metric, span, and log when running in CI; omitted gracefully on local runs.
 
-[0.3.4]: https://github.com/ikko-dev/gitlab-review/compare/0.3.3...0.3.4
+[0.3.4]: https://github.com/weareikko/gitlab-review/compare/0.3.3...0.3.4
 
 ## [0.3.3] - 2026-05-21
 
@@ -337,8 +337,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Richer OTel agent telemetry ([#35]): per-turn `gen_ai.agent.turn` spans and per-call `execute_tool` spans, with per-turn token/cost/TTFT metrics.
 - OTel structured log records ([#35]): one `gitlab_review.comment` per comment and one `gitlab_review.completed` per run (requires the Logs Publisher scope).
 
-[0.3.3]: https://github.com/ikko-dev/gitlab-review/compare/0.3.2...0.3.3
-[#35]: https://github.com/ikko-dev/gitlab-review/pull/35
+[0.3.3]: https://github.com/weareikko/gitlab-review/compare/0.3.2...0.3.3
+[#35]: https://github.com/weareikko/gitlab-review/pull/35
 
 ## [0.3.2] - 2026-05-20
 
@@ -347,7 +347,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Structured `Logger` (`debug`/`info`/`warn`/`error`) with `createLogger` and `noopLogger`; all output to stderr (169c470, #33).
 - `--verbose` (or `GITLAB_REVIEW_VERBOSE=true`) enables debug logging — loaded skills/conventions, agent turn numbers, and individual tool calls (169c470, #33).
 
-[0.3.2]: https://github.com/ikko-dev/gitlab-review/compare/0.3.1...0.3.2
+[0.3.2]: https://github.com/weareikko/gitlab-review/compare/0.3.1...0.3.2
 
 ## [0.3.1] - 2026-05-20
 
@@ -355,8 +355,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Draft mode: remap `body` → `note` for the draft notes API, which previously rejected every draft inline comment with 400 "note is missing" ([#32]).
 
-[0.3.1]: https://github.com/ikko-dev/gitlab-review/compare/0.3.0...0.3.1
-[#32]: https://github.com/ikko-dev/gitlab-review/pull/32
+[0.3.1]: https://github.com/weareikko/gitlab-review/compare/0.3.0...0.3.1
+[#32]: https://github.com/weareikko/gitlab-review/pull/32
 
 ## [0.3.0] - 2026-05-19
 
@@ -383,10 +383,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GitLabClient.paginate()` wraps each page fetch in the same `AbortController` timeout as `request()`.
 - Eval helper renamed `hasApiKey` → `missingApiKey` to match its semantics.
 
-[0.3.0]: https://github.com/ikko-dev/gitlab-review/compare/0.2.0...0.3.0
-[#28]: https://github.com/ikko-dev/gitlab-review/pull/28
-[#29]: https://github.com/ikko-dev/gitlab-review/pull/29
-[#31]: https://github.com/ikko-dev/gitlab-review/pull/31
+[0.3.0]: https://github.com/weareikko/gitlab-review/compare/0.2.0...0.3.0
+[#28]: https://github.com/weareikko/gitlab-review/pull/28
+[#29]: https://github.com/weareikko/gitlab-review/pull/29
+[#31]: https://github.com/weareikko/gitlab-review/pull/31
 
 ## [0.2.0] - 2026-05-19
 
@@ -398,10 +398,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Align project naming to `gitlab-review` across code, markers, OTel naming, the default artifact, and `GITLAB_REVIEW_*` env vars; legacy hidden markers stay readable for migration ([#27]).
 
-[0.2.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.2.0
-[#25]: https://github.com/ikko-dev/gitlab-review/pull/25
-[#26]: https://github.com/ikko-dev/gitlab-review/pull/26
-[#27]: https://github.com/ikko-dev/gitlab-review/pull/27
+[0.2.0]: https://github.com/weareikko/gitlab-review/releases/tag/0.2.0
+[#25]: https://github.com/weareikko/gitlab-review/pull/25
+[#26]: https://github.com/weareikko/gitlab-review/pull/26
+[#27]: https://github.com/weareikko/gitlab-review/pull/27
 
 ## [0.1.11] - 2026-05-19
 
@@ -409,8 +409,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Preserve previous summary runs in a collapsed `Previous review runs` history section (bounded to 10) instead of erasing them ([#24]).
 
-[0.1.11]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.11
-[#24]: https://github.com/ikko-dev/gitlab-review/pull/24
+[0.1.11]: https://github.com/weareikko/gitlab-review/releases/tag/0.1.11
+[#24]: https://github.com/weareikko/gitlab-review/pull/24
 
 ## [0.1.10] - 2026-05-19
 
@@ -422,8 +422,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The summary note is upserted before inline comments so it appears at the top of the MR activity feed ([#22]).
 
-[0.1.10]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.10
-[#22]: https://github.com/ikko-dev/gitlab-review/pull/22
+[0.1.10]: https://github.com/weareikko/gitlab-review/releases/tag/0.1.10
+[#22]: https://github.com/weareikko/gitlab-review/pull/22
 
 ## [0.1.9] - 2026-05-19
 
@@ -442,8 +442,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - OTel `service.version` is inlined at build time from `package.json`, so it reads the real version under `npx`/standalone instead of `0.0.0`.
 
-[0.1.9]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.9
-[#19]: https://github.com/ikko-dev/gitlab-review/pull/19
+[0.1.9]: https://github.com/weareikko/gitlab-review/releases/tag/0.1.9
+[#19]: https://github.com/weareikko/gitlab-review/pull/19
 
 ## [0.1.8] - 2026-05-19
 
@@ -451,8 +451,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - OTel bridge boot crash (`resources.Resource is not a constructor`): use the `@opentelemetry/resources` v2 factory API ([#18]).
 
-[0.1.8]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.8
-[#18]: https://github.com/ikko-dev/gitlab-review/pull/18
+[0.1.8]: https://github.com/weareikko/gitlab-review/releases/tag/0.1.8
+[#18]: https://github.com/weareikko/gitlab-review/pull/18
 
 ## [0.1.7] - 2026-05-19
 
@@ -460,8 +460,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Opt-in OpenTelemetry bridge (`GITLAB_REVIEW_OTEL=1`) emitting GenAI-convention spans with per-run tokens/cost; exporter selection follows the standard `OTEL_*` env vars ([#17]).
 
-[0.1.7]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.7
-[#17]: https://github.com/ikko-dev/gitlab-review/pull/17
+[0.1.7]: https://github.com/weareikko/gitlab-review/releases/tag/0.1.7
+[#17]: https://github.com/weareikko/gitlab-review/pull/17
 
 ## [0.1.6] - 2026-05-19
 
@@ -473,8 +473,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Use Codecov OIDC authentication for CI uploads ([#15]).
 
-[0.1.6]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.6
-[#15]: https://github.com/ikko-dev/gitlab-review/pull/15
+[0.1.6]: https://github.com/weareikko/gitlab-review/releases/tag/0.1.6
+[#15]: https://github.com/weareikko/gitlab-review/pull/15
 
 ## [0.1.5] - 2026-05-19
 
@@ -488,8 +488,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Drafts dropped by the pre-publish re-check are reported separately from duplicates ([#14]).
 
-[0.1.5]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.5
-[#14]: https://github.com/ikko-dev/gitlab-review/pull/14
+[0.1.5]: https://github.com/weareikko/gitlab-review/releases/tag/0.1.5
+[#14]: https://github.com/weareikko/gitlab-review/pull/14
 
 ## [0.1.4] - 2026-05-18
 
@@ -497,8 +497,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Configurable agent `thinkingLevel` via `--thinking <level>` / `GITLAB_REVIEW_THINKING_LEVEL` (`off`…`xhigh`, default `off`); thinking tokens are billed and reported ([#13]).
 
-[0.1.4]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.4
-[#13]: https://github.com/ikko-dev/gitlab-review/pull/13
+[0.1.4]: https://github.com/weareikko/gitlab-review/releases/tag/0.1.4
+[#13]: https://github.com/weareikko/gitlab-review/pull/13
 
 ## [0.1.3] - 2026-05-18
 
@@ -506,8 +506,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `formatUsageLine` reports billable input as `input + cacheRead + cacheWrite` so the usage line agrees with the cost when prompt caching is active; adds a `(N cached)` hint ([#12]).
 
-[0.1.3]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.3
-[#12]: https://github.com/ikko-dev/gitlab-review/pull/12
+[0.1.3]: https://github.com/weareikko/gitlab-review/releases/tag/0.1.3
+[#12]: https://github.com/weareikko/gitlab-review/pull/12
 
 ## [0.1.2] - 2026-05-18
 
@@ -519,8 +519,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Replace the bundled `gitlab-review` dependency with direct pinned deps on `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and `@earendil-works/pi-coding-agent`; conventions loading, prompt building, and noise filtering now live here ([#11]).
 
-[0.1.2]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.2
-[#11]: https://github.com/ikko-dev/gitlab-review/pull/11
+[0.1.2]: https://github.com/weareikko/gitlab-review/releases/tag/0.1.2
+[#11]: https://github.com/weareikko/gitlab-review/pull/11
 
 ## [0.1.1] - 2026-05-18
 
@@ -528,13 +528,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Forward shell-quoted Git diff arguments to `gitlab-review` instead of raw diff content.
 
-[0.1.1]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.1
+[0.1.1]: https://github.com/weareikko/gitlab-review/releases/tag/0.1.1
 
 ## [0.1.0] - 2026-05-18
 
 ### Added
 
-- Initial release of `@ikko-dev/gitlab-review` ([a6166f5], [310dccf]).
+- Initial release of `@weareikko/gitlab-review` ([a6166f5], [310dccf]).
 - Add package metadata and expanded README usage documentation ([c2a11c0]).
 - Add package exports for the CLI entry point and public API type declarations ([5c53a43]).
 - Add config validation and argument parsing test coverage ([a167ab1]).
@@ -551,22 +551,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Rename the npm package scope to `@ikko-dev/gitlab-review` ([c29faef]).
+- Rename the npm package scope to `@weareikko/gitlab-review` ([c29faef]).
 - Add typed runtime errors for clearer CLI failures ([cd4220d]).
 - Return an honest intermediate min-severity type before runtime validation ([5c53a43]).
 
-[0.1.0]: https://github.com/ikko-dev/gitlab-review/releases/tag/0.1.0
-[a6166f5]: https://github.com/ikko-dev/gitlab-review/commit/a6166f5
-[310dccf]: https://github.com/ikko-dev/gitlab-review/commit/310dccf
-[c2a11c0]: https://github.com/ikko-dev/gitlab-review/commit/c2a11c0
-[38190f7]: https://github.com/ikko-dev/gitlab-review/commit/38190f7
-[fa64a59]: https://github.com/ikko-dev/gitlab-review/commit/fa64a59
-[64c9d09]: https://github.com/ikko-dev/gitlab-review/commit/64c9d09
-[cd4220d]: https://github.com/ikko-dev/gitlab-review/commit/cd4220d
-[c29faef]: https://github.com/ikko-dev/gitlab-review/commit/c29faef
-[5c53a43]: https://github.com/ikko-dev/gitlab-review/commit/5c53a43
-[0bdf985]: https://github.com/ikko-dev/gitlab-review/commit/0bdf985
-[a167ab1]: https://github.com/ikko-dev/gitlab-review/commit/a167ab1
-[4b5920b]: https://github.com/ikko-dev/gitlab-review/commit/4b5920b
-[1a610da]: https://github.com/ikko-dev/gitlab-review/commit/1a610da
-[2c4971b]: https://github.com/ikko-dev/gitlab-review/commit/2c4971b
+[0.1.0]: https://github.com/weareikko/gitlab-review/releases/tag/0.1.0
+[a6166f5]: https://github.com/weareikko/gitlab-review/commit/a6166f5
+[310dccf]: https://github.com/weareikko/gitlab-review/commit/310dccf
+[c2a11c0]: https://github.com/weareikko/gitlab-review/commit/c2a11c0
+[38190f7]: https://github.com/weareikko/gitlab-review/commit/38190f7
+[fa64a59]: https://github.com/weareikko/gitlab-review/commit/fa64a59
+[64c9d09]: https://github.com/weareikko/gitlab-review/commit/64c9d09
+[cd4220d]: https://github.com/weareikko/gitlab-review/commit/cd4220d
+[c29faef]: https://github.com/weareikko/gitlab-review/commit/c29faef
+[5c53a43]: https://github.com/weareikko/gitlab-review/commit/5c53a43
+[0bdf985]: https://github.com/weareikko/gitlab-review/commit/0bdf985
+[a167ab1]: https://github.com/weareikko/gitlab-review/commit/a167ab1
+[4b5920b]: https://github.com/weareikko/gitlab-review/commit/4b5920b
+[1a610da]: https://github.com/weareikko/gitlab-review/commit/1a610da
+[2c4971b]: https://github.com/weareikko/gitlab-review/commit/2c4971b
