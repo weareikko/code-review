@@ -89,7 +89,7 @@ Project skills take precedence over built-in skills with the same name. A skill 
 
 ## Skills footer
 
-When skills are active, their names appear in the MR summary note footer:
+When skills are active, their names appear in the review summary footer (the MR note on GitLab, the PR summary comment on GitHub):
 
 ```md
 Skills: `code-review`

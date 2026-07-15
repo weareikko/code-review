@@ -66,7 +66,7 @@ npx @weareikko/code-review \
 
 Behaviour:
 
-- **Fixed angle→model mapping.** Angle `i` runs on pool member `i % pool.length`. The mapping is deterministic and stable for a given (MR, commit) — there is no randomness or round-robin.
+- **Fixed angle→model mapping.** Angle `i` runs on pool member `i % pool.length`. The mapping is deterministic and stable for a given (MR/PR, commit) — there is no randomness or round-robin.
 - **Cross-family verifier.** Each severe finding is verified by a pool member _other than_ the model that authored it (with 3+ members the tie-break is deterministic by pool order; with a single-model pool it degenerates to today's behaviour). The author-model annotation is internal pipeline metadata only — it never reaches a posted comment, fingerprint, or the summary.
 - **Per-stage key resolution.** Each member resolves its own provider key from that provider's standard env var, so a key for one provider is never sent to another. A member whose key is missing or empty is dropped with a warning instead of failing the run; if every member is unusable, the pipeline falls back to `--model` (which is already validated to have a key).
 - **Per-model cost breakdown.** When more than one distinct model runs, the `Review usage:` output adds a per-model breakdown (tokens and cost per pool member) and `review-usage.json` records the same under a `byModel` array. The top-level totals are the sum across the pool.
