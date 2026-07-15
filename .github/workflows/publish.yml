@@ -72,9 +72,8 @@ jobs:
           echo "IS_PRERELEASE=$IS_PRERELEASE" >> $GITHUB_ENV
 
       - name: Publish package
+        # Auth is OIDC trusted publishing (id-token: write + --provenance); no npm token needed.
         run: npm publish --provenance --access public --tag ${{ env.NPM_TAG }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         uses: ncipollo/release-action@v1
