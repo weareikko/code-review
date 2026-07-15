@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A reusable GitHub Actions workflow (`.github/workflows/reusable-review.yml`, `on: workflow_call`) so any repo can enable PR review with a ~10-line caller — no checkout, permissions, or run steps to wire up. See the "Reusable workflow" section of the README ([#122]).
+
 ## [0.8.1] - 2026-07-15
 
 ### Changed
@@ -28,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [Unreleased]: https://github.com/weareikko/code-review/compare/0.8.1...HEAD
 [0.8.1]: https://github.com/weareikko/code-review/compare/0.8.0...0.8.1
+[#122]: https://github.com/weareikko/code-review/pull/122
 [0.8.0]: https://github.com/weareikko/code-review/compare/0.7.6...0.8.0
 [#118]: https://github.com/weareikko/code-review/pull/118
 [#121]: https://github.com/weareikko/code-review/pull/121
