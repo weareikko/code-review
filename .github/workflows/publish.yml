@@ -84,3 +84,16 @@ jobs:
             Please refer to [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/CHANGELOG.md) for details.
           draft: false
           prerelease: ${{ env.IS_PRERELEASE }}
+
+      - name: Update moving minor tag
+        # Re-point the MAJOR.MINOR tag (e.g. 0.8) at this release so consumers can
+        # pin `@0.8` and pick up patch releases automatically. In 0.x a minor bump
+        # signals a breaking change, so the minor series — not a major `0` tag — is
+        # the compatibility boundary; we deliberately maintain no moving `@0` tag.
+        # Skipped for prereleases. The tag has a single dot, so it does not match the
+        # `*.*.*` publish trigger and cannot cause a re-run loop.
+        if: env.IS_PRERELEASE == 'false'
+        run: |
+          MINOR_TAG=${VERSION%.*}
+          git tag -f "$MINOR_TAG"
+          git push origin "refs/tags/$MINOR_TAG" --force
