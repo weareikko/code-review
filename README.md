@@ -110,7 +110,7 @@ jobs:
     steps:
       # Checkout (full history) is bundled — no separate checkout step needed.
       # Opt out with `checkout: false` if your job already checked out the code.
-      - uses: weareikko/code-review@0.8.2 # pin to a release tag
+      - uses: weareikko/code-review@0.8 # moving minor tag — auto patch updates (see Pinning below)
         with:
           model: anthropic/claude-sonnet-4-5
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -121,6 +121,8 @@ jobs:
 Inputs: `model` (required), `api-key`, `github-token` (default `${{ github.token }}`), `version` (npm dist-tag/version, default `latest`), `node-version` (default `24`), `working-directory`, `args` (extra CLI flags forwarded verbatim), `checkout` (default `true` — bundled repository checkout), and `fetch-depth` (default `0` — full history, required for the merge-base diff).
 
 Because the composite action references your secrets directly (`${{ secrets.ANTHROPIC_API_KEY }}`), it works from **any** repository, including consumers in a different organization from this one.
+
+> **Pinning the ref.** `@0.8` is a **moving minor tag**, re-pointed to each new patch, so you receive `0.8.x` fixes automatically. Because a `0.x` minor bump marks a breaking change, the minor series is the compatibility boundary — there is intentionally no moving `@0` tag. For a frozen build, pin an exact patch (`@0.8.3`) or a commit SHA; to track the tip, use `@main`. GitHub `uses:` refs do not support wildcards, so `@0.8.x` is not valid — use the moving `@0.8` tag instead.
 
 ### Reusable workflow (same org/enterprise)
 
@@ -137,7 +139,7 @@ permissions:
 
 jobs:
   review:
-    uses: weareikko/code-review/.github/workflows/code-review.yml@0.8.2 # pin to a release tag
+    uses: weareikko/code-review/.github/workflows/code-review.yml@0.8 # moving minor tag — auto patch updates
     secrets: inherit
 ```
 
