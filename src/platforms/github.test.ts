@@ -3,6 +3,7 @@ import { ConfigError } from '../errors.js';
 import { extractExistingFingerprints } from '../fingerprints.js';
 import { findExistingReviewedCommitSha, findExistingSummaryNote } from '../posting.js';
 import { extractPriorThreads } from '../prior-threads.js';
+import { extractOpenBotFindings } from '../summary-carryover.js';
 import type { DiffRefs, ReviewComment } from '../types.js';
 import {
   buildGitHubComments,
@@ -178,6 +179,29 @@ describe('normalizeGitHubDiscussions', () => {
     expect(discussions[0].notes).toEqual([{ id: 10, body: 'summary here' }]);
   });
 
+  it('marks notes resolved when their id is in the resolved set', () => {
+    const discussions = normalizeGitHubDiscussions(
+      [
+        { id: 1, body: 'resolved finding', path: 'src/a.ts', line: 3, side: 'RIGHT' },
+        { id: 2, body: 'reply', path: 'src/a.ts', in_reply_to_id: 1 },
+        { id: 3, body: 'open finding', path: 'src/b.ts', line: 4, side: 'RIGHT' },
+      ],
+      [],
+      new Set([1, 2]),
+    );
+    // The resolved thread's notes are both flagged; the open thread stays false.
+    expect(discussions[0].notes.map((n) => n.resolved)).toEqual([true, true]);
+    expect(discussions[1].notes.map((n) => n.resolved)).toEqual([false]);
+  });
+
+  it('defaults notes to unresolved when no resolved set is passed', () => {
+    const [discussion] = normalizeGitHubDiscussions(
+      [{ id: 1, body: 'x', path: 'src/a.ts', line: 3, side: 'RIGHT' }],
+      [],
+    );
+    expect(discussion.notes[0].resolved).toBe(false);
+  });
+
   it('feeds the shared fingerprint / summary / prior-thread helpers unchanged', () => {
     // Build a real bot comment body (footer + fingerprint markers) via the payload builder.
     const [generated] = buildGitHubComments([comment()], DIFF, REFS, new Set());
@@ -213,8 +237,23 @@ describe('normalizeGitHubDiscussions', () => {
   });
 });
 
+/**
+ * A resolved review thread's comment ids, shaped as the GraphQL `reviewThreads`
+ * query returns them. `ids` land in the resolved set only when `isResolved`.
+ */
+interface ResolvedThreadStub {
+  isResolved: boolean;
+  ids: number[];
+}
+
 /** Routes GitHub API requests by method + path so one mock backs a whole run. */
-function routedFetch(overrides: { reviewComments?: unknown[]; issueComments?: unknown[] } = {}): {
+function routedFetch(
+  overrides: {
+    reviewComments?: unknown[];
+    issueComments?: unknown[];
+    reviewThreads?: ResolvedThreadStub[];
+  } = {},
+): {
   fetchImpl: ReturnType<typeof vi.fn>;
   calls: { method: string; url: string; body?: string }[];
 } {
@@ -222,6 +261,25 @@ function routedFetch(overrides: { reviewComments?: unknown[]; issueComments?: un
   const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
     const method = init.method ?? 'GET';
     calls.push({ method, url, body: init.body as string | undefined });
+    if (method === 'POST' && url.endsWith('/graphql')) {
+      return new Response(
+        JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                reviewThreads: {
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                  nodes: (overrides.reviewThreads ?? []).map((t) => ({
+                    isResolved: t.isResolved,
+                    comments: { nodes: t.ids.map((id) => ({ databaseId: id })) },
+                  })),
+                },
+              },
+            },
+          },
+        }),
+      );
+    }
     if (method === 'GET' && url.endsWith('/pulls/7')) {
       return new Response(
         JSON.stringify({
@@ -304,6 +362,26 @@ describe('GitHubPlatform', () => {
     expect(discussions).toHaveLength(2);
     expect(discussions[0].notes[0].id).toBe(1);
     expect(discussions[1].notes[0].id).toBe(10);
+  });
+
+  it('getDiscussions flags resolved threads so carry-over drops them', async () => {
+    // Two bot findings with fingerprint markers; only the first thread is resolved.
+    const resolvedBody = '**issue: resolved bug**\n\n<!-- code-review:fingerprint-primary:aaaa -->';
+    const openBody = '**issue: open bug**\n\n<!-- code-review:fingerprint-primary:bbbb -->';
+    const { fetchImpl } = routedFetch({
+      reviewComments: [
+        { id: 1, body: resolvedBody, path: 'src/a.ts', line: 3, side: 'RIGHT' },
+        { id: 2, body: openBody, path: 'src/b.ts', line: 4, side: 'RIGHT' },
+      ],
+      reviewThreads: [{ isResolved: true, ids: [1] }],
+    });
+
+    const discussions = await makePlatform(fetchImpl).getDiscussions();
+
+    // extractOpenBotFindings keeps only the still-open finding, mirroring GitLab.
+    const open = extractOpenBotFindings(discussions);
+    expect(open).toHaveLength(1);
+    expect(open[0].file).toBe('src/b.ts');
   });
 
   it('postComments posts one batched review with commit_id, skipping duplicates and off-diff', async () => {
