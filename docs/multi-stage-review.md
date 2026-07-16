@@ -45,7 +45,7 @@ developer can audit what the pipeline suppressed — consistent with the existin
 ### Why three, not five
 
 The Claude Code display also shows **Triage** and **Sweep / Verify-sweep**. Those
-are refinements with a poor cost-per-yield ratio for a CI-on-every-MR reviewer:
+are refinements with a poor cost-per-yield ratio for a CI-on-every-MR/PR reviewer:
 
 - **Triage** (semantic dedup _between_ finders) only earns its keep once Find
   fans out into multiple overlapping agents. With one finder there is nothing to
@@ -97,7 +97,7 @@ This is a property of the **Find** stage and is deferred. The intended policy wh
 it lands:
 
 - **Coverage** (chunk-when-over-budget vs drop-when-over-budget) engages at the
-  default depth, conditional on size — a normal MR stays under budget and pays
+  default depth, conditional on size — a normal MR/PR stays under budget and pays
   nothing extra.
 - **Intensity** (multi-angle per chunk, Triage, Sweep) is what `full` buys.
 - `single` keeps drop-and-flag as the cheap, predictable fallback.

@@ -2,6 +2,8 @@
 
 ← Back to the [README](../README.md)
 
+> **Naming note.** Telemetry is emitted on both platforms (GitLab MRs and GitHub PRs), but the diagnostics/OTel identifiers below keep their historical `gitlab_*` / `gitlab.*` prefixes for backward compatibility (renaming them would break existing dashboards and queries). Source-control API phase/channel names are the platform-neutral `scm.*` (e.g. `scm.get_merge_request`). The GitLab-CI project attributes (`gitlab.project_path`, `gitlab.project_namespace`, `gitlab.mr_target_branch`, `gitlab.pipeline_source`, `gitlab.ci_job_id`, `gitlab.ci_pipeline_id`) are populated only from GitLab CI variables and are absent on GitHub Actions runs.
+
 ## Diagnostics channels
 
 `code-review` publishes opt-in Node.js `diagnostics_channel` tracing events with no external telemetry dependency. Subscribers can listen before calling `run()` or from a Node preload/import hook before running the CLI.
@@ -25,7 +27,7 @@ Node emits tracing subchannels as `tracing:<base>:start`, `:end`, `:asyncStart`,
 
 When `--posting-mode draft` is used, the `scm.post_comments` payload also exposes `draftsAbandoned`, `draftsCreated`, `draftsDeletedPrePublish`, and `draftsPublished` counters describing the draft lifecycle within the run.
 
-The `git.get_merge_diff` payload exposes `diffFilesChanged`, `diffLinesAdded`, and `diffLinesRemoved`; the GitLab read phases expose `httpRequestMethod`, `httpUrl`, `httpStatusCode`, `httpResponseBodySize`, and `serverAddress` (no secrets — the token is sent in a request header, not the URL); and the top-level `run` payload exposes `postedBySeverity`, a per-severity breakdown of posted comments.
+The `git.get_merge_diff` payload exposes `diffFilesChanged`, `diffLinesAdded`, and `diffLinesRemoved`; the source-control (`scm.*`) read phases expose `httpRequestMethod`, `httpUrl`, `httpStatusCode`, `httpResponseBodySize`, and `serverAddress` (no secrets — the token is sent in a request header, not the URL); and the top-level `run` payload exposes `postedBySeverity`, a per-severity breakdown of posted comments.
 
 The `reviewer.run` payload exposes a `usage` field (`{ model, tokens, cost }`) once the agent has returned. The same `usage` is forwarded onto the top-level `run` payload so a subscriber on `run:asyncEnd` sees the final token and cost totals for the review.
 

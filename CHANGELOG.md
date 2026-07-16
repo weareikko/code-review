@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Docs reframed for dual GitLab + GitHub support: platform auto-detection, GitHub environment/flags, both output transports, and the composite-action vs reusable-workflow `secrets: inherit` caveat ([#124]).
+
 ## [0.8.2] - 2026-07-15
 
 ### Added
@@ -37,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING**: renamed the product-scoped environment-variable prefix `GITLAB_REVIEW_* → CODE_REVIEW_*` (e.g. `GITLAB_REVIEW_MODEL → CODE_REVIEW_MODEL`, and the namespacing shim that de-prefixes provider/infra vars in shared CI) with no backward compatibility — the old names are no longer read, so existing CI configs must rename their variables. Unprefixed GitLab tokens (`GITLAB_TOKEN`, `CI_JOB_TOKEN`, …) are unchanged ([#121]).
 
 [Unreleased]: https://github.com/weareikko/code-review/compare/0.8.2...HEAD
+[#124]: https://github.com/weareikko/code-review/pull/124
 [0.8.2]: https://github.com/weareikko/code-review/compare/0.8.1...0.8.2
 [#123]: https://github.com/weareikko/code-review/pull/123
 [0.8.1]: https://github.com/weareikko/code-review/compare/0.8.0...0.8.1

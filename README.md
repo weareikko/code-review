@@ -5,15 +5,19 @@
 [![Size](https://img.shields.io/bundlephobia/minzip/@weareikko/code-review?style=flat&colorB=3e63dd&colorA=414853&label=size)](https://bundlephobia.com/package/@weareikko/code-review)
 ![Codecov](https://img.shields.io/codecov/c/github/weareikko/code-review?style=flat&colorB=3e63dd&colorA=414853)
 
-Run an agent-driven code review in GitLab CI, parse inline comments, post deduplicated merge request discussions, and report per-run token usage and cost.
+Run an agent-driven code review on **GitLab merge requests and GitHub pull requests** — the same review engine on both. It parses inline comments, posts deduplicated review discussions, upserts a summary, and reports per-run token usage and cost. The platform is auto-detected from the environment (GitLab CI vs. GitHub Actions) and can be forced with `--platform github|gitlab`.
 
-The reviewer reads the MR **title and description** as the author's declared intent: it checks the diff against the stated purpose and flags code/intent mismatches (the change does something the description never claimed, or omits something it promised) as a first-class finding. A missing or empty description degrades gracefully — the review still runs.
+The reviewer reads the merge/pull request **title and description** as the author's declared intent: it reads the diff against the stated purpose and surfaces code/intent mismatches (the change does something the description never claimed, or omits something it promised) as a summary note. A missing or empty description degrades gracefully — the review still runs.
 
 ## Requirements
 
 - Node.js `>=24`
-- `git` available in the runtime
-- A pipeline running in a merge request context (`CI_PROJECT_ID`, `CI_MERGE_REQUEST_IID`)
+- `git` available in the runtime (full history — the review diffs against the merge base)
+- A run in one of the two supported contexts, which the tool auto-detects:
+  - **GitLab CI** in a merge-request pipeline (`GITLAB_CI`, `CI_PROJECT_ID`, `CI_MERGE_REQUEST_IID`), or
+  - **GitHub Actions** on a `pull_request` event (`GITHUB_ACTIONS`, `GITHUB_REPOSITORY`, the PR number)
+
+Detection precedence: an explicit `--platform github|gitlab` (or `CODE_REVIEW_PLATFORM`) always wins; otherwise `GITHUB_ACTIONS=true` selects GitHub and `GITLAB_CI=true` (or a present `CI_PROJECT_ID` / `CI_SERVER_URL`) selects GitLab; failing that, the tool infers the platform from whichever side's identifiers are present.
 
 ## Install / Run
 
@@ -79,13 +83,48 @@ review:
       - review-usage.json
 ```
 
-## GitHub Actions
+## GitHub Actions example
 
-The same reviewer also reviews **GitHub pull requests** — the engine is platform-agnostic and auto-detects GitHub from the Actions environment (`GITHUB_ACTIONS`, `GITHUB_REPOSITORY`, the `pull_request` event). Set `--platform github` to force it.
+On GitHub the same engine reviews **pull requests** — auto-detected from the Actions environment (`GITHUB_ACTIONS`, `GITHUB_REPOSITORY`, the `pull_request` event); pass `--platform github` to force it. Findings post as one batched PR review with inline comments plus an upserted summary comment.
 
-### Reusable workflow (simplest)
+### Composite action (recommended)
 
-The quickest way to enable reviews in a repo is the bundled reusable workflow. Add a tiny caller and let it check out the code, install the CLI, and run the review for you:
+The bundled composite action is the primary path: it checks out the repository, sets up Node, installs the CLI, and runs the review in one step. It needs:
+
+- **Permissions:** `pull-requests: write` (to post the review and summary) and `contents: read` (to check out the code). The default `GITHUB_TOKEN` is enough; the action reads it as `${{ github.token }}` by default.
+- **Full git history:** the action checks out the repository by default with `fetch-depth: 0` so the merge-base diff and commit log resolve (tune with `fetch-depth`, or set `checkout: false` and check out yourself first).
+- **A model + its key:** pass the model via the `model` input and the provider's key via the `api-key` input (or expose the provider's standard env var, e.g. `ANTHROPIC_API_KEY`, to the step).
+
+```yml
+name: code-review
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout (full history) is bundled — no separate checkout step needed.
+      # Opt out with `checkout: false` if your job already checked out the code.
+      - uses: weareikko/code-review@0.8.2 # pin to a release tag
+        with:
+          model: anthropic/claude-sonnet-4-5
+          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # github-token defaults to ${{ github.token }}
+          # args: --min-severity warn --dry-run
+```
+
+Inputs: `model` (required), `api-key`, `github-token` (default `${{ github.token }}`), `version` (npm dist-tag/version, default `latest`), `node-version` (default `24`), `working-directory`, `args` (extra CLI flags forwarded verbatim), `checkout` (default `true` — bundled repository checkout), and `fetch-depth` (default `0` — full history, required for the merge-base diff).
+
+Because the composite action references your secrets directly (`${{ secrets.ANTHROPIC_API_KEY }}`), it works from **any** repository, including consumers in a different organization from this one.
+
+### Reusable workflow (same org/enterprise)
+
+The bundled reusable workflow lets a caller enable reviews with no `steps:` of its own — it checks out the code, installs the CLI, and runs the review for you:
 
 ```yml
 name: code-review
@@ -102,45 +141,19 @@ jobs:
     secrets: inherit
 ```
 
-It reads review settings from repo/org **variables** (`CODE_REVIEW_MODEL`, `CODE_REVIEW_DEPTH`, `CODE_REVIEW_THINKING_LEVEL`, `CODE_REVIEW_VERIFY_MODEL`) and provider credentials from **secrets** named with the `CODE_REVIEW_` prefix (e.g. `CODE_REVIEW_ANTHROPIC_API_KEY`), which the CLI's env shim de-prefixes for the provider. `secrets: inherit` is required so the reusable workflow can see them. Optional `with:` inputs: `model` (overrides the `CODE_REVIEW_MODEL` variable), `version`, `node-version`, `working-directory`, `args`, and `runs-on`.
+It reads review settings from repo/org **variables** (`CODE_REVIEW_MODEL`, `CODE_REVIEW_DEPTH`, `CODE_REVIEW_THINKING_LEVEL`, `CODE_REVIEW_VERIFY_MODEL`) and provider credentials from **secrets** named with the `CODE_REVIEW_` prefix (e.g. `CODE_REVIEW_ANTHROPIC_API_KEY`), which the CLI's env shim de-prefixes for the provider. Optional `with:` inputs: `model` (overrides the `CODE_REVIEW_MODEL` variable), `version`, `node-version`, `working-directory`, `args`, and `runs-on`.
 
-### Composite action
+> **Caveat — `secrets: inherit` is same-organization (or enterprise) only.** Organization secrets are **not** inherited across organizations, so this pattern only works when the caller repository lives in the same org (or enterprise) as `weareikko/code-review`. Cross-organization consumers must use the **composite action** above, which references their own secrets directly. (The reusable workflow relies on `secrets: inherit` and declares no `workflow_call.secrets`, so there is no explicit-secrets path for it.)
 
-For more control, use the bundled composite action directly. It needs:
+### Running the CLI directly
 
-- **Permissions:** `pull-requests: write` (to post the review and summary) and `contents: read` (to check out the code). The default `GITHUB_TOKEN` is enough; the action reads it as `${{ github.token }}` by default.
-- **Full git history:** the bundled checkout uses `fetch-depth: 0` so the merge-base diff and commit log resolve (tune with `fetch-depth`, or set `checkout: false` and check out yourself).
-- **A model + its key:** pass the model via the `model` input and the provider's key via the `api-key` input (or expose the provider's standard env var, e.g. `ANTHROPIC_API_KEY`, to the step).
+Prefer no action at all? `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, and the PR number are read straight from the Actions environment. Check out the code first (full history) so the merge-base diff resolves:
 
 ```yml
-name: code-review
-on:
-  pull_request:
-
-permissions:
-  contents: read
-  pull-requests: write
-
-jobs:
-  review:
-    runs-on: ubuntu-latest
-    steps:
-      # Checkout (full history) is bundled — opt out with `checkout: false` if
-      # your job already checked out the code with its own options.
-      - uses: weareikko/code-review@main # pin to a release tag in production
-        with:
-          model: anthropic/claude-sonnet-4-5
-          api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          # github-token defaults to ${{ github.token }}
-          # args: --min-severity warn --dry-run
-```
-
-Inputs: `model` (required), `api-key`, `github-token` (default `${{ github.token }}`), `version` (npm dist-tag/version, default `latest`), `node-version` (default `24`), `working-directory`, `args` (extra CLI flags forwarded verbatim), `checkout` (default `true` — bundled repository checkout), and `fetch-depth` (default `0` — full history, required for the merge-base diff).
-
-Prefer to run the CLI directly (no composite action)? `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, and the PR number are read straight from the Actions environment:
-
-```yml
-- uses: actions/setup-node@v4
+- uses: actions/checkout@v5
+  with:
+    fetch-depth: 0
+- uses: actions/setup-node@v5
   with:
     node-version: 24
 - run: npx @weareikko/code-review
@@ -159,17 +172,17 @@ The README covers getting started. Reference material lives in [`docs/`](https:/
 - [Skills](https://github.com/weareikko/code-review/blob/main/docs/skills.md) — built-in, external (`npm:`/`file:`/`git:`), and project auto-discovered review skills.
 - [Multi-stage review](https://github.com/weareikko/code-review/blob/main/docs/multi-stage-review.md) — the staged Find / Verify / Synthesize pipeline behind `--review-depth`.
 - [Observability](https://github.com/weareikko/code-review/blob/main/docs/observability.md) — diagnostics-channel tracing and the opt-in OpenTelemetry bridge (spans, metrics, logs).
-- [Output format](https://github.com/weareikko/code-review/blob/main/docs/output-format.md) — inline-comment shape, MR-level summary note, footer, and duplicate prevention.
+- [Output format](https://github.com/weareikko/code-review/blob/main/docs/output-format.md) — inline-comment shape, the upserted summary (a note on GitLab, an issue comment on GitHub), footer, and duplicate prevention.
 
 ## Configuration
 
-The CLI auto-resolves most values from GitLab CI variables and provider-standard env vars. The two things you must provide are a model and its provider's API key:
+The CLI auto-resolves most values from the CI environment (GitLab CI variables or the GitHub Actions context) and provider-standard env vars. The two things you must provide are a model and its provider's API key:
 
 ```bash
 code-review --model anthropic/claude-sonnet-4-5 --api-key "$ANTHROPIC_API_KEY"
 ```
 
-Equivalently, set `CODE_REVIEW_MODEL` and the provider's key (e.g. `ANTHROPIC_API_KEY`) as CI/CD variables. Common knobs include `--min-severity`, `--thinking`, `--posting-mode draft`, `--no-summary`, and `--dry-run`. See the full [environment-variable and flag reference](https://github.com/weareikko/code-review/blob/main/docs/configuration.md).
+Equivalently, set `CODE_REVIEW_MODEL` and the provider's key (e.g. `ANTHROPIC_API_KEY`) as CI/CD variables (GitLab) or repository/organization variables and secrets (GitHub). Common knobs include `--min-severity`, `--thinking`, `--posting-mode draft`, `--no-summary`, and `--dry-run`. See the full [environment-variable and flag reference](https://github.com/weareikko/code-review/blob/main/docs/configuration.md).
 
 ## Providers
 
@@ -182,7 +195,7 @@ Equivalently, set `CODE_REVIEW_MODEL` and the provider's key (e.g. `ANTHROPIC_AP
   - parsed comment payload
   - computed fingerprints
   - duplicate status
-  - final GitLab discussion payload
+  - final platform-specific posting payload (a GitLab discussion payload, or a GitHub review-comment payload)
 - `review-usage.json`: token and cost breakdown for the run (`tokens.{input,output,cacheRead,cacheWrite,total}`, `cost.{input,output,cacheRead,cacheWrite,total}`, `model`)
 
 The CLI also prints a one-line summary at the end of the run:
@@ -198,15 +211,17 @@ Use these files for CI debugging and auditing.
 - **`Node.js >=24 is required`**
   - Use `node:24` (or newer) in CI.
 - **`Missing required configuration`**
-  - Provide required flags or ensure CI vars are available (`CI_PROJECT_ID`, `CI_MERGE_REQUEST_IID`, token, API key).
+  - Provide required flags or ensure the platform's identifiers/token are available: on GitLab `CI_PROJECT_ID`, `CI_MERGE_REQUEST_IID`, and a GitLab token; on GitHub `GITHUB_REPOSITORY`, the PR number, and `GITHUB_TOKEN`. A model and its API key are required on both.
+- **`Could not detect the review platform` / `Ambiguous review platform`**
+  - Set `--platform github|gitlab` (or `CODE_REVIEW_PLATFORM`) to force the platform.
 - **`--min-severity must be one of: info, warn, critical`**
   - Fix `--min-severity` or `CODE_REVIEW_MIN_SEVERITY`.
 - **Git history errors / merge-base failures**
-  - Set `GIT_DEPTH: 0`.
+  - Fetch full history: `GIT_DEPTH: 0` on GitLab, `fetch-depth: 0` on `actions/checkout` (the composite action does this by default).
   - Ensure source and target branches are fetchable from `origin`.
-- **GitLab API 401/403 when posting**
-  - Ensure token has rights to read MR metadata/discussions and create MR discussions.
-  - If using `CI_JOB_TOKEN`, ensure your GitLab project settings allow required API access.
+- **API 401/403 when posting**
+  - GitLab: ensure the token can read MR metadata/discussions and create MR discussions; with `CI_JOB_TOKEN`, check that project settings allow the required API access.
+  - GitHub: ensure the token has `pull-requests: write` (the default `GITHUB_TOKEN` with that permission is enough).
 - **No comments posted**
   - Check `review-comments.json` for `duplicate: true` or empty parsed comments.
   - Run with `--dry-run` and inspect `code-review.md` formatting (`== Inline Comments ==`).
