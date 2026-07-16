@@ -88,9 +88,10 @@ Options:
                           context aids reasoning but inflates tokens and fits fewer files in
                           the budget; less fits more. 0 = built-in default (20).
                           (env: CODE_REVIEW_DIFF_CONTEXT)
-  --retrieve-skipped      Stage diffs for files dropped by the size budget on disk so the
-                          reviewer can read them on demand instead of losing them.
-                          (env: CODE_REVIEW_RETRIEVE_SKIPPED=true)
+  --no-retrieve-skipped   Disable staging diffs for files dropped by the size budget on disk.
+                          Retrieval is on by default: dropped diffs are staged so the reviewer
+                          can read them on demand instead of losing them.
+                          (env: CODE_REVIEW_RETRIEVE_SKIPPED=0)
   --min-severity <level>  info, warn, or critical (default: info)
   --thinking <level>      off, minimal, low, medium, high, or xhigh (default: off).
                           Higher levels add billable thinking tokens at the model output rate.

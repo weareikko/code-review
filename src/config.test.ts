@@ -169,12 +169,22 @@ describe('config env defaults', () => {
     expect(resolveConfig([], { ...baseEnv, CODE_REVIEW_DIFF_CONTEXT: '12' }).diffContext).toBe(12);
   });
 
-  it('resolves retrieveSkipped from the flag and env, default false', () => {
-    expect(resolveConfig([], { ...baseEnv }).retrieveSkipped).toBe(false);
+  it('resolves retrieveSkipped from the flag and env, default true', () => {
+    expect(resolveConfig([], { ...baseEnv }).retrieveSkipped).toBe(true);
     expect(resolveConfig(['--retrieve-skipped'], { ...baseEnv }).retrieveSkipped).toBe(true);
     expect(
       resolveConfig([], { ...baseEnv, CODE_REVIEW_RETRIEVE_SKIPPED: '1' }).retrieveSkipped,
     ).toBe(true);
+  });
+
+  it('disables retrieveSkipped via --no-retrieve-skipped or a falsy env value', () => {
+    expect(resolveConfig(['--no-retrieve-skipped'], { ...baseEnv }).retrieveSkipped).toBe(false);
+    expect(
+      resolveConfig([], { ...baseEnv, CODE_REVIEW_RETRIEVE_SKIPPED: '0' }).retrieveSkipped,
+    ).toBe(false);
+    expect(
+      resolveConfig([], { ...baseEnv, CODE_REVIEW_RETRIEVE_SKIPPED: 'false' }).retrieveSkipped,
+    ).toBe(false);
   });
 });
 

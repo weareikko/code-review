@@ -58,6 +58,11 @@ export interface SizeNotice {
   decomposeHint?: { lines: number; threshold: number };
   /** Diff coverage when files were dropped: reviewed vs total changed lines. */
   coverage?: { reviewedLines: number; totalLines: number };
+  /**
+   * True when the dropped diffs were staged on disk for on-demand retrieval, so
+   * the callout frames them as staged-and-readable rather than lost outright.
+   */
+  retrieved?: boolean;
 }
 
 export interface SummaryBodyOptions {
@@ -94,10 +99,18 @@ export function buildSizeNoticeBlock(notice?: SizeNotice): string {
       .map((file) => `- \`${file.path}\` (${formatChars(file.chars)})`)
       .join('\n');
     const cov = notice.coverage;
-    const coverageLine =
-      cov && cov.totalLines > 0
-        ? `> **Partial review — ~${Math.round((cov.reviewedLines / cov.totalLines) * 100)}% of changed lines reviewed** (${cov.reviewedLines} of ${cov.totalLines}). The files below were NOT reviewed; their absence from the findings is not a clean bill of health.`
+    const retrieved = notice.retrieved === true;
+    let coverageLine: string;
+    if (cov && cov.totalLines > 0) {
+      const pct = Math.round((cov.reviewedLines / cov.totalLines) * 100);
+      coverageLine = retrieved
+        ? `> **Large diff — ~${pct}% of changed lines fit the inline budget** (${cov.reviewedLines} of ${cov.totalLines}). The files below exceeded it and were staged for on-demand retrieval; see the review summary for which were read. Absence from the findings is not a clean bill of health.`
+        : `> **Partial review — ~${pct}% of changed lines reviewed** (${cov.reviewedLines} of ${cov.totalLines}). The files below were NOT reviewed; their absence from the findings is not a clean bill of health.`;
+    } else {
+      coverageLine = retrieved
+        ? `> **${sizeSkippedFiles.length} file(s) exceeded the size budget** — their diffs were staged for on-demand retrieval; see the review summary for which were read:`
         : `> **${sizeSkippedFiles.length} file(s) were not reviewed** — the diff exceeded the size budget, so these files were dropped from the review:`;
+    }
     blocks.push(
       [
         `> [!WARNING]`,

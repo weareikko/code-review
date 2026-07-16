@@ -58,6 +58,12 @@ export interface ReviewSizeNotice {
    * a confident full review.
    */
   coverage?: { reviewedLines: number; totalLines: number };
+  /**
+   * True when the size-dropped diffs were staged on disk for on-demand retrieval
+   * (retrieval mode). The summary callout then frames them as staged-and-readable
+   * rather than lost, and defers the read/not-read account to the reviewer.
+   */
+  retrieved?: boolean;
 }
 
 /** Token and cost usage attributed to a single pool member. */
@@ -743,13 +749,13 @@ export function buildUserPrompt(
         .map((file) => `- ${file}`)
         .join(
           '\n',
-        )}\n</skipped_files>\nThe above files were not included because the diff exceeded the size limit. Mention them explicitly in your summary as not reviewed.`,
+        )}\n</skipped_files>\nThe above files were not included because the diff exceeded the size limit. They are already surfaced to the reader in the MR summary, so do not re-list them; just do not assume they are clean, since you did not see them.`,
     );
   }
   if (coverage && coverage.totalLines > 0 && coverage.reviewedLines < coverage.totalLines) {
     const pct = Math.round((coverage.reviewedLines / coverage.totalLines) * 100);
     parts.push(
-      `<coverage>You reviewed ${coverage.reviewedLines} of ${coverage.totalLines} changed lines (~${pct}%). The rest were dropped for the size budget and you did NOT see them. State this partial coverage in your summary and do not imply the unreviewed files are clean — their absence from your findings is not a clearance.</coverage>`,
+      `<coverage>You reviewed ${coverage.reviewedLines} of ${coverage.totalLines} changed lines (~${pct}%). The rest were dropped for the size budget and you did NOT see them. The MR summary already reports this partial coverage to the reader, so do not restate it; just do not imply the unreviewed files are clean — their absence from your findings is not a clearance.</coverage>`,
     );
   }
   if (priorThreads && priorThreads.length > 0) {
@@ -1073,10 +1079,8 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
           totalLines: reviewedChangedLines + skippedChangedLines,
         }
       : undefined;
-  const sizeNotice: ReviewSizeNotice = { sizeSkippedFiles, decomposeHint, coverage };
-
-  // Retrieval mode (opt-in): stage dropped-file diffs on disk so the agent can
-  // read the ones it deems risky instead of losing them to the char budget.
+  // Retrieval mode (default on): stage dropped-file diffs on disk so the agent
+  // can read the ones it deems risky instead of losing them to the char budget.
   const retrievableSkipped =
     config.retrieveSkipped && sizeSkippedSections.length > 0
       ? await writeSkippedDiffs(cwd, sizeSkippedSections)
@@ -1084,6 +1088,13 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   if (retrievableSkipped.length > 0) {
     logger.info(`Staged ${retrievableSkipped.length} dropped-file diff(s) on disk for retrieval.`);
   }
+
+  const sizeNotice: ReviewSizeNotice = {
+    sizeSkippedFiles,
+    decomposeHint,
+    coverage,
+    retrieved: retrievableSkipped.length > 0,
+  };
 
   const context = await loadReviewContext(cwd, config.skills, (msg) => logger.warn(msg), {
     refreshGitSkills: config.refreshGitSkills,
