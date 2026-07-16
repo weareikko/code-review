@@ -1140,6 +1140,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     logger,
     aggregated,
     verifyMember: resolveVerifyMember(config, primary, logger),
+    attachTelemetry: options.attachTelemetry,
   };
 
   let outputText: string;
@@ -1340,6 +1341,14 @@ interface StageDeps {
    * pool-based selection.
    */
   verifyMember?: PoolMember | null;
+  /**
+   * Optional telemetry attach hook, applied to EVERY agent the stages spawn
+   * (multi-angle finders and per-finding verifiers), not just the single/verify
+   * Find agent. Returns a detach callback run when that agent finishes. Without
+   * this, read-coverage/trajectory measurement silently misses every agent above
+   * `single` depth.
+   */
+  attachTelemetry?: (agent: AgentLike) => (() => void) | undefined;
 }
 
 /**
@@ -1381,6 +1390,7 @@ async function runMultiAngleFind(
       thinkingLevel: deps.thinkingLevel,
       getApiKey: member.getApiKey,
     });
+    const detachTelemetry = deps.attachTelemetry?.(agent);
     try {
       const text = await runAgentToCompletion(agent, userPrompt, {
         timeoutMs: deps.timeoutMs,
@@ -1396,6 +1406,8 @@ async function runMultiAngleFind(
       summaries[index] = parsed.summary;
     } catch (error) {
       deps.logger.warn(`Find angle "${angle.key}" failed: ${(error as Error).message}; skipping.`);
+    } finally {
+      detachTelemetry?.();
     }
   });
 
@@ -1448,6 +1460,7 @@ async function verifyAndSynthesize(
         thinkingLevel: deps.thinkingLevel,
         getApiKey: verifierMember.getApiKey,
       });
+      const detachTelemetry = deps.attachTelemetry?.(verifier);
       try {
         const text = await runAgentToCompletion(verifier, buildVerifyUserPrompt(comment), {
           timeoutMs: deps.timeoutMs,
@@ -1460,6 +1473,8 @@ async function verifyAndSynthesize(
           `Verify failed for ${comment.file}:${comment.line}: ${(error as Error).message}; keeping finding.`,
         );
         verdicts.set(index, { decision: 'keep', reason: 'verifier error; finding kept' });
+      } finally {
+        detachTelemetry?.();
       }
     });
     await runBounded(tasks, VERIFY_CONCURRENCY);
