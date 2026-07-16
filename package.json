@@ -69,7 +69,10 @@
     "@opentelemetry/resources": "^2.7.1",
     "@opentelemetry/sdk-node": "^0.218.0",
     "@opentelemetry/semantic-conventions": "^1.41.1",
+    "diff": "^8.0.4",
+    "isomorphic-git": "^1.38.7",
     "jsonrepair": "^3.14.0",
+    "typebox": "^1.1.38",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
