@@ -266,6 +266,38 @@ describe('runReview pipeline', () => {
     }
   });
 
+  it('filterDiff exposes every non-noise section in allSections regardless of the budget', () => {
+    const bigBody = '+x\n'.repeat(50);
+    const raw = [
+      'diff --git a/package-lock.json b/package-lock.json',
+      '--- a/package-lock.json',
+      '+++ b/package-lock.json',
+      '@@ -1 +1 @@',
+      '+new',
+      'diff --git a/src/big-a.ts b/src/big-a.ts',
+      '--- a/src/big-a.ts',
+      '+++ b/src/big-a.ts',
+      '@@ -1 +1 @@',
+      bigBody,
+      'diff --git a/src/big-b.ts b/src/big-b.ts',
+      '--- a/src/big-b.ts',
+      '+++ b/src/big-b.ts',
+      '@@ -1 +1 @@',
+      bigBody,
+      '',
+    ].join('\n');
+
+    const result = filterDiff(raw, 200); // budget drops one source file
+
+    // allSections carries both source files (the budget is irrelevant to it) but
+    // excludes the noise lockfile.
+    expect(result.allSections.map((s) => s.path).sort()).toEqual(['src/big-a.ts', 'src/big-b.ts']);
+    for (const section of result.allSections) {
+      expect(section.section).toContain(`b/${section.path}`);
+      expect(section.changedLines).toBeGreaterThan(0);
+    }
+  });
+
   it('filterDiff preserves diff order and reports full coverage when under budget', () => {
     const raw = [
       'diff --git a/src/a.ts b/src/a.ts',
@@ -1419,6 +1451,28 @@ describe('buildUserPrompt', () => {
     // Retrieval block replaces the plain "not reviewed" list, not appends to it.
     expect(prompt).not.toContain('The above files were not included because the diff exceeded');
     expect(prompt.indexOf('<diff>')).toBeLessThan(prompt.indexOf('<skipped_files>'));
+  });
+
+  it('with omitInlineDiff (disk mode): omits the <diff> block and uses the full staged-files wording', () => {
+    const prompt = buildUserPrompt(
+      diff,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      [
+        { path: 'src/a.ts', diskPath: '.code-review-skipped/src__a.ts.diff' },
+        { path: 'src/b.ts', diskPath: '.code-review-skipped/src__b.ts.diff' },
+      ],
+      true,
+    );
+
+    expect(prompt).not.toContain('<diff>');
+    expect(prompt).toContain('<skipped_files>');
+    expect(prompt).toContain('- src/a.ts → .code-review-skipped/src__a.ts.diff');
+    expect(prompt).toContain('NO diff inline');
+    expect(prompt).toContain('a file you do not open is a file you did not review');
   });
 });
 

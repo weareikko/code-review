@@ -53,6 +53,16 @@ describe('verify prompt layout (cache alignment)', () => {
     expect(user).not.toContain('<diff>');
     expect(user).not.toContain(diff);
   });
+
+  it('disk mode: omits the inline diff and points verifiers at the staged files', () => {
+    const system = buildVerifySystemPrompt('', 'feat: do the thing', [
+      { path: 'src/a.ts', diskPath: '.code-review-skipped/src__a.ts.diff' },
+    ]);
+    expect(system).not.toContain('<diff>');
+    expect(system).toContain('<staged_files>');
+    expect(system).toContain('- src/a.ts → .code-review-skipped/src__a.ts.diff');
+    expect(system).toContain('staged on disk');
+  });
 });
 
 describe('parseVerdict', () => {

@@ -44,10 +44,21 @@ export async function cleanupSkippedDiffs(cwd: string): Promise<void> {
 }
 
 /**
- * Render the `<skipped_files>` block for the retrieval mode: each dropped file
- * with its on-disk diff path and an instruction to read the highest-risk ones.
+ * Render the `<skipped_files>` block: each file with its on-disk diff path and an
+ * instruction to read them.
+ *
+ * - `partial` (retrieval mode): only budget-dropped files are staged; the rest
+ *   of the diff is inline, so the agent reads the highest-risk staged files.
+ * - `full` (disk input mode): the ENTIRE change is staged — nothing is inline —
+ *   so reading is not optional; the review is only as good as what gets opened.
  */
-export function renderRetrievableSkippedBlock(files: SkippedDiffFile[]): string {
+export function renderRetrievableSkippedBlock(
+  files: SkippedDiffFile[],
+  mode: 'partial' | 'full' = 'partial',
+): string {
   const list = files.map((f) => `- ${f.path} → ${f.diskPath}`).join('\n');
+  if (mode === 'full') {
+    return `<skipped_files>\n${list}\n</skipped_files>\nThis review has NO diff inline — every changed file's diff is staged on disk at the path shown, and the list above is the complete change. Use your file-read tool to open and review them; a file you do not open is a file you did not review. Prioritise source files over config/tests/generated, but aim to cover the whole change. In your summary, state explicitly which files you reviewed and which you did not open.`;
+  }
   return `<skipped_files>\n${list}\n</skipped_files>\nThese files exceeded the inline size budget, so their diffs are NOT in the prompt above — but each is staged on disk at the path shown. Use your file-read tool to open the diffs most likely to contain defects (start with source files over config/tests) and review them as if they were inline. You may not have budget to read them all; say in your summary which you reviewed and which you did not.`;
 }

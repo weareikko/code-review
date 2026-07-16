@@ -354,6 +354,12 @@ export interface FilteredDiff {
    * demand instead of losing them entirely (opt-in retrieval).
    */
   sizeSkippedSections: Array<{ path: string; section: string }>;
+  /**
+   * Every non-noise file section (path + raw diff), regardless of the char
+   * budget. Disk input mode stages all of these so the reviewer reads them on
+   * demand instead of receiving any diff inline.
+   */
+  allSections: Array<{ path: string; section: string; changedLines: number }>;
 }
 
 function parseFilePath(header: string): string | null {
@@ -470,6 +476,17 @@ export function filterDiff(raw: string, maxChars = DEFAULT_MAX_DIFF_CHARS): Filt
     reviewedChangedLines += changedLines;
   }
 
+  const allSections = kept
+    .map((section) => {
+      const filePath = parseFilePath(section.split('\n', 1)[0] ?? '');
+      return filePath
+        ? { path: filePath, section, changedLines: countChangedLines(section) }
+        : null;
+    })
+    .filter(
+      (entry): entry is { path: string; section: string; changedLines: number } => entry !== null,
+    );
+
   return {
     diff: included.join(''),
     noiseSkippedFiles,
@@ -477,6 +494,7 @@ export function filterDiff(raw: string, maxChars = DEFAULT_MAX_DIFF_CHARS): Filt
     reviewedChangedLines,
     skippedChangedLines,
     sizeSkippedSections,
+    allSections,
   };
 }
 
@@ -728,6 +746,7 @@ export function buildUserPrompt(
   intent?: ReviewIntent,
   coverage?: { reviewedLines: number; totalLines: number },
   retrievableSkipped?: SkippedDiffFile[],
+  omitInlineDiff = false,
 ): string {
   const parts: string[] = [];
   const intentBlock = renderIntentBlock(intent);
@@ -739,10 +758,17 @@ export function buildUserPrompt(
   if (commitLog?.trim()) {
     parts.push(`Commits in this MR (oldest first):\n<commits>\n${commitLog.trim()}\n</commits>`);
   }
-  parts.push(`Review this diff:\n<diff>\n${diff}\n</diff>`);
+  // Disk input mode (omitInlineDiff): the whole change is staged on disk, so no
+  // <diff> block is emitted and the staged-files block carries the full change.
+  if (!omitInlineDiff) {
+    parts.push(`Review this diff:\n<diff>\n${diff}\n</diff>`);
+  }
   if (retrievableSkipped && retrievableSkipped.length > 0) {
-    // Retrieval mode: size-dropped diffs are staged on disk for the agent to read.
-    parts.push(renderRetrievableSkippedBlock(retrievableSkipped));
+    // Retrieval mode (partial): size-dropped diffs are staged alongside an inline
+    // diff. Disk mode (full): the staged files ARE the whole change.
+    parts.push(
+      renderRetrievableSkippedBlock(retrievableSkipped, omitInlineDiff ? 'full' : 'partial'),
+    );
   } else if (skippedFiles.length > 0) {
     parts.push(
       `<skipped_files>\n${skippedFiles
@@ -1047,6 +1073,9 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   const minSeverity = toGitLabReviewSeverity(config.minSeverity);
   const logger = options.logger ?? noopLogger;
 
+  const inputMode = config.inputMode ?? 'inline';
+  const diskMode = inputMode === 'disk';
+
   const maxDiffChars = config.maxDiffChars > 0 ? config.maxDiffChars : DEFAULT_MAX_DIFF_CHARS;
   const {
     diff,
@@ -1055,59 +1084,95 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     reviewedChangedLines,
     skippedChangedLines,
     sizeSkippedSections,
+    allSections,
   } = filterDiff(options.diff, maxDiffChars);
-  if (!diff.trim()) {
+  // Inline mode needs a non-empty inlined diff; disk mode stages the change
+  // instead, so it requires staged sections rather than inline text.
+  const hasContent = diskMode ? allSections.length > 0 : diff.trim().length > 0;
+  if (!hasContent) {
     throw new ReviewerError('No reviewable diff content after filtering noise files.', {
       hint: 'Ensure the merge request introduces changes outside of generated/lock files.',
     });
   }
 
-  // The agent still needs to know which files went unreviewed (size + noise), so
-  // it can mention them; the prominent split/decompose callout is surfaced
-  // separately in the MR summary via `sizeNotice`.
-  const skippedFiles = [...sizeSkippedFiles.map((f) => f.path), ...noiseSkippedFiles];
-
   const decomposeHint =
     config.decomposeHintLines > 0 && reviewedChangedLines > config.decomposeHintLines
       ? { lines: reviewedChangedLines, threshold: config.decomposeHintLines }
       : undefined;
-  // Coverage is only meaningful when the budget actually dropped files.
-  const coverage =
-    sizeSkippedFiles.length > 0
-      ? {
-          reviewedLines: reviewedChangedLines,
-          totalLines: reviewedChangedLines + skippedChangedLines,
-        }
-      : undefined;
-  // Retrieval mode (default on): stage dropped-file diffs on disk so the agent
-  // can read the ones it deems risky instead of losing them to the char budget.
-  const retrievableSkipped =
-    config.retrieveSkipped && sizeSkippedSections.length > 0
-      ? await writeSkippedDiffs(cwd, sizeSkippedSections)
-      : ([] as SkippedDiffFile[]);
-  if (retrievableSkipped.length > 0) {
-    logger.info(`Staged ${retrievableSkipped.length} dropped-file diff(s) on disk for retrieval.`);
-  }
 
-  const sizeNotice: ReviewSizeNotice = {
-    sizeSkippedFiles,
-    decomposeHint,
-    coverage,
-    retrieved: retrievableSkipped.length > 0,
-  };
+  // Resolve how the change reaches the reviewer, and stage diffs on disk.
+  let promptDiff: string;
+  let promptSkippedFiles: string[];
+  let promptCoverage: { reviewedLines: number; totalLines: number } | undefined;
+  let retrievableSkipped: SkippedDiffFile[];
+  let sizeNotice: ReviewSizeNotice;
+
+  if (diskMode) {
+    // Stage the ENTIRE change on disk; nothing is inlined. The same manifest
+    // drives the Verify stage so verifiers read from disk too.
+    retrievableSkipped =
+      allSections.length > 0
+        ? await writeSkippedDiffs(
+            cwd,
+            allSections.map(({ path, section }) => ({ path, section })),
+          )
+        : [];
+    if (retrievableSkipped.length > 0) {
+      logger.info(
+        `Disk input mode: staged ${retrievableSkipped.length} file diff(s) for on-demand review.`,
+      );
+    }
+    promptDiff = '';
+    promptSkippedFiles = [];
+    promptCoverage = undefined;
+    // Staging is the mode here, not a budget truncation, so no partial-coverage
+    // callout — that would falsely read as "we couldn't review this".
+    sizeNotice = { sizeSkippedFiles: [], decomposeHint, retrieved: false };
+  } else {
+    // The agent still needs to know which files went unreviewed (size + noise);
+    // the split/decompose callout is surfaced separately via `sizeNotice`.
+    promptSkippedFiles = [...sizeSkippedFiles.map((f) => f.path), ...noiseSkippedFiles];
+    // Coverage is only meaningful when the budget actually dropped files.
+    promptCoverage =
+      sizeSkippedFiles.length > 0
+        ? {
+            reviewedLines: reviewedChangedLines,
+            totalLines: reviewedChangedLines + skippedChangedLines,
+          }
+        : undefined;
+    // Retrieval mode (default on): stage dropped-file diffs on disk so the agent
+    // can read the ones it deems risky instead of losing them to the char budget.
+    retrievableSkipped =
+      config.retrieveSkipped && sizeSkippedSections.length > 0
+        ? await writeSkippedDiffs(cwd, sizeSkippedSections)
+        : ([] as SkippedDiffFile[]);
+    if (retrievableSkipped.length > 0) {
+      logger.info(
+        `Staged ${retrievableSkipped.length} dropped-file diff(s) on disk for retrieval.`,
+      );
+    }
+    promptDiff = diff;
+    sizeNotice = {
+      sizeSkippedFiles,
+      decomposeHint,
+      coverage: promptCoverage,
+      retrieved: retrievableSkipped.length > 0,
+    };
+  }
 
   const context = await loadReviewContext(cwd, config.skills, (msg) => logger.warn(msg), {
     refreshGitSkills: config.refreshGitSkills,
   });
   const systemPrompt = buildJSONSystemPrompt(context, minSeverity);
   const userPrompt = buildUserPrompt(
-    diff,
-    skippedFiles,
+    promptDiff,
+    promptSkippedFiles,
     options.commitLog,
     options.priorThreads,
     options.intent,
-    coverage,
+    promptCoverage,
     retrievableSkipped,
+    diskMode,
   );
 
   const skillNames = context.skills.map((s) => s.name);
@@ -1141,6 +1206,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     aggregated,
     verifyMember: resolveVerifyMember(config, primary, logger),
     attachTelemetry: options.attachTelemetry,
+    verifyStaged: diskMode ? retrievableSkipped : undefined,
   };
 
   let outputText: string;
@@ -1349,6 +1415,14 @@ interface StageDeps {
    * `single` depth.
    */
   attachTelemetry?: (agent: AgentLike) => (() => void) | undefined;
+  /**
+   * Disk input mode: the staged manifest for the whole change. When set, the
+   * Verify stage omits the inline diff from its system prompt and points
+   * verifiers at the staged files instead, so "nothing inline" holds at every
+   * depth (otherwise verifiers would still receive the diff and the mode's cost
+   * profile wouldn't transfer past `single`).
+   */
+  verifyStaged?: SkippedDiffFile[];
 }
 
 /**
@@ -1446,7 +1520,8 @@ async function verifyAndSynthesize(
 
   const verdicts = new Map<number, Verdict>();
   if (severe.length > 0) {
-    const verifySystemPrompt = buildVerifySystemPrompt(diff, commitLog);
+    // Disk input mode: verifiers read the staged files instead of an inline diff.
+    const verifySystemPrompt = buildVerifySystemPrompt(diff, commitLog, deps.verifyStaged);
     const tasks = severe.map(({ finding, index }) => async () => {
       const comment = finding.comment;
       // Explicit --verify-model wins; otherwise a cross-family verifier: a pool

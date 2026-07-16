@@ -16,6 +16,19 @@ export type ReviewDepth = 'single' | 'verify' | 'full';
 
 export const REVIEW_DEPTHS: readonly ReviewDepth[] = ['single', 'verify', 'full'];
 
+/**
+ * How the change is presented to the reviewer agent (experimental; drives the
+ * input-mode comparison eval).
+ *
+ * - `inline`: the diff is embedded in the prompt (default; size-dropped files are
+ *   still staged on disk and referenced).
+ * - `disk`: nothing is inlined — every non-noise file diff is staged on disk and
+ *   the prompt carries only the file list; the agent reads what it deems risky.
+ */
+export type ReviewInputMode = 'inline' | 'disk';
+
+export const REVIEW_INPUT_MODES: readonly ReviewInputMode[] = ['inline', 'disk'];
+
 export const THINKING_LEVELS: readonly ThinkingLevel[] = [
   'off',
   'minimal',
