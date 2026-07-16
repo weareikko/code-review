@@ -122,7 +122,12 @@ Inputs: `model` (required), `api-key`, `github-token` (default `${{ github.token
 
 Because the composite action references your secrets directly (`${{ secrets.ANTHROPIC_API_KEY }}`), it works from **any** repository, including consumers in a different organization from this one.
 
-> **Pinning the ref.** `@0.8` is a **moving minor tag**, re-pointed to each new patch, so you receive `0.8.x` fixes automatically. Because a `0.x` minor bump marks a breaking change, the minor series is the compatibility boundary — there is intentionally no moving `@0` tag. For a frozen build, pin an exact patch (`@0.8.3`) or a commit SHA; to track the tip, use `@main`. GitHub `uses:` refs do not support wildcards, so `@0.8.x` is not valid — use the moving `@0.8` tag instead.
+> **Pinning the ref.** Two moving tags are maintained, each re-pointed to the latest release it covers:
+>
+> - `@0.8` — **minor series**: newest `0.8.x`, patches only. Because a `0.x` minor bump marks a breaking change, this is the non-breaking channel and the recommended pin while the project is pre-1.0.
+> - `@0` — **major series**: newest stable release. **Caveat:** in 0.x a minor bump _is_ a breaking change, so `@0` may advance across breaking releases (`0.8 → 0.9`); it becomes a true semver compatibility boundary only once `1.0` ships.
+>
+> For a frozen build, pin an exact patch (`@0.8.3`) or a commit SHA (immutable; strongest supply-chain posture); to track the tip, use `@main`. GitHub `uses:` refs do not support wildcards, so `@0.8.x` is not valid — use a moving tag instead.
 
 ### Reusable workflow (same org/enterprise)
 
