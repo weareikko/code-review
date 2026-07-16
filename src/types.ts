@@ -24,10 +24,13 @@ export const REVIEW_DEPTHS: readonly ReviewDepth[] = ['single', 'verify', 'full'
  *   still staged on disk and referenced).
  * - `disk`: nothing is inlined — every non-noise file diff is staged on disk and
  *   the prompt carries only the file list; the agent reads what it deems risky.
+ * - `commits`: nothing is inlined — the prompt points the agent at read-only git
+ *   tools (`git_log`/`git_show`/`git_diff`) to explore the change commit by
+ *   commit, optionally scoped to the commits since the last reviewed one.
  */
-export type ReviewInputMode = 'inline' | 'disk';
+export type ReviewInputMode = 'inline' | 'disk' | 'commits';
 
-export const REVIEW_INPUT_MODES: readonly ReviewInputMode[] = ['inline', 'disk'];
+export const REVIEW_INPUT_MODES: readonly ReviewInputMode[] = ['inline', 'disk', 'commits'];
 
 export const THINKING_LEVELS: readonly ThinkingLevel[] = [
   'off',

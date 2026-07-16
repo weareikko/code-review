@@ -10,6 +10,7 @@ import { createReadOnlyTools } from '@earendil-works/pi-coding-agent';
 import type { Config } from './config.js';
 import { resolveProviderApiKey } from './config.js';
 import { isQuotaExceededMessage, ReviewerError } from './errors.js';
+import { createGitTools } from './git-tool.js';
 import type { Logger } from './logger.js';
 import { noopLogger } from './logger.js';
 import { parseReviewMarkdownWithWarnings } from './parser.js';
@@ -146,6 +147,12 @@ export interface RunReviewOptions {
    * The returned function, if any, is called after the review completes.
    */
   attachTelemetry?: (agent: AgentLike) => (() => void) | undefined;
+  /**
+   * `commits` input mode only: the last-reviewed commit (a ref/sha). When set,
+   * the commit-exploration prompt tells the agent to review only the commits
+   * after it (incremental review); when absent, the whole history is in scope.
+   */
+  sinceRef?: string;
 }
 
 const DEFAULT_REVIEW_TIMEOUT_MS = 10 * 60 * 1000;
@@ -747,6 +754,7 @@ export function buildUserPrompt(
   coverage?: { reviewedLines: number; totalLines: number },
   retrievableSkipped?: SkippedDiffFile[],
   omitInlineDiff = false,
+  commitExploration?: { sinceRef?: string },
 ): string {
   const parts: string[] = [];
   const intentBlock = renderIntentBlock(intent);
@@ -758,9 +766,25 @@ export function buildUserPrompt(
   if (commitLog?.trim()) {
     parts.push(`Commits in this MR (oldest first):\n<commits>\n${commitLog.trim()}\n</commits>`);
   }
+  // Commit-exploration mode (Mode C): no diff is inlined; the agent walks the
+  // change with the read-only git tools.
+  if (commitExploration) {
+    const since = commitExploration.sinceRef;
+    parts.push(
+      [
+        'This review has NO diff inline. Explore the change with the read-only git tools:',
+        since
+          ? `- \`git_log\` with since="${since}" lists the commits you have NOT reviewed yet (everything after ${since}). Review exactly those commits.`
+          : '- `git_log` lists the commits in this change. Review all of them.',
+        "- `git_show <sha>` shows a commit's message and full diff. Open every commit in scope.",
+        '- `git_diff <from> <to>` shows the combined diff between two points if you prefer to review the range at once.',
+        'A commit you do not open is code you did not review. In your summary, state which commits you reviewed.',
+      ].join('\n'),
+    );
+  }
   // Disk input mode (omitInlineDiff): the whole change is staged on disk, so no
   // <diff> block is emitted and the staged-files block carries the full change.
-  if (!omitInlineDiff) {
+  if (!omitInlineDiff && !commitExploration) {
     parts.push(`Review this diff:\n<diff>\n${diff}\n</diff>`);
   }
   if (retrievableSkipped && retrievableSkipped.length > 0) {
@@ -1075,6 +1099,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
 
   const inputMode = config.inputMode ?? 'inline';
   const diskMode = inputMode === 'disk';
+  const commitsMode = inputMode === 'commits';
 
   const maxDiffChars = config.maxDiffChars > 0 ? config.maxDiffChars : DEFAULT_MAX_DIFF_CHARS;
   const {
@@ -1086,9 +1111,9 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     sizeSkippedSections,
     allSections,
   } = filterDiff(options.diff, maxDiffChars);
-  // Inline mode needs a non-empty inlined diff; disk mode stages the change
-  // instead, so it requires staged sections rather than inline text.
-  const hasContent = diskMode ? allSections.length > 0 : diff.trim().length > 0;
+  // Inline mode needs a non-empty inlined diff; disk/commits modes present the
+  // change out-of-band, so they require non-noise sections rather than inline text.
+  const hasContent = diskMode || commitsMode ? allSections.length > 0 : diff.trim().length > 0;
   if (!hasContent) {
     throw new ReviewerError('No reviewable diff content after filtering noise files.', {
       hint: 'Ensure the merge request introduces changes outside of generated/lock files.',
@@ -1107,7 +1132,20 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   let retrievableSkipped: SkippedDiffFile[];
   let sizeNotice: ReviewSizeNotice;
 
-  if (diskMode) {
+  if (commitsMode) {
+    // Commit-exploration mode: nothing inlined or staged — the agent walks the
+    // change with the git tools (wired into `tools` below).
+    retrievableSkipped = [];
+    promptDiff = '';
+    promptSkippedFiles = [];
+    promptCoverage = undefined;
+    sizeNotice = { sizeSkippedFiles: [], decomposeHint, retrieved: false };
+    logger.info(
+      options.sinceRef
+        ? `Commit-exploration input mode: reviewing commits since ${options.sinceRef}.`
+        : 'Commit-exploration input mode: reviewing the full commit range.',
+    );
+  } else if (diskMode) {
     // Stage the ENTIRE change on disk; nothing is inlined. The same manifest
     // drives the Verify stage so verifiers read from disk too.
     retrievableSkipped =
@@ -1173,6 +1211,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     promptCoverage,
     retrievableSkipped,
     diskMode,
+    commitsMode ? { sinceRef: options.sinceRef } : undefined,
   );
 
   const skillNames = context.skills.map((s) => s.name);
@@ -1191,7 +1230,11 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     logger.info(`Model pool: ${pool.map((m) => m.id).join(', ')}.`);
   }
   const primary = pool[0];
-  const tools = createReadOnlyTools(cwd) as AgentTool[];
+  // Commit-exploration mode adds the read-only git tools so the agent can walk
+  // the change; other modes keep the plain read-only file tools.
+  const tools = (
+    commitsMode ? [...createReadOnlyTools(cwd), ...createGitTools(cwd)] : createReadOnlyTools(cwd)
+  ) as AgentTool[];
 
   const createAgent = options.createAgent ?? defaultCreateAgent;
   const timeoutMs = options.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS;

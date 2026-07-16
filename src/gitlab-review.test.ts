@@ -1474,6 +1474,42 @@ describe('buildUserPrompt', () => {
     expect(prompt).toContain('NO diff inline');
     expect(prompt).toContain('a file you do not open is a file you did not review');
   });
+
+  it('with commitExploration: omits the diff and instructs git-tool exploration scoped to sinceRef', () => {
+    const prompt = buildUserPrompt(
+      diff,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      { sinceRef: 'abc1234' },
+    );
+
+    expect(prompt).not.toContain('<diff>');
+    expect(prompt).toContain('git_log');
+    expect(prompt).toContain('git_show');
+    expect(prompt).toContain('since="abc1234"');
+    expect(prompt).toContain('state which commits you reviewed');
+  });
+
+  it('with commitExploration and no sinceRef: reviews the full commit range', () => {
+    const prompt = buildUserPrompt(
+      diff,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      {},
+    );
+    expect(prompt).not.toContain('<diff>');
+    expect(prompt).toContain('`git_log` lists the commits in this change. Review all of them.');
+  });
 });
 
 describe('loadReviewContext', () => {
