@@ -188,10 +188,15 @@ function reviewCommentPosition(comment: PullRequestReviewComment): DiscussionNot
  * The fingerprint markers, summary marker, and reviewed-commit footer are HTML
  * comments that render identically on GitHub, so `extractExistingFingerprints`,
  * `findExistingSummaryNote`, and the reviewed-commit scan all work as-is.
+ *
+ * `resolvedCommentIds` carries the database ids of comments in resolved review
+ * threads (from the GraphQL `reviewThreads` query, since REST omits resolution),
+ * so each note gets a `resolved` flag mirroring GitLab's per-note field.
  */
 export function normalizeGitHubDiscussions(
   reviewComments: PullRequestReviewComment[],
   issueComments: IssueComment[],
+  resolvedCommentIds: Set<number> = new Set(),
 ): Discussion[] {
   const threads = new Map<number, DiscussionNote[]>();
   const order: number[] = [];
@@ -207,6 +212,11 @@ export function normalizeGitHubDiscussions(
     notes.push({
       id: comment.id,
       body: comment.body ?? '',
+      // GitHub's REST comments carry no resolution state; it comes from the
+      // GraphQL `reviewThreads` query, keyed by comment database id. A resolved
+      // thread marks all its comments, so any note being resolved flags the
+      // whole thread for the shared `notes.some((n) => n.resolved)` checks.
+      resolved: resolvedCommentIds.has(comment.id),
       position: reviewCommentPosition(comment),
     });
   }
@@ -294,11 +304,12 @@ export class GitHubPlatform implements ReviewPlatform {
   }
 
   async getDiscussions(): Promise<Discussion[]> {
-    const [reviewComments, issueComments] = await Promise.all([
+    const [reviewComments, issueComments, resolvedCommentIds] = await Promise.all([
       this.client.listReviewComments(this.owner, this.repo, this.pull),
       this.client.listIssueComments(this.owner, this.repo, this.pull),
+      this.client.listResolvedReviewCommentIds(this.owner, this.repo, this.pull),
     ]);
-    return normalizeGitHubDiscussions(reviewComments, issueComments);
+    return normalizeGitHubDiscussions(reviewComments, issueComments, resolvedCommentIds);
   }
 
   buildComments(

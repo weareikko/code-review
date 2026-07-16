@@ -121,6 +121,36 @@ export interface Review {
   id: number;
 }
 
+/** Minimal shape of the `reviewThreads` GraphQL query response we consume. */
+interface ReviewThreadsResponse {
+  repository?: {
+    pullRequest?: {
+      reviewThreads?: {
+        pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+        nodes?: {
+          isResolved?: boolean;
+          comments?: { nodes?: { databaseId?: number | null }[] };
+        }[];
+      };
+    };
+  } | null;
+}
+
+const REVIEW_THREADS_QUERY = `
+  query ($owner: String!, $repo: String!, $pull: Int!, $cursor: String) {
+    repository(owner: $owner, name: $repo) {
+      pullRequest(number: $pull) {
+        reviewThreads(first: 100, after: $cursor) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            isResolved
+            comments(first: 100) { nodes { databaseId } }
+          }
+        }
+      }
+    }
+  }`;
+
 export class GitHubClient {
   private readonly base: string;
   private readonly token: string;
@@ -331,5 +361,82 @@ export class GitHubClient {
 
   getCurrentUser(): Promise<GitHubUser> {
     return this.request('/user');
+  }
+
+  /**
+   * Derive the GraphQL endpoint from the REST base. github.com exposes GraphQL
+   * at `<origin>/graphql`, while GitHub Enterprise Server exposes it at
+   * `<origin>/api/graphql` (its REST base is `<origin>/api/v3`).
+   */
+  private graphqlEndpoint(): string {
+    const suffix = '/api/v3';
+    if (this.base.endsWith(suffix)) return `${this.base.slice(0, -suffix.length)}/api/graphql`;
+    return `${this.base}/graphql`;
+  }
+
+  private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+    const url = this.graphqlEndpoint();
+    const response = await this.fetchWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers: this.headers({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ query, variables }),
+      },
+      'POST',
+      '/graphql',
+    );
+    if (!response.ok) this.failure('POST', '/graphql', response, await response.text());
+    const text = await response.text();
+    const parsed = JSON.parse(text) as { data?: T; errors?: { message?: string }[] };
+    if (parsed.errors && parsed.errors.length > 0) {
+      throw new GitHubApiError(
+        `GitHub API POST /graphql failed: ${parsed.errors.map((e) => e.message ?? '').join('; ')}`,
+        {
+          method: 'POST',
+          path: '/graphql',
+          responseBody: text,
+          hint: 'Ensure the token can read pull-request review threads (pull-requests: read / repo scope).',
+        },
+      );
+    }
+    return parsed.data as T;
+  }
+
+  /**
+   * Return the database IDs of review comments that belong to a **resolved**
+   * review thread. GitHub's REST comment endpoints omit thread-resolution state;
+   * it is only exposed via GraphQL `reviewThreads.isResolved`. Callers use this
+   * set to mark normalized notes resolved so resolved threads are excluded from
+   * summary carry-over and prior-thread context. Paginates over threads.
+   */
+  async listResolvedReviewCommentIds(
+    owner: string,
+    repo: string,
+    pull: number,
+  ): Promise<Set<number>> {
+    const resolved = new Set<number>();
+    let cursor: string | null = null;
+    let hasNext = true;
+    while (hasNext) {
+      const data: ReviewThreadsResponse = await this.graphql(REVIEW_THREADS_QUERY, {
+        owner,
+        repo,
+        pull,
+        cursor,
+      });
+      const threads = data.repository?.pullRequest?.reviewThreads;
+      if (!threads) break;
+      for (const thread of threads.nodes ?? []) {
+        if (!thread.isResolved) continue;
+        for (const comment of thread.comments?.nodes ?? []) {
+          if (typeof comment.databaseId === 'number') resolved.add(comment.databaseId);
+        }
+      }
+      hasNext = threads.pageInfo?.hasNextPage ?? false;
+      cursor = threads.pageInfo?.endCursor ?? null;
+      if (!cursor) hasNext = false;
+    }
+    return resolved;
   }
 }

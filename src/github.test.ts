@@ -185,6 +185,101 @@ describe('GitHub write endpoints', () => {
   });
 });
 
+function graphqlThreadsResponse(
+  nodes: { isResolved: boolean; ids: number[] }[],
+  pageInfo: { hasNextPage: boolean; endCursor: string | null } = {
+    hasNextPage: false,
+    endCursor: null,
+  },
+): Response {
+  return new Response(
+    JSON.stringify({
+      data: {
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              pageInfo,
+              nodes: nodes.map((n) => ({
+                isResolved: n.isResolved,
+                comments: { nodes: n.ids.map((id) => ({ databaseId: id })) },
+              })),
+            },
+          },
+        },
+      },
+    }),
+  );
+}
+
+describe('GitHub resolved review-thread ids (GraphQL)', () => {
+  it('returns only the comment ids of resolved threads', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      graphqlThreadsResponse([
+        { isResolved: true, ids: [1, 2] },
+        { isResolved: false, ids: [3] },
+      ]),
+    );
+    const client = new GitHubClient({ token: 't', fetchImpl });
+
+    const resolved = await client.listResolvedReviewCommentIds('o', 'r', 7);
+
+    expect([...resolved].toSorted((a, b) => a - b)).toEqual([1, 2]);
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://api.github.com/graphql');
+    const init = fetchImpl.mock.calls[0][1];
+    expect(init.method).toBe('POST');
+    const body = JSON.parse(init.body as string);
+    expect(body.variables).toEqual({ owner: 'o', repo: 'r', pull: 7, cursor: null });
+    expect(body.query).toContain('reviewThreads');
+  });
+
+  it('targets the /api/graphql endpoint on GitHub Enterprise Server', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(graphqlThreadsResponse([]));
+    const client = new GitHubClient({
+      apiUrl: 'https://ghe.example.com/api/v3',
+      token: 't',
+      fetchImpl,
+    });
+
+    await client.listResolvedReviewCommentIds('o', 'r', 7);
+
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://ghe.example.com/api/graphql');
+  });
+
+  it('paginates across review-thread pages', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        graphqlThreadsResponse([{ isResolved: true, ids: [1] }], {
+          hasNextPage: true,
+          endCursor: 'CUR',
+        }),
+      )
+      .mockResolvedValueOnce(graphqlThreadsResponse([{ isResolved: true, ids: [2] }]));
+    const client = new GitHubClient({ token: 't', fetchImpl });
+
+    const resolved = await client.listResolvedReviewCommentIds('o', 'r', 7);
+
+    expect([...resolved].toSorted((a, b) => a - b)).toEqual([1, 2]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(fetchImpl.mock.calls[1][1].body as string).variables.cursor).toBe('CUR');
+  });
+
+  it('throws a typed GitHubApiError when GraphQL returns errors', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ errors: [{ message: 'Bad credentials' }] })),
+      );
+    const client = new GitHubClient({ token: 't', fetchImpl });
+
+    await expect(client.listResolvedReviewCommentIds('o', 'r', 7)).rejects.toMatchObject({
+      name: 'GitHubApiError',
+      method: 'POST',
+      path: '/graphql',
+    });
+  });
+});
+
 describe('GitHub client error handling', () => {
   it('throws a typed GitHubApiError with status and body on failure', async () => {
     const fetchImpl = vi

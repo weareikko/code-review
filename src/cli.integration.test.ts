@@ -99,6 +99,9 @@ function makeGitHubBackend() {
   const reviewComments: GitHubReviewComment[] = [];
   const issueComments: GitHubComment[] = [];
   const reviewsPosted: Array<{ commit_id: string; comments?: GitHubReviewComment[] }> = [];
+  // Ids of review comments whose thread is resolved. REST omits resolution, so
+  // tests seed this to model GitHub's GraphQL `reviewThreads.isResolved`.
+  const resolvedCommentIds = new Set<number>();
   let nextId = 1000;
   const jsonResponse = (value: unknown): Response =>
     new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
@@ -107,6 +110,26 @@ function makeGitHubBackend() {
     const method = init.method ?? 'GET';
     const path = new URL(url).pathname;
     const bodyJson = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
+
+    // Thread resolution lives only in GraphQL; each inline comment is its own
+    // single-comment thread, resolved when its id is in `resolvedCommentIds`.
+    if (method === 'POST' && path.endsWith('/graphql')) {
+      return jsonResponse({
+        data: {
+          repository: {
+            pullRequest: {
+              reviewThreads: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: reviewComments.map((c) => ({
+                  isResolved: resolvedCommentIds.has(c.id),
+                  comments: { nodes: [{ databaseId: c.id }] },
+                })),
+              },
+            },
+          },
+        },
+      });
+    }
 
     if (method === 'GET' && path.endsWith('/pulls/1')) {
       return jsonResponse({
@@ -145,7 +168,7 @@ function makeGitHubBackend() {
     return new Response('not found', { status: 404 });
   });
 
-  return { fetchImpl, reviewComments, issueComments, reviewsPosted };
+  return { fetchImpl, reviewComments, issueComments, reviewsPosted, resolvedCommentIds };
 }
 
 function makeConfig(cwd: string, overrides: Partial<Config> = {}): Config {
@@ -340,5 +363,47 @@ describe('run() over GitHub with an unresolved prior finding', () => {
     expect(backend.issueComments).toHaveLength(1);
     expect(backend.issueComments[0].body).toContain('Still open from earlier reviews');
     expect(backend.issueComments[0].body).toContain('src/foo.ts:3');
+  });
+
+  it('does not carry a resolved prior finding into the summary note', async () => {
+    const backend = makeGitHubBackend();
+
+    // Same seed as above, but the thread is resolved on GitHub. Resolution lives
+    // only in GraphQL, so REST alone can't see it — the fix reads `isResolved`
+    // and must therefore drop this finding from the "Still open" block.
+    const [prior] = buildGitHubComments(
+      [
+        {
+          file: 'src/foo.ts',
+          line: 3,
+          side: 'RIGHT',
+          severity: 'warn',
+          confidence: 'high',
+          body: 'issue: an earlier concern that was addressed',
+        },
+      ],
+      fixtures.defaultDiff,
+      REFS,
+      new Set(),
+    );
+    const priorBody = (prior.payload as GitHubReviewCommentPayload).body;
+    backend.reviewComments.push({
+      id: 500,
+      path: 'src/foo.ts',
+      line: 3,
+      side: 'RIGHT',
+      body: priorBody,
+    });
+    backend.resolvedCommentIds.add(500);
+
+    vi.stubGlobal('fetch', backend.fetchImpl);
+
+    const result = await run(makeConfig(cwd, { forceReview: true }));
+
+    expect(result.summary?.action).toBe('created');
+    expect(backend.issueComments).toHaveLength(1);
+    // The resolved finding is gone — no stale "Still open" reference to it.
+    expect(backend.issueComments[0].body).not.toContain('Still open from earlier reviews');
+    expect(backend.issueComments[0].body).not.toContain('addressed');
   });
 });
