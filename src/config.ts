@@ -185,7 +185,8 @@ export interface Config {
   /**
    * When true, diffs for files dropped by the char budget are staged on disk so
    * the reviewer can read them on demand instead of losing them (retrieval mode).
-   * Default false. Sourced from `--retrieve-skipped` / `CODE_REVIEW_RETRIEVE_SKIPPED`.
+   * Default true. Disable with `--no-retrieve-skipped` /
+   * `CODE_REVIEW_RETRIEVE_SKIPPED=0`.
    */
   retrieveSkipped: boolean;
   reviewFile: string;
@@ -209,6 +210,7 @@ const BOOLEAN_FLAGS = new Set([
   'no-summary',
   'force-review',
   'retrieve-skipped',
+  'no-retrieve-skipped',
   'verbose',
   'help',
   'version',
@@ -273,6 +275,18 @@ function toBoolean(value: unknown): boolean {
 function resolvePostSummary(args: ParsedArgs, env: NodeJS.ProcessEnv): boolean {
   if (args.noSummary === true) return false;
   const raw = env.CODE_REVIEW_POST_SUMMARY;
+  if (typeof raw === 'string') {
+    const normalized = raw.trim().toLowerCase();
+    if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+    if (normalized.length > 0) return true;
+  }
+  return true;
+}
+
+function resolveRetrieveSkipped(args: ParsedArgs, env: NodeJS.ProcessEnv): boolean {
+  if (args.noRetrieveSkipped === true) return false;
+  if (args.retrieveSkipped === true) return true;
+  const raw = env.CODE_REVIEW_RETRIEVE_SKIPPED;
   if (typeof raw === 'string') {
     const normalized = raw.trim().toLowerCase();
     if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
@@ -572,7 +586,7 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     maxDiffChars,
     decomposeHintLines,
     diffContext,
-    retrieveSkipped: toBoolean(args.retrieveSkipped) || toBoolean(env.CODE_REVIEW_RETRIEVE_SKIPPED),
+    retrieveSkipped: resolveRetrieveSkipped(args, env),
     reviewFile: String(args.reviewFile ?? 'code-review.md'),
     output: String(args.output ?? 'review-comments.json'),
     dryRun: toBoolean(args.dryRun),

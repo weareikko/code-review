@@ -82,6 +82,21 @@ describe('summary note upsert', () => {
     expect(body).toContain('src/huge.ts');
   });
 
+  it('frames the size-skip callout around retrieval when diffs were staged on disk', () => {
+    const body = buildSummaryBody('Looks good.', undefined, {
+      sizeNotice: {
+        sizeSkippedFiles: [{ path: 'src/huge.ts', chars: 120_000, changedLines: 400 }],
+        coverage: { reviewedLines: 20, totalLines: 420 },
+        retrieved: true,
+      },
+    });
+    expect(body).toContain('staged for on-demand retrieval');
+    expect(body).toContain('see the review summary for which were read');
+    expect(body).toContain('src/huge.ts');
+    // The misleading "were NOT reviewed" framing is gone under retrieval.
+    expect(body).not.toContain('The files below were NOT reviewed');
+  });
+
   it('renders an MR-level decompose hint when over threshold even with no skips', () => {
     const body = buildSummaryBody('Looks good.', undefined, {
       sizeNotice: { sizeSkippedFiles: [], decomposeHint: { lines: 2400, threshold: 1500 } },
