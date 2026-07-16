@@ -85,15 +85,20 @@ jobs:
           draft: false
           prerelease: ${{ env.IS_PRERELEASE }}
 
-      - name: Update moving minor tag
-        # Re-point the MAJOR.MINOR tag (e.g. 0.8) at this release so consumers can
-        # pin `@0.8` and pick up patch releases automatically. In 0.x a minor bump
-        # signals a breaking change, so the minor series — not a major `0` tag — is
-        # the compatibility boundary; we deliberately maintain no moving `@0` tag.
-        # Skipped for prereleases. The tag has a single dot, so it does not match the
-        # `*.*.*` publish trigger and cannot cause a re-run loop.
+      - name: Update moving version tags
+        # Re-point the MAJOR (e.g. 0) and MAJOR.MINOR (e.g. 0.8) tags at this release
+        # so consumers can pin `@0` or `@0.8` and pick up newer releases automatically,
+        # à la actions/checkout. Semantics differ while pre-1.0: a 0.x minor bump marks
+        # a breaking change, so `@0` tracks the latest stable release INCLUDING breaking
+        # changes, whereas `@0.8` is the non-breaking patch channel (see the README pin
+        # note). At 1.0, `@1` becomes a proper semver compatibility boundary.
+        # Skipped for prereleases. Both tags have fewer than two dots, so they never
+        # match the `*.*.*` publish trigger and cannot cause a re-run loop.
         if: env.IS_PRERELEASE == 'false'
         run: |
+          MAJOR_TAG=${VERSION%%.*}
           MINOR_TAG=${VERSION%.*}
-          git tag -f "$MINOR_TAG"
-          git push origin "refs/tags/$MINOR_TAG" --force
+          for TAG in "$MAJOR_TAG" "$MINOR_TAG"; do
+            git tag -f "$TAG"
+            git push origin "refs/tags/$TAG" --force
+          done

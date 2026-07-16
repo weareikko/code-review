@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- A moving `MAJOR.MINOR` tag (e.g. `0.8`), re-pointed to each patch release, so action consumers can pin `@0.8` and receive `0.8.x` fixes automatically. No moving `@0` tag: in 0.x a minor bump marks a breaking change, so the minor series is the compatibility boundary ([#127]).
+- Moving `MAJOR` and `MAJOR.MINOR` tags (e.g. `0` and `0.8`), re-pointed to each stable release, so action consumers can pin `@0` (latest stable) or `@0.8` (non-breaking patches) instead of a full version. While in 0.x, `@0` may cross breaking changes since a minor bump signals one; it becomes a true compatibility boundary at 1.0 ([#127], [#128]).
 
 ## [0.8.3] - 2026-07-16
 
@@ -51,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING**: renamed the product-scoped environment-variable prefix `GITLAB_REVIEW_* → CODE_REVIEW_*` (e.g. `GITLAB_REVIEW_MODEL → CODE_REVIEW_MODEL`, and the namespacing shim that de-prefixes provider/infra vars in shared CI) with no backward compatibility — the old names are no longer read, so existing CI configs must rename their variables. Unprefixed GitLab tokens (`GITLAB_TOKEN`, `CI_JOB_TOKEN`, …) are unchanged ([#121]).
 
 [Unreleased]: https://github.com/weareikko/code-review/compare/0.8.3...HEAD
+[#128]: https://github.com/weareikko/code-review/pull/128
 [#127]: https://github.com/weareikko/code-review/pull/127
 [0.8.3]: https://github.com/weareikko/code-review/compare/0.8.2...0.8.3
 [#125]: https://github.com/weareikko/code-review/pull/125
