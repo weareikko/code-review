@@ -19,28 +19,40 @@ import { generateSyntheticReview, type BugKind, type SyntheticSpec } from './syn
 const RUN = process.env.INPUT_MODE_RUN === '1';
 const TRIALS = Number(process.env.INPUT_MODE_TRIALS ?? 2);
 
+// Large fixtures (~269k chars, 2.7x the 100k budget) with planted bugs in small
+// files that rank last and get dropped first — forcing inline to rely on
+// retrieval to catch them. This is the crossover regime the sub-budget pilot and
+// the too-clean real PRs could not test.
 const FIXTURES: { name: string; spec: SyntheticSpec }[] = [
   {
-    name: 'auth-service',
+    name: 'auth-large',
     spec: {
-      fillerFiles: 8,
-      fillerLinesPerFile: 300,
-      bugs: ['sql-injection', 'missing-authz', 'unhandled-null'] as BugKind[],
-      commits: 4,
+      fillerFiles: 18,
+      fillerLinesPerFile: 500,
+      bugs: [
+        'sql-injection',
+        'missing-authz',
+        'unhandled-null',
+        'off-by-one',
+        'hardcoded-secret',
+        'shared-mutable-race',
+      ] as BugKind[],
+      commits: 5,
     },
   },
   {
-    name: 'pipeline',
+    name: 'pipeline-large',
     spec: {
-      fillerFiles: 10,
-      fillerLinesPerFile: 350,
+      fillerFiles: 20,
+      fillerLinesPerFile: 450,
       bugs: [
         'missing-await-loop',
         'off-by-one',
         'shared-mutable-race',
-        'hardcoded-secret',
+        'sql-injection',
+        'missing-authz',
       ] as BugKind[],
-      commits: 5,
+      commits: 6,
     },
   },
 ];
