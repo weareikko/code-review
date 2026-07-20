@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--input-mode` / `CODE_REVIEW_INPUT_MODE` with a new default `auto`: the reviewer receives the diff inline while it fits the char budget and switches to on-disk staging once it overflows (the agent reads files on demand), which raised recall on large over-budget diffs in evals where inline's retrieval fallback went under-used. Explicit `inline`, `disk`, and `commits` modes are also selectable, and read-only git tools (`git_log`/`git_show`/`git_diff`) are available to the reviewer in every mode when run against a checkout ([#131]).
+
 ## [0.8.4] - 2026-07-16
 
 ### Changed
@@ -58,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [Unreleased]: https://github.com/weareikko/code-review/compare/0.8.4...HEAD
 [0.8.4]: https://github.com/weareikko/code-review/compare/0.8.3...0.8.4
+[#131]: https://github.com/weareikko/code-review/pull/131
 [#129]: https://github.com/weareikko/code-review/pull/129
 [#128]: https://github.com/weareikko/code-review/pull/128
 [#127]: https://github.com/weareikko/code-review/pull/127
