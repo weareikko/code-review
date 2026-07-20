@@ -283,6 +283,17 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
           // Subscribe the OTel bridge to the agent's event stream so per-turn
           // and per-tool-call spans/metrics fire in real time.
           attachTelemetry: bridges?.otel?.createAgentTelemetry(runId),
+          // `commits` mode: scope the review to commits after the last-reviewed
+          // one (from the prior summary footer) for an incremental pass. Only
+          // when it differs from head — equal-to-head would leave nothing to
+          // review (and that case is only reachable under --force-review, which
+          // wants a full re-review anyway).
+          sinceRef:
+            config.inputMode === 'commits' &&
+            reviewedCommitSha &&
+            reviewedCommitSha !== refs.head_sha
+              ? reviewedCommitSha
+              : undefined,
         });
         context.usage = result;
         return result;

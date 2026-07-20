@@ -1,10 +1,12 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 import { run } from './cli.js';
 import type { Config } from './config.js';
+import { runReview } from './gitlab-review.js';
 import { buildGitHubComments, type GitHubReviewCommentPayload } from './platforms/github.js';
+import { buildReviewedCommitFooter, SUMMARY_MARKER } from './posting.js';
 import type { DiffRefs } from './types.js';
 
 // Deterministic diff + reviewer output shared with the mocked git/reviewer
@@ -69,6 +71,10 @@ vi.mock('./gitlab-review.js', async (importOriginal) => {
     }),
   };
 });
+
+// The module-mocked reviewer, typed as a mock so tests can inspect its calls
+// (avoids `vi.mocked(...)` in the test body, which the lint config forbids).
+const runReviewMock = runReview as unknown as Mock;
 
 // A 40-hex commit SHA so the reviewed-commit footer regex (which requires 40 hex
 // chars) matches on the re-run and triggers the skip.
@@ -253,6 +259,36 @@ describe('run() over an in-memory GitHubPlatform', () => {
     expect(third.skipped).toBe(true);
     expect(third.posted).toBe(0);
     expect(backend.reviewsPosted).toHaveLength(1);
+  });
+});
+
+describe('run() with commits input mode', () => {
+  it('passes the prior reviewed commit as sinceRef for an incremental pass', async () => {
+    const backend = makeGitHubBackend();
+    vi.stubGlobal('fetch', backend.fetchImpl);
+
+    // A prior summary note whose reviewed-commit footer points at an older commit
+    // (≠ head), so the incremental commits-mode pass scopes the review to it.
+    const OLD_SHA = 'abcdef0123456789abcdef0123456789abcdef01';
+    backend.issueComments.push({
+      id: 500,
+      body: `${SUMMARY_MARKER}\n\n### Code Review\n\n<sub>${buildReviewedCommitFooter(OLD_SHA)}</sub>`,
+    });
+
+    await run(makeConfig(cwd, { inputMode: 'commits' }));
+
+    const lastCall = runReviewMock.mock.calls.at(-1);
+    expect(lastCall?.[1]).toMatchObject({ sinceRef: OLD_SHA });
+  });
+
+  it('leaves sinceRef undefined when there is no prior review (full range)', async () => {
+    const backend = makeGitHubBackend();
+    vi.stubGlobal('fetch', backend.fetchImpl);
+
+    await run(makeConfig(cwd, { inputMode: 'commits' }));
+
+    const lastCall = runReviewMock.mock.calls.at(-1);
+    expect(lastCall?.[1].sinceRef).toBeUndefined();
   });
 });
 
