@@ -15,7 +15,7 @@ const bug = (over: Partial<PlantedBug> & Pick<PlantedBug, 'file' | 'line'>): Pla
 const comment = (
   over: Partial<ReviewComment> & Pick<ReviewComment, 'file' | 'line'>,
 ): ReviewComment => ({
-  side: 'new',
+  side: 'RIGHT',
   severity: 'critical',
   confidence: 'high',
   body: 'issue (blocking): something',
