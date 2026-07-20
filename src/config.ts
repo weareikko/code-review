@@ -5,9 +5,11 @@ import { DEFAULT_GITHUB_API_URL } from './github.js';
 import { POSTING_MODES, type PostingMode } from './posting.js';
 import {
   REVIEW_DEPTHS,
+  REVIEW_INPUT_MODES,
   splitModel,
   THINKING_LEVELS,
   type ReviewDepth,
+  type ReviewInputMode,
   type Severity,
   type ThinkingLevel,
 } from './types.js';
@@ -151,6 +153,14 @@ export interface Config {
    * single-pass behaviour; `verify` adds an adversarial Verify + Synthesize pass.
    */
   reviewDepth: ReviewDepth;
+  /**
+   * How the change is presented to the reviewer: `auto` (inline while it fits the
+   * budget, disk on overflow), `inline`, `disk`, or `commits`. Sourced from
+   * `--input-mode` / `CODE_REVIEW_INPUT_MODE`; default `auto`. Optional on the
+   * type so existing `Config` fixtures need not set it — `resolveConfig` always
+   * populates it and read sites default to `auto`.
+   */
+  inputMode?: ReviewInputMode;
   /**
    * Optional `provider/modelId` for the Verify stage (`verify`/`full` depth). When
    * set, every adversarial verifier runs on this model instead of the pool's
@@ -576,6 +586,9 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     reviewDepth: normalizeChoice(
       args.reviewDepth ?? env.CODE_REVIEW_DEPTH ?? 'single',
     ) as ReviewDepth,
+    inputMode: normalizeChoice(
+      args.inputMode ?? env.CODE_REVIEW_INPUT_MODE ?? 'auto',
+    ) as ReviewInputMode,
     verifyModel: String(args.verifyModel ?? env.CODE_REVIEW_VERIFY_MODEL ?? ''),
     postingMode: normalizeChoice(
       args.postingMode ?? env.CODE_REVIEW_POSTING_MODE ?? 'direct',
@@ -681,6 +694,9 @@ export function validateConfig(config: Config): void {
 
   if (!REVIEW_DEPTHS.includes(config.reviewDepth)) {
     throw new ConfigError(`--review-depth must be one of: ${REVIEW_DEPTHS.join(', ')}`);
+  }
+  if (config.inputMode !== undefined && !REVIEW_INPUT_MODES.includes(config.inputMode)) {
+    throw new ConfigError(`--input-mode must be one of: ${REVIEW_INPUT_MODES.join(', ')}`);
   }
 
   if (!POSTING_MODES.includes(config.postingMode)) {

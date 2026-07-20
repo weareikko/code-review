@@ -1,0 +1,3022 @@
+diff --git a/package-lock.json b/package-lock.json
+index 0afd09a0..2557e4fa 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -6369,10 +6369,9 @@
+       }
+     },
+     "node_modules/alien-signals": {
+-      "version": "3.1.2",
+-      "resolved": "https://registry.npmjs.org/alien-signals/-/alien-signals-3.1.2.tgz",
+-      "integrity": "sha512-d9dYqZTS90WLiU0I5c6DHj/HcKkF8ZyGN3G5x8wSbslulz70KOxaqCT0hQCo9KOyhVqzqGojvNdJXoTumZOtcw==",
+-      "dev": true,
++      "version": "3.2.1",
++      "resolved": "https://registry.npmjs.org/alien-signals/-/alien-signals-3.2.1.tgz",
++      "integrity": "sha512-I8FjmltrfnDFoZedi5CG8DghVYNhzb/Ijluz7tCSJH0xpd0484Kowhbb1XDYOxfJpU1p5wnM2X54dA+IfGyD1g==",
+       "license": "MIT"
+     },
+     "node_modules/ansi-html-community": {
+@@ -21163,6 +21162,7 @@
+       "version": "1.9.0-beta.0",
+       "license": "MIT",
+       "dependencies": {
++        "alien-signals": "^3.2.1",
+         "deepmerge": "^4.3.1",
+         "morphdom": "^2.7.8"
+       },
+diff --git a/packages/docs/components/Action/js-api.md b/packages/docs/components/Action/js-api.md
+index fda961cd..e2331f4b 100644
+--- a/packages/docs/components/Action/js-api.md
++++ b/packages/docs/components/Action/js-api.md
+@@ -45,6 +45,8 @@ Modifiers can be chained with a `.` as separator:
+ 
+ Use this option to define the components that should be used as targets to the [effect callback](#effect). Multiple components can be defined by using a single space as delimiter.
+ 
++When an Action is inside a [`DataScope`](../DataScope/index.md), targets are limited to components in that same nearest scope. Actions outside a `DataScope` keep resolving targets globally.
++
+ ::: info Name definition
+ The `Action` component will use the `name` property defined in the static `config` object of each class to resolve components on the page.
+ 
+diff --git a/packages/docs/components/DataBind/index.md b/packages/docs/components/DataBind/index.md
+index 6618a4fd..e44b3a5a 100644
+--- a/packages/docs/components/DataBind/index.md
++++ b/packages/docs/components/DataBind/index.md
+@@ -41,6 +41,68 @@ registerComponent(DataBind);
+ 
+ :::
+ 
++### Multiple virtual bindings
++
++Use virtual `data-bind:*` attributes to update several parts of an element from the same value:
++
++| Syntax                   | Behavior                                                                                                                                 |
++| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
++| `data-bind:prop.<name>`  | Assigns the DOM property.                                                                                                                |
++| `data-bind:attr.<name>`  | Removes the attribute for `false`, `null`, or `undefined`; writes an empty attribute for `true`; otherwise writes the stringified value. |
++| `data-bind:class.<name>` | Toggles the class according to the result's boolean value.                                                                               |
++| `data-bind:style.<name>` | Clears the style for `false`, `null`, or `undefined`; otherwise writes the stringified value.                                            |
++| `data-bind:text`         | Assigns `textContent`.                                                                                                                   |
++
++A non-empty attribute value is a JavaScript expression with access to `value`, `target`, and `$data`. An empty attribute passes through the current value. When an element has one or more virtual bindings, they replace the default single `textContent` or property update. Bindings are read when first used; changing their attributes afterward is not supported.
++
++Use kebab-case for camel-cased DOM properties because HTML attribute names are case-insensitive, for example `data-bind:prop.tab-index` targets `tabIndex`.
++
++For ARIA attributes, explicitly stringify booleans when `"false"` must remain present, for example `data-bind:attr.aria-selected="String(value === 'overview')"`.
++
++The following Tabs-like controls keep their labels while updating state and panels from the `tab` group:
++
++```html
++<input
++  id="current-tab"
++  type="hidden"
++  value="overview"
++  data-component="DataBind"
++  data-option-group="tab"
++  data-option-immediate />
++
++<button
++  data-component="Action DataBind"
++  data-option-group="tab"
++  data-on:click="DataBind(#current-tab) -> target.value = 'overview'"
++  data-bind:class.is-active="value === 'overview'"
++  data-bind:attr.aria-selected="String(value === 'overview')">
++  Overview
++</button>
++<button
++  data-component="Action DataBind"
++  data-option-group="tab"
++  data-on:click="DataBind(#current-tab) -> target.value = 'details'"
++  data-bind:class.is-active="value === 'details'"
++  data-bind:attr.aria-selected="String(value === 'details')">
++  Details
++</button>
++
++<section
++  data-component="DataBind"
++  data-option-group="tab"
++  data-bind:attr.hidden="value !== 'overview'">
++  Overview panel
++</section>
++<section
++  data-component="DataBind"
++  data-option-group="tab"
++  data-bind:attr.hidden="value !== 'details'">
++  Details panel
++</section>
++```
++
++Expression errors are reported without interrupting updates to the other bindings, matching `DataComputed` and `DataEffect` behavior.
++
+ ### Advanced usage with computed and effects
+ 
+ The whole family of `Data...` components can be used to create reactivity in your HTML with only a few `data-...` attributes.
+diff --git a/packages/docs/components/DataBind/js-api.md b/packages/docs/components/DataBind/js-api.md
+index 0e802160..2437476d 100644
+--- a/packages/docs/components/DataBind/js-api.md
++++ b/packages/docs/components/DataBind/js-api.md
+@@ -28,14 +28,21 @@ If the option is explicitly set with the `data-option-prop` attribute, it will o
+ - Type: `boolean`
+ - Default: `false`
+ 
+-Use the `data-option-immediate` attribute on a `DataBind` component to propage its value on mount to other components in the same group.
++Use the `data-option-immediate` attribute on a `DataBind` component to propagate its value on mount to other components in the same group. Immediate keyed values inside a [`DataScope`](../DataScope/index.md) are collected before subscribers are notified.
+ 
+ ### `group`
+ 
+ - Type: `string`
+ - Default: `''`
+ 
+-The `group` option is used to group instances together. All related instances will be updated when the value changes.
++The `group` option is used to group instances together. All related instances will be updated when the value changes. Inside a [`DataScope`](../DataScope/index.md), an omitted group inherits the scope's group and remains isolated from other scopes.
++
++### `key`
++
++- Type: `string`
++- Default: the native form control `name`, when scoped
++
++A keyed value updates only bindings with the same key while notifying unkeyed subscribers. Keys are local to a `DataScope`; unscoped bindings preserve scalar group behavior.
+ 
+ When using it with multiple checkboxes or select multiple, use the `[]` suffix to push each selected value in an array. See the [checkboxes example](/components/DataBind/examples.md#checkboxes) for more details on how this works.
+ 
+@@ -61,15 +68,42 @@ Wether new values should be pushed to an array instead of a single value. This i
+ 
+ ## Methods
+ 
+-### `set(value: string | boolean | string[], dispatch = true)`
++### `set(value: DataValue, dispatch = true)`
+ 
+ Set the value for the current instance and dispatch it to others if the second parameter `dispatch` is set to `true` (default).
+ 
++`DataValue` accepts `boolean`, `string`, `string[]`, `number`, `Date`, `null`, or `undefined`.
++
+ **Params**
+ 
+-- `value` (`string | boolean | string[]`): the value to set
++- `value` (`DataValue`): the value to set
+ - `dispatch` (`boolean`, default to `true`): wether to dispatch the value to other related instances or not
+ 
++The mutation helpers below are available on `DataBind` and `DataModel`. They are not supported on computed values or effects.
++
++### `toggle(onValue = true, offValue = false)`
++
++Toggle between two values and dispatch the result to the group. Single checkboxes support the default boolean values; custom values require a target that can represent them without coercing them to `checked`. Radio inputs are not supported.
++
++Custom values can describe disclosure state without repeating comparison logic in an Action:
++
++```html
++<button
++  data-component="Action"
++  data-option-target="DataBind(.state)"
++  data-option-effect="target.toggle('open', 'closed')">
++  Toggle
++</button>
++```
++
++### `increment(step = 1)`
++
++Convert the current value to a number, increment it by `step`, and dispatch the result. A non-numeric current value starts at `0`. Pass a negative step to decrement. Date inputs are not supported.
++
++### `cycle(values)`
++
++Select and dispatch the value following the current value in the given array. The method wraps to the first value; an unknown current value also selects the first value. An empty array does nothing.
++
+ ### `get()`
+ 
+ Get the value for the current instance.
+diff --git a/packages/docs/components/DataComputed/js-api.md b/packages/docs/components/DataComputed/js-api.md
+index 00630a98..c0e93e7d 100644
+--- a/packages/docs/components/DataComputed/js-api.md
++++ b/packages/docs/components/DataComputed/js-api.md
+@@ -14,7 +14,7 @@ The `DataComputed` component extends the [`DataBind` component](../DataBind/js-a
+ - Type: `string`
+ - Default: `''`
+ 
+-Use this option to define a piece of JavaScript code to transform the value before it is updated on the target. The `value` and `target` variables can be used to access both the current value of the binding and the DOM element targeted by the changes.
++Use this option to define a piece of JavaScript code to transform the value before it is updated on the target. The `value` and `target` variables can be used to access both the current value of the binding and the DOM element targeted by the changes. Inside a `DataScope`, the third `$data` argument is a frozen snapshot of all keyed values in the resolved group.
+ 
+ **Example**
+ 
+diff --git a/packages/docs/components/DataEffect/js-api.md b/packages/docs/components/DataEffect/js-api.md
+index 36765726..2d911447 100644
+--- a/packages/docs/components/DataEffect/js-api.md
++++ b/packages/docs/components/DataEffect/js-api.md
+@@ -14,7 +14,7 @@ The `DataEffect` component extends the [`DataBind` component](../DataBind/js-api
+ - Type: `string`
+ - Default: `''`
+ 
+-Use this option to define a piece of JavaScript code to be executed when the value changes. The `value` and `target` variables can be used to access both the current value of the binding and the DOM element targeted by the changes.
++Use this option to define a piece of JavaScript code to be executed when the value changes. The `value` and `target` variables can be used to access both the current value of the binding and the DOM element targeted by the changes. Inside a `DataScope`, the third `$data` argument is a frozen snapshot of all keyed values in the resolved group.
+ 
+ **Example**
+ 
+diff --git a/packages/docs/components/DataScope/examples.md b/packages/docs/components/DataScope/examples.md
+new file mode 100644
+index 00000000..6696b0b8
+--- /dev/null
++++ b/packages/docs/components/DataScope/examples.md
+@@ -0,0 +1,92 @@
++---
++title: DataScope examples
++---
++
++# Examples
++
++## Isolated reusable widgets
++
++Sibling scopes remain independent even when they use the same group name. In the following example, each profile owns its `person` group and its own `$data` snapshot. Updating one profile does not update the other.
++
++<llm-exclude>
++<PreviewPlayground
++  :html="() => import('./stories/isolated.twig')"
++  :script="() => import('./stories/isolated.js?raw')"
++  />
++</llm-exclude>
++<llm-only>
++
++:::code-group
++
++<<< ./stories/isolated.twig
++<<< ./stories/isolated.js
++
++:::
++
++</llm-only>
++
++## Tabs
++
++The following example implements two independent tab interfaces with `DataScope`, [`Action`](../Action/index.md), and [`DataBind`](../DataBind/index.md). Each scope contains a hidden source of truth, while virtual bindings synchronize the selected state and panels. The `Tabs` component is not registered.
++
++<llm-exclude>
++<PreviewPlayground
++  :html="() => import('./stories/tabs.twig')"
++  :script="() => import('./stories/tabs.js?raw')"
++  />
++</llm-exclude>
++<llm-only>
++
++:::code-group
++
++<<< ./stories/tabs.twig
++<<< ./stories/tabs.js
++
++:::
++
++</llm-only>
++
++## Accordion
++
++This example uses the same pattern for two independent accordion interfaces. Each action toggles the scoped hidden value; opening one panel closes the other panels in that scope, and clicking the open item closes it. The `Accordion` component is not registered.
++
++<llm-exclude>
++<PreviewPlayground
++  :html="() => import('./stories/accordion.twig')"
++  :script="() => import('./stories/accordion.js?raw')"
++  />
++</llm-exclude>
++<llm-only>
++
++:::code-group
++
++<<< ./stories/accordion.twig
++<<< ./stories/accordion.js
++
++:::
++
++</llm-only>
++
++## Nested and explicit groups
++
++A Data component without `data-option-group` inherits the group of its nearest `DataScope`. An explicit group creates another group inside the same scope instead of escaping the scope.
++
++```html
++<div data-component="DataScope" data-option-group="profile">
++  <!-- Uses the local "profile" group. -->
++  <input name="name" data-component="DataModel" />
++
++  <!-- Uses a separate local "settings" group. -->
++  <input
++    name="theme"
++    value="dark"
++    data-component="DataModel"
++    data-option-group="settings"
++    data-option-immediate />
++
++  <div data-component="DataScope" data-option-group="address">
++    <!-- Uses the nested scope's local "address" group. -->
++    <input name="city" data-component="DataModel" />
++  </div>
++</div>
++```
+diff --git a/packages/docs/components/DataScope/index.md b/packages/docs/components/DataScope/index.md
+new file mode 100644
+index 00000000..b14093ac
+--- /dev/null
++++ b/packages/docs/components/DataScope/index.md
+@@ -0,0 +1,39 @@
++---
++badges: [JS]
++---
++
++# DataScope <Badges :texts="$frontmatter.badges" />
++
++Use the `DataScope` component to isolate [`DataBind`](../DataBind/index.md), [`DataModel`](../DataModel/index.md), [`DataComputed`](../DataComputed/index.md), and [`DataEffect`](../DataEffect/index.md) groups inside a reusable widget. [`Action`](../Action/index.md) targets inside the widget are isolated by the same scope.
++
++Descendant Data components inherit the scope's group unless they define their own `data-option-group`. Nested scopes use the nearest `DataScope` boundary.
++
++## Table of content
++
++- [Examples](./examples.md)
++- [JavaScript API](./js-api.md)
++
++## Usage
++
++Import the `DataScope` component with the Data components used by your application. Add `DataScope` to the root element of a widget, then omit `data-option-group` from descendants that should inherit its default group.
++
++<llm-exclude>
++<PreviewPlayground
++  :html="() => import('./stories/basic.twig')"
++  :script="() => import('./stories/basic.js?raw')"
++  />
++</llm-exclude>
++<llm-only>
++
++:::code-group
++
++<<< ./stories/basic.twig
++<<< ./stories/basic.js
++
++:::
++
++</llm-only>
++
++The native `name` of a form control becomes its key inside the scope. Use `data-option-key` to define a key explicitly. Unkeyed computed values and effects receive the complete frozen `$data` snapshot, allowing expressions to combine several keyed values.
++
++See the [JavaScript API](./js-api.md) for details about group inheritance, keys, and scoped data snapshots.
+diff --git a/packages/docs/components/DataScope/js-api.md b/packages/docs/components/DataScope/js-api.md
+new file mode 100644
+index 00000000..1aa7dfb8
+--- /dev/null
++++ b/packages/docs/components/DataScope/js-api.md
+@@ -0,0 +1,56 @@
++---
++title: DataScope JavaScript API
++outline: deep
++---
++
++# JS API
++
++The `DataScope` component defines a local boundary for Data groups and stores keyed values in frozen `$data` snapshots.
++
++## Options
++
++### `group`
++
++- Type: `string`
++- Default: `'default'`
++
++The `group` option defines the group inherited by descendant Data components that do not set their own `data-option-group`.
++
++Each group belongs to its nearest `DataScope`. Two scopes can therefore use the same group name without sharing values. An explicit group on a descendant creates another isolated group within the same scope.
++
++## Keys
++
++Inside a scope, a Data component resolves its key from:
++
++1. its `data-option-key` option;
++2. the native `name` of an `<input>`, `<select>`, or `<textarea>`.
++
++A keyed value updates bindings with the same key and notifies unkeyed [`DataComputed`](../DataComputed/index.md) and [`DataEffect`](../DataEffect/index.md) subscribers. Unscoped Data groups preserve their scalar behavior.
++
++Use `data-option-immediate` on keyed sources to collect their initial values when the components mount. All immediate values mounted in the same tick are collected before subscribers are notified.
++
++## Scoped data
++
++Data callbacks receive the group's `$data` snapshot as their third argument:
++
++```html
++<div data-component="DataScope" data-option-group="person">
++  <input name="first" value="Ada" data-component="DataModel" data-option-immediate />
++  <input name="last" value="Lovelace" data-component="DataModel" data-option-immediate />
++  <span data-component="DataComputed" data-option-compute="`${$data.first} ${$data.last}`">
++    Ada Lovelace
++  </span>
++</div>
++```
++
++The snapshot object and its array values are frozen. Array and `Date` values are cloned before they are exposed, so mutating the original value does not mutate an existing snapshot. A cloned `Date` can still be changed through its mutation methods, but later snapshots remain isolated from those changes.
++
++## Action targets
++
++An [`Action`](../Action/index.md) inside a `DataScope` resolves targets only among components in the same nearest scope. An Action outside a scope continues to resolve targets globally.
++
++## Lifecycle
++
++Scope membership is resolved when a Data component is initialized. Moving a mounted component between scopes or changing its group or key dynamically is not supported.
++
++When the last component providing a key is destroyed, that key is removed from the scope's `$data` snapshot.
+diff --git a/packages/docs/components/DataScope/stories/accordion.js b/packages/docs/components/DataScope/stories/accordion.js
+new file mode 100644
+index 00000000..09643069
+--- /dev/null
++++ b/packages/docs/components/DataScope/stories/accordion.js
+@@ -0,0 +1,6 @@
++import { registerComponent } from '@studiometa/js-toolkit';
++import { Action, DataBind, DataScope } from '@studiometa/ui';
++
++registerComponent(DataScope);
++registerComponent(DataBind);
++registerComponent(Action);
+diff --git a/packages/docs/components/DataScope/stories/accordion.twig b/packages/docs/components/DataScope/stories/accordion.twig
+new file mode 100644
+index 00000000..e6dfd457
+--- /dev/null
++++ b/packages/docs/components/DataScope/stories/accordion.twig
+@@ -0,0 +1,74 @@
++<div class="grid gap-8">
++  {% for i in 1..2 %}
++    <section data-component="DataScope" class="grid gap-2 rounded ring p-4">
++      <input
++        class="accordion-state"
++        type="hidden"
++        value="accordion-1"
++        data-component="DataBind"
++        data-option-immediate />
++      <div class="grid gap-2">
++        <button
++          id="accordion-{{ i }}-button-1"
++          type="button"
++          aria-controls="accordion-{{ i }}-panel-1"
++          aria-expanded="true"
++          data-component="Action DataBind"
++          data-bind:attr.aria-expanded="String(value === 'accordion-1')"
++          data-on:click="DataBind(.accordion-state)->target.toggle('accordion-1', '')">
++          First item
++        </button>
++        <div
++          id="accordion-{{ i }}-panel-1"
++          role="region"
++          aria-labelledby="accordion-{{ i }}-button-1"
++          data-component="DataBind"
++          data-bind:attr.hidden="value !== 'accordion-1'">
++          First accordion panel. Clicking again closes it.
++        </div>
++      </div>
++      <div class="grid gap-2">
++        <button
++          id="accordion-{{ i }}-button-2"
++          type="button"
++          aria-controls="accordion-{{ i }}-panel-2"
++          aria-expanded="false"
++          data-component="Action DataBind"
++          data-bind:attr.aria-expanded="String(value === 'accordion-2')"
++          data-on:click="DataBind(.accordion-state)->target.toggle('accordion-2', '')">
++          Second item
++        </button>
++        <div
++          id="accordion-{{ i }}-panel-2"
++          role="region"
++          aria-labelledby="accordion-{{ i }}-button-2"
++          hidden
++          data-component="DataBind"
++          data-bind:attr.hidden="value !== 'accordion-2'">
++          Second accordion panel. Opening it auto-closes the first one.
++        </div>
++      </div>
++      <div class="grid gap-2">
++        <button
++          id="accordion-{{ i }}-button-3"
++          type="button"
++          aria-controls="accordion-{{ i }}-panel-3"
++          aria-expanded="false"
++          data-component="Action DataBind"
++          data-bind:attr.aria-expanded="String(value === 'accordion-3')"
++          data-on:click="DataBind(.accordion-state)->target.toggle('accordion-3', '')">
++          Third item
++        </button>
++        <div
++          id="accordion-{{ i }}-panel-3"
++          role="region"
++          aria-labelledby="accordion-{{ i }}-button-3"
++          hidden
++          data-component="DataBind"
++          data-bind:attr.hidden="value !== 'accordion-3'">
++          Third accordion panel. No Accordion component is registered.
++        </div>
++      </div>
++    </section>
++  {% endfor %}
++</div>
+diff --git a/packages/docs/components/DataScope/stories/basic.js b/packages/docs/components/DataScope/stories/basic.js
+new file mode 100644
+index 00000000..d19c578c
+--- /dev/null
++++ b/packages/docs/components/DataScope/stories/basic.js
+@@ -0,0 +1,6 @@
++import { registerComponent } from '@studiometa/js-toolkit';
++import { DataComputed, DataModel, DataScope } from '@studiometa/ui';
++
++registerComponent(DataScope);
++registerComponent(DataModel);
++registerComponent(DataComputed);
+diff --git a/packages/docs/components/DataScope/stories/basic.twig b/packages/docs/components/DataScope/stories/basic.twig
+new file mode 100644
+index 00000000..8b2b67a2
+--- /dev/null
++++ b/packages/docs/components/DataScope/stories/basic.twig
+@@ -0,0 +1,29 @@
++<div
++  data-component="DataScope"
++  data-option-group="person"
++  class="flex flex-col gap-4 rounded ring p-4">
++  <label class="flex flex-col gap-1">
++    <span>First name</span>
++    <input
++      name="first"
++      value="Ada"
++      data-component="DataModel"
++      data-option-immediate
++      class="bg-transparent rounded ring p-2" />
++  </label>
++  <label class="flex flex-col gap-1">
++    <span>Last name</span>
++    <input
++      name="last"
++      value="Lovelace"
++      data-component="DataModel"
++      data-option-immediate
++      class="bg-transparent rounded ring p-2" />
++  </label>
++  <p
++    data-component="DataComputed"
++    data-option-compute="`${$data.first} ${$data.last}`"
++    class="text-xl font-bold">
++    Ada Lovelace
++  </p>
++</div>
+diff --git a/packages/docs/components/DataScope/stories/isolated.js b/packages/docs/components/DataScope/stories/isolated.js
+new file mode 100644
+index 00000000..d19c578c
+--- /dev/null
++++ b/packages/docs/components/DataScope/stories/isolated.js
+@@ -0,0 +1,6 @@
++import { registerComponent } from '@studiometa/js-toolkit';
++import { DataComputed, DataModel, DataScope } from '@studiometa/ui';
++
++registerComponent(DataScope);
++registerComponent(DataModel);
++registerComponent(DataComputed);
+diff --git a/packages/docs/components/DataScope/stories/isolated.twig b/packages/docs/components/DataScope/stories/isolated.twig
+new file mode 100644
+index 00000000..3293fdb7
+--- /dev/null
++++ b/packages/docs/components/DataScope/stories/isolated.twig
+@@ -0,0 +1,37 @@
++<div class="grid gap-6 md:grid-cols-2">
++  <div
++    data-component="DataScope"
++    data-option-group="person"
++    class="flex flex-col gap-4 rounded ring p-4">
++    <h2 class="text-xl font-bold">First profile</h2>
++    <input
++      name="first"
++      value="Ada"
++      data-component="DataModel"
++      data-option-immediate
++      class="bg-transparent rounded ring p-2" />
++    <output
++      data-component="DataComputed"
++      data-option-compute="`Hello ${$data.first}`">
++      Hello Ada
++    </output>
++  </div>
++
++  <div
++    data-component="DataScope"
++    data-option-group="person"
++    class="flex flex-col gap-4 rounded ring p-4">
++    <h2 class="text-xl font-bold">Second profile</h2>
++    <input
++      name="first"
++      value="Grace"
++      data-component="DataModel"
++      data-option-immediate
++      class="bg-transparent rounded ring p-2" />
++    <output
++      data-component="DataComputed"
++      data-option-compute="`Hello ${$data.first}`">
++      Hello Grace
++    </output>
++  </div>
++</div>
+diff --git a/packages/docs/components/DataScope/stories/tabs.js b/packages/docs/components/DataScope/stories/tabs.js
+new file mode 100644
+index 00000000..09643069
+--- /dev/null
++++ b/packages/docs/components/DataScope/stories/tabs.js
+@@ -0,0 +1,6 @@
++import { registerComponent } from '@studiometa/js-toolkit';
++import { Action, DataBind, DataScope } from '@studiometa/ui';
++
++registerComponent(DataScope);
++registerComponent(DataBind);
++registerComponent(Action);
+diff --git a/packages/docs/components/DataScope/stories/tabs.twig b/packages/docs/components/DataScope/stories/tabs.twig
+new file mode 100644
+index 00000000..ed588bb3
+--- /dev/null
++++ b/packages/docs/components/DataScope/stories/tabs.twig
+@@ -0,0 +1,76 @@
++<div class="grid gap-8">
++  {% for i in 1..2 %}
++    <section data-component="DataScope" class="grid gap-4 rounded ring p-4">
++      <input
++        class="tabs-state"
++        type="hidden"
++        value="tab-1"
++        data-component="DataBind"
++        data-option-immediate />
++      <div
++        class="flex gap-2 border-b"
++        role="tablist"
++        aria-label="Demo tabs {{ i }}">
++        <button
++          id="tabs-{{ i }}-tab-1"
++          type="button"
++          role="tab"
++          aria-controls="tabs-{{ i }}-panel-1"
++          aria-selected="true"
++          data-component="Action DataBind"
++          data-bind:attr.aria-selected="String(value === 'tab-1')"
++          data-on:click="DataBind(.tabs-state)->target.value = 'tab-1'">
++          First tab
++        </button>
++        <button
++          id="tabs-{{ i }}-tab-2"
++          type="button"
++          role="tab"
++          aria-controls="tabs-{{ i }}-panel-2"
++          aria-selected="false"
++          data-component="Action DataBind"
++          data-bind:attr.aria-selected="String(value === 'tab-2')"
++          data-on:click="DataBind(.tabs-state)->target.value = 'tab-2'">
++          Second tab
++        </button>
++        <button
++          id="tabs-{{ i }}-tab-3"
++          type="button"
++          role="tab"
++          aria-controls="tabs-{{ i }}-panel-3"
++          aria-selected="false"
++          data-component="Action DataBind"
++          data-bind:attr.aria-selected="String(value === 'tab-3')"
++          data-on:click="DataBind(.tabs-state)->target.value = 'tab-3'">
++          Third tab
++        </button>
++      </div>
++      <div
++        id="tabs-{{ i }}-panel-1"
++        role="tabpanel"
++        aria-labelledby="tabs-{{ i }}-tab-1"
++        data-component="DataBind"
++        data-bind:attr.hidden="value !== 'tab-1'">
++        First tab content. The hidden input is the single source of truth.
++      </div>
++      <div
++        id="tabs-{{ i }}-panel-2"
++        role="tabpanel"
++        aria-labelledby="tabs-{{ i }}-tab-2"
++        hidden
++        data-component="DataBind"
++        data-bind:attr.hidden="value !== 'tab-2'">
++        Second tab content. DataBind synchronizes this panel.
++      </div>
++      <div
++        id="tabs-{{ i }}-panel-3"
++        role="tabpanel"
++        aria-labelledby="tabs-{{ i }}-tab-3"
++        hidden
++        data-component="DataBind"
++        data-bind:attr.hidden="value !== 'tab-3'">
++        Third tab content. No Tabs component is registered.
++      </div>
++    </section>
++  {% endfor %}
++</div>
+diff --git a/packages/eslint-plugin-ui/src/utils/ast.ts b/packages/eslint-plugin-ui/src/utils/ast.ts
+index dcf83c1d..e4d23064 100644
+--- a/packages/eslint-plugin-ui/src/utils/ast.ts
++++ b/packages/eslint-plugin-ui/src/utils/ast.ts
+@@ -36,6 +36,7 @@ export const UI_COMPONENT_NAMES = new Set([
+   'DataComputed',
+   'DataEffect',
+   'DataModel',
++  'DataScope',
+   'Draggable',
+   'Figure',
+   'FigureVideo',
+diff --git a/packages/tests/Action/Action.spec.ts b/packages/tests/Action/Action.spec.ts
+index 8e73ba2c..6bc6fbc1 100644
+--- a/packages/tests/Action/Action.spec.ts
++++ b/packages/tests/Action/Action.spec.ts
+@@ -1,6 +1,6 @@
+ import { describe, it, vi, expect } from 'vitest';
+ import { Base } from '@studiometa/js-toolkit';
+-import { Action } from '@studiometa/ui';
++import { Action, DataScope } from '@studiometa/ui';
+ import { h, mount, destroy } from '#test-utils';
+ 
+ async function getContext({
+@@ -147,4 +147,47 @@ describe('The Action component', () => {
+     action.$el.dispatchEvent(new Event('click'));
+     expect(action.$el.id).toBe('foo');
+   });
++
++  it('should only target instances in the nearest DataScope', async () => {
++    const fn = vi.fn();
++    class Foo extends Base {
++      static config = { name: 'Foo' };
++
++      run() {
++        fn(this);
++      }
++    }
++
++    const scopeRoot = h('div');
++    const actionRoot = h('button', {
++      dataOptionTarget: 'Foo',
++      dataOptionEffect: 'target.run()',
++    });
++    const localRoot = h('div');
++    const nestedScopeRoot = h('div');
++    const nestedRoot = h('div');
++    nestedScopeRoot.append(nestedRoot);
++    scopeRoot.append(actionRoot, localRoot, nestedScopeRoot);
++
++    const siblingScopeRoot = h('div');
++    const siblingRoot = h('div');
++    siblingScopeRoot.append(siblingRoot);
++    const globalRoot = h('div');
++
++    const scope = new DataScope(scopeRoot);
++    const nestedScope = new DataScope(nestedScopeRoot);
++    const siblingScope = new DataScope(siblingScopeRoot);
++    const action = new Action(actionRoot);
++    const local = new Foo(localRoot);
++    const nested = new Foo(nestedRoot);
++    const sibling = new Foo(siblingRoot);
++    const global = new Foo(globalRoot);
++    await mount(scope, nestedScope, siblingScope, action, local, nested, sibling, global);
++
++    actionRoot.dispatchEvent(new Event('click'));
++    expect(fn).toHaveBeenCalledTimes(1);
++    expect(fn).toHaveBeenCalledWith(local);
++
++    await destroy(scope, nestedScope, siblingScope, action, local, nested, sibling, global);
++  });
+ });
+diff --git a/packages/tests/Data/DataBind.spec.ts b/packages/tests/Data/DataBind.spec.ts
+index f1a7c5b9..e6aa352c 100644
+--- a/packages/tests/Data/DataBind.spec.ts
++++ b/packages/tests/Data/DataBind.spec.ts
+@@ -1,5 +1,13 @@
+ import { it, describe, expect, vi } from 'vitest';
+-import { DataBind, DataComputed, DataEffect } from '@studiometa/ui';
++import {
++  Action,
++  DataBind,
++  DataComputed,
++  DataEffect,
++  DataModel,
++  DataScope,
++  type DataValue,
++} from '@studiometa/ui';
+ import { nextTick } from '@studiometa/js-toolkit/utils';
+ import { destroy, hConnected as h, mount } from '#test-utils';
+ 
+@@ -36,6 +44,18 @@ describe('The DataBind component', () => {
+     expect(instance.get()).toBe('bar');
+   });
+ 
++  it('should clear typed input properties with nullish values', () => {
++    const dateElement = h('input', { type: 'date', value: '2026-01-01' });
++    const date = new DataBind(dateElement);
++    expect(() => date.set(undefined)).not.toThrow();
++    expect(dateElement.value).toBe('');
++
++    const numberElement = h('input', { type: 'number', value: '42' });
++    const number = new DataBind(numberElement);
++    number.set(null);
++    expect(numberElement.value).toBe('');
++  });
++
+   it('should set the checked property of a checkbox', () => {
+     const input = h('input', { type: 'checkbox' });
+     const instance = new DataBind(input);
+@@ -149,6 +169,128 @@ describe('The DataBind component', () => {
+     expect(spySet).toHaveBeenLastCalledWith('bar');
+   });
+ 
++  it('should toggle between default and custom values', () => {
++    const checkbox = new DataBind(h('input', { type: 'checkbox' }));
++    checkbox.toggle();
++    expect(checkbox.value).toBe(true);
++    checkbox.toggle();
++    expect(checkbox.value).toBe(false);
++    checkbox.toggle('open', 'closed');
++    expect(checkbox.value).toBe(false);
++
++    const radioElement = h('input', { type: 'radio', value: 'one' });
++    const radio = new DataBind(radioElement);
++    radio.toggle('one', '');
++    expect(radioElement.checked).toBe(false);
++
++    const state = new DataBind(h('div'));
++    state.toggle('open', 'closed');
++    expect(state.value).toBe('open');
++    state.toggle('open', 'closed');
++    expect(state.value).toBe('closed');
++
++    const numericState = new DataBind(h('input', { type: 'text' }));
++    numericState.toggle(1, 0);
++    expect(numericState.value).toBe('1');
++    numericState.toggle(1, 0);
++    expect(numericState.value).toBe('0');
++  });
++
++  it('should mutate scoped values from an Action', async () => {
++    const root = h('div', { dataOptionGroup: 'disclosure' });
++    const stateElement = h('div', { class: 'state', dataOptionKey: 'state' });
++    const button = h('button', {
++      dataOptionTarget: 'DataBind(.state)',
++      dataOptionEffect: "target.toggle('open', 'closed')",
++    });
++    root.append(stateElement, button);
++
++    const scope = new DataScope(root);
++    const state = new DataBind(stateElement);
++    const action = new Action(button);
++    await mount(scope, state, action);
++
++    button.dispatchEvent(new Event('click'));
++    expect(state.value).toBe('open');
++    expect(state.$data).toEqual({ state: 'open' });
++
++    button.dispatchEvent(new Event('click'));
++    expect(state.value).toBe('closed');
++    expect(state.$data).toEqual({ state: 'closed' });
++
++    await destroy(scope, state, action);
++  });
++
++  it('should increment numeric values and recover from non-numeric values', () => {
++    const instance = new DataBind(h('div', ['2']));
++
++    instance.increment();
++    expect(instance.value).toBe('3');
++    instance.increment(-2);
++    expect(instance.value).toBe('1');
++    instance.value = 'invalid';
++    instance.increment(5);
++    expect(instance.value).toBe('5');
++
++    const dateElement = h('input', { type: 'date', value: '2026-01-01' });
++    const date = new DataBind(dateElement);
++    date.increment();
++    expect(dateElement.value).toBe('2026-01-01');
++  });
++
++  it('should cycle through values', () => {
++    const instance = new DataBind(h('div', ['one']));
++    const values = ['one', 'two', 'three'];
++
++    instance.cycle(values);
++    expect(instance.value).toBe('two');
++    instance.cycle(values);
++    expect(instance.value).toBe('three');
++    instance.cycle(values);
++    expect(instance.value).toBe('one');
++
++    instance.value = 'unknown';
++    instance.cycle(values);
++    expect(instance.value).toBe('one');
++    instance.cycle([]);
++    expect(instance.value).toBe('one');
++
++    const numeric = new DataBind(h('input', { type: 'text', value: '1' }));
++    numeric.cycle([1, 2, 3]);
++    expect(numeric.value).toBe('2');
++
++    const array = new DataBind(h('div', ['one,two']));
++    array.cycle([
++      ['one', 'two'],
++      ['three', 'four'],
++    ]);
++    expect(array.value).toBe('three,four');
++
++    const raw = new DataBind(
++      h('div', {
++        'data-bind:attr.data-value': 'value',
++      }),
++    );
++    raw.set('false');
++    raw.cycle([false, 'false', true]);
++    expect(raw.value).toBe(true);
++  });
++
++  it('should reject mutation helpers on computed values and effects', () => {
++    const computed = new DataComputed(
++      h('div', { dataOptionCompute: 'value' }, ['current']),
++    );
++    computed.toggle('next', 'current');
++    expect(computed.value).toBe('current');
++
++    const effectElement = h('div', {
++      dataOptionEffect: 'target.dataset.called = "true"',
++    });
++    const effect = new DataEffect(effectElement);
++    effect.increment();
++    expect(effectElement.dataset.called).toBeUndefined();
++  });
++
+   it('should dispatch value to other instances', async () => {
+     const instance1 = new DataBind(h('div', { dataOptionGroup: 'a' }, ['foo']));
+     const instance2 = new DataBind(h('div', { dataOptionGroup: 'a' }, ['foo']));
+@@ -172,6 +314,108 @@ describe('The DataBind component', () => {
+     expect(instance4.$el.id).toBe('bar');
+   });
+ 
++  it('should deliver group updates through the public set method', async () => {
++    const legacySource = new DataBind(h('div', { dataOptionGroup: 'custom-set' }));
++    const legacySubscriber = new DataBind(h('div', { dataOptionGroup: 'custom-set' }));
++    const legacySet = vi.spyOn(legacySubscriber, 'set');
++    await mount(legacySource, legacySubscriber);
++
++    legacySource.set('legacy');
++    expect(legacySet).toHaveBeenCalledWith('legacy', false);
++
++    const root = h('div', { dataOptionGroup: 'person' });
++    const input = h('input', { name: 'first' });
++    const output = h('div', { dataOptionKey: 'first' });
++    root.append(input, output);
++    const scope = new DataScope(root);
++    const scopedSource = new DataModel(input);
++    const scopedSubscriber = new DataBind(output);
++    const scopedSet = vi.spyOn(scopedSubscriber, 'set');
++    await mount(scope, scopedSource, scopedSubscriber);
++
++    scopedSource.set('scoped');
++    expect(scopedSet).toHaveBeenCalledWith('scoped', false);
++
++    await destroy(legacySource, legacySubscriber, scope, scopedSource, scopedSubscriber);
++  });
++
++  it('should preserve the latest value during reentrant group updates', async () => {
++    class ReentrantDataBind extends DataBind {
++      private dispatched = false;
++
++      set(value: DataValue, dispatch = true) {
++        super.set(value, dispatch);
++
++        if (!dispatch && value === 'outer' && !this.dispatched) {
++          this.dispatched = true;
++          super.set('inner');
++        }
++      }
++    }
++
++    const source = new DataBind(h('div', { dataOptionGroup: 'reentrant' }));
++    const reentrant = new ReentrantDataBind(h('div', { dataOptionGroup: 'reentrant' }));
++    const output = new DataBind(h('div', { dataOptionGroup: 'reentrant' }));
++    await mount(source, reentrant, output);
++
++    source.set('outer');
++
++    expect(source.value).toBe('inner');
++    expect(reentrant.value).toBe('inner');
++    expect(output.value).toBe('inner');
++
++    await destroy(source, reentrant, output);
++  });
++
++  it('should not run effects on mount unless an immediate value is dispatched', async () => {
++    const passiveElement = h('div', {
++      dataOptionGroup: 'passive-effect',
++      dataOptionEffect: 'target.dataset.called = "true"',
++    });
++    const immediateElement = h('div', {
++      dataOptionGroup: 'immediate-effect',
++      dataOptionEffect:
++        'target.dataset.calls = String(Number(target.dataset.calls || 0) + 1)',
++      dataOptionImmediate: true,
++    });
++    const passive = new DataEffect(passiveElement);
++    const immediate = new DataEffect(immediateElement);
++
++    await mount(passive, immediate);
++    expect(passiveElement.dataset.called).toBeUndefined();
++    expect(immediateElement.dataset.calls).toBeUndefined();
++
++    await nextTick();
++    expect(passiveElement.dataset.called).toBeUndefined();
++    expect(immediateElement.dataset.calls).toBe('1');
++
++    await destroy(passive, immediate);
++  });
++
++  it('should dispose and recreate group subscriptions across lifecycle changes', async () => {
++    const source = new DataBind(h('div', { dataOptionGroup: 'lifecycle' }));
++    const effectElement = h('div', {
++      dataOptionGroup: 'lifecycle',
++      dataOptionEffect:
++        'target.dataset.calls = String(Number(target.dataset.calls || 0) + 1)',
++    });
++    const effect = new DataEffect(effectElement);
++    await mount(source, effect);
++
++    source.set('first');
++    expect(effectElement.dataset.calls).toBe('1');
++
++    await destroy(effect);
++    source.set('second');
++    expect(effectElement.dataset.calls).toBe('1');
++
++    await mount(effect);
++    source.set('third');
++    expect(effectElement.dataset.calls).toBe('2');
++
++    await destroy(source, effect);
++  });
++
+   it('should forget related instances not in the DOM anymore', async () => {
+     const fragment = new Document();
+     const inputA = h('input', {
+@@ -246,4 +490,194 @@ describe('The DataBind component', () => {
+     await nextTick();
+     expect(bind2.value).toBe('foo');
+   });
++
++  it('should apply multiple virtual prop, attr, class, style and text bindings', () => {
++    const button = h(
++      'button',
++      {
++        'data-bind:prop.disabled': '!value',
++        'data-bind:prop.tab-index': 'value ? 0 : -1',
++        'data-bind:attr.aria-pressed': 'String(Boolean(value))',
++        'data-bind:class.is-active': 'value',
++        'data-bind:style.display': 'value ? "block" : "none"',
++        'data-bind:text': '`Selected: ${value}`',
++      },
++      ['Original label'],
++    );
++    const instance = new DataBind(button);
++
++    instance.set(true);
++
++    expect(button.disabled).toBe(false);
++    expect(button.tabIndex).toBe(0);
++    expect(button.getAttribute('aria-pressed')).toBe('true');
++    expect(button.classList.contains('is-active')).toBe(true);
++    expect(button.style.display).toBe('block');
++    expect(button.textContent).toBe('Selected: true');
++  });
++
++  it('should retain the raw value applied through virtual bindings', async () => {
++    const button = h('button', {
++      'data-bind:attr.aria-expanded': 'String(value === "open")',
++    });
++    const instance = new DataBind(button);
++
++    instance.set('open');
++    expect(instance.value).toBe('open');
++    expect(button.getAttribute('aria-expanded')).toBe('true');
++
++    instance.toggle('open', 'closed');
++    expect(instance.value).toBe('closed');
++    expect(button.getAttribute('aria-expanded')).toBe('false');
++
++    const input = h('input', {
++      value: 'initial',
++      'data-bind:attr.data-value': 'value',
++    });
++    const model = new DataModel(input);
++    await mount(model);
++    model.set('initial');
++    input.value = 'edited';
++    model.dispatch();
++    expect(model.value).toBe('edited');
++    expect(input.dataset.value).toBe('edited');
++    await destroy(model);
++  });
++
++  it('should resolve acronym-cased DOM properties', () => {
++    const div = h('div', {
++      'data-bind:prop.inner-html': '`<strong>${value}</strong>`',
++    });
++    const instance = new DataBind(div);
++
++    instance.set('Content');
++
++    expect(div.innerHTML).toBe('<strong>Content</strong>');
++    expect((div as HTMLElement & { innerHtml?: string }).innerHtml).toBeUndefined();
++  });
++
++  it('should pass the raw value through empty virtual bindings', () => {
++    const div = h('div', {
++      'data-bind:prop.title': '',
++      'data-bind:attr.data-value': '',
++      'data-bind:class.selected': '',
++      'data-bind:style.--state': '',
++      'data-bind:text': '',
++    });
++    const instance = new DataBind(div);
++
++    instance.set('visible');
++
++    expect(div.title).toBe('visible');
++    expect(div.dataset.value).toBe('visible');
++    expect(div.classList.contains('selected')).toBe(true);
++    expect(div.style.getPropertyValue('--state')).toBe('visible');
++    expect(div.textContent).toBe('visible');
++
++    instance.set(undefined);
++    expect(div.title).toBe('');
++    expect(div.hasAttribute('data-value')).toBe(false);
++    expect(div.classList.contains('selected')).toBe(false);
++    expect(div.style.getPropertyValue('--state')).toBe('');
++    expect(div.textContent).toBe('');
++  });
++
++  it('should use scoped data in virtual binding expressions', () => {
++    const root = h('div', { dataOptionGroup: 'tabs' });
++    const button = h('button', {
++      'data-bind:attr.aria-selected': '$data.active === value',
++      'data-bind:class.is-active': '$data.active === value',
++    });
++    root.append(button);
++    const scope = new DataScope(root);
++    const instance = new DataBind(button);
++    scope.setValue('tabs', 'active', 'details');
++
++    instance.set('details');
++
++    expect(button.getAttribute('aria-selected')).toBe('');
++    expect(button.classList.contains('is-active')).toBe(true);
++  });
++
++  it('should remove attributes and clear styles according to binding semantics', () => {
++    const div = h('div', {
++      'data-bind:attr.hidden': 'value',
++      'data-bind:style.--state': 'value',
++    });
++    const instance = new DataBind(div);
++
++    instance.set(true);
++    expect(div.getAttribute('hidden')).toBe('');
++    expect(div.style.getPropertyValue('--state')).toBe('true');
++
++    for (const value of [false, null, undefined]) {
++      instance.set(value);
++      expect(div.hasAttribute('hidden')).toBe(false);
++      expect(div.style.getPropertyValue('--state')).toBe('');
++    }
++
++    instance.set(0);
++    expect(div.getAttribute('hidden')).toBe('0');
++    expect(div.style.getPropertyValue('--state')).toBe('0');
++  });
++
++  it('should fail quietly when a virtual binding expression throws', () => {
++    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
++    const div = h('div', {
++      'data-bind:attr.title': 'missing.value',
++      'data-bind:text': '`Value: ${value}`',
++    });
++    const instance = new DataBind(div);
++
++    expect(() => instance.set('foo')).not.toThrow();
++    expect(div.hasAttribute('title')).toBe(false);
++    expect(div.textContent).toBe('Value: foo');
++    expect(consoleError).toHaveBeenCalledOnce();
++    consoleError.mockRestore();
++  });
++
++  it('should update virtual subscribers when their legacy value equals the dispatched value', async () => {
++    const source = new DataBind(h('div', { dataOptionGroup: 'equal' }, ['foo']));
++    const button = h(
++      'button',
++      {
++        dataOptionGroup: 'equal',
++        'data-bind:attr.data-value': 'value',
++      },
++      ['foo'],
++    );
++    const subscriber = new DataBind(button);
++    await mount(source, subscriber);
++
++    source.set('foo');
++
++    expect(button.dataset.value).toBe('foo');
++    expect(button.textContent).toBe('foo');
++  });
++
++  it('should coexist with Action virtual events without option collisions', async () => {
++    const button = h('button', {
++      'data-on:click': 'target.$el.dataset.clicked = "true"',
++      'data-bind:class.is-active': 'value',
++    });
++    const action = new Action(button);
++    const bind = new DataBind(button);
++    await mount(action, bind);
++
++    bind.set(true);
++    button.dispatchEvent(new Event('click'));
++
++    expect(button.classList.contains('is-active')).toBe(true);
++    expect(button.dataset.clicked).toBe('true');
++  });
++
++  it('should preserve the legacy single-property behavior without virtual bindings', () => {
++    const button = h('button', { dataOptionProp: 'disabled' }, ['Label']);
++    const instance = new DataBind(button);
++
++    instance.set(true);
++
++    expect(button.disabled).toBe(true);
++    expect(button.textContent).toBe('Label');
++  });
+ });
+diff --git a/packages/tests/Data/DataScope.spec.ts b/packages/tests/Data/DataScope.spec.ts
+new file mode 100644
+index 00000000..ba0da8bf
+--- /dev/null
++++ b/packages/tests/Data/DataScope.spec.ts
+@@ -0,0 +1,544 @@
++import { describe, expect, it } from 'vitest';
++import { DataBind, DataComputed, DataEffect, DataModel, DataScope } from '@studiometa/ui';
++import { nextTick } from '@studiometa/js-toolkit/utils';
++import { destroy, hConnected as h, mount } from '#test-utils';
++
++describe('The DataScope component', () => {
++  it('should inherit its default group while allowing explicit overrides', async () => {
++    const root = h('div');
++    const inheritedAElement = h('div');
++    const inheritedBElement = h('div');
++    const overriddenElement = h('div', { dataOptionGroup: 'other' });
++    root.append(inheritedAElement, inheritedBElement, overriddenElement);
++
++    const scope = new DataScope(root);
++    const inheritedA = new DataBind(inheritedAElement);
++    const inheritedB = new DataBind(inheritedBElement);
++    const overridden = new DataBind(overriddenElement);
++    await mount(scope, inheritedA, inheritedB, overridden);
++
++    expect(scope.$options.group).toBe('default');
++    expect(inheritedA.group).toBe('default');
++    expect(inheritedA.$group).toBe(inheritedB.$group);
++    expect(overridden.group).toBe('other');
++    expect(overridden.$group).not.toBe(inheritedA.$group);
++
++    await destroy(scope, inheritedA, inheritedB, overridden);
++  });
++
++  it('should isolate sibling scopes and use the nearest nested scope', async () => {
++    const outerRoot = h('div', { dataOptionGroup: 'shared' });
++    const outerElement = h('div');
++    const nestedRoot = h('div', { dataOptionGroup: 'shared' });
++    const nestedElement = h('div');
++    nestedRoot.append(nestedElement);
++    outerRoot.append(outerElement, nestedRoot);
++
++    const siblingRoot = h('div', { dataOptionGroup: 'shared' });
++    const siblingElement = h('div');
++    siblingRoot.append(siblingElement);
++
++    const outerScope = new DataScope(outerRoot);
++    const nestedScope = new DataScope(nestedRoot);
++    const siblingScope = new DataScope(siblingRoot);
++    const outer = new DataBind(outerElement);
++    const nested = new DataBind(nestedElement);
++    const sibling = new DataBind(siblingElement);
++    await mount(outerScope, nestedScope, siblingScope, outer, nested, sibling);
++
++    expect(outer.$group).not.toBe(nested.$group);
++    expect(outer.$group).not.toBe(sibling.$group);
++    expect(nested.dataScope).toBe(nestedScope);
++
++    outer.set('outer');
++    expect(nested.value).toBe('');
++    expect(sibling.value).toBe('');
++
++    await destroy(outerScope, nestedScope, siblingScope, outer, nested, sibling);
++  });
++
++  it('should keep keyed values independent and synchronize equal keys', async () => {
++    const root = h('div', { dataOptionGroup: 'person' });
++    const firstInput = h('input', { name: 'first', value: 'Ada' });
++    const lastInput = h('input', { name: 'last', value: 'Lovelace' });
++    const firstOutput = h('div', { dataOptionKey: 'first' });
++    root.append(firstInput, lastInput, firstOutput);
++
++    const scope = new DataScope(root);
++    const first = new DataModel(firstInput);
++    const last = new DataModel(lastInput);
++    const output = new DataBind(firstOutput);
++    await mount(scope, first, last, output);
++
++    firstInput.value = 'Grace';
++    firstInput.dispatchEvent(new Event('input'));
++    expect(first.value).toBe('Grace');
++    expect(output.value).toBe('Grace');
++    expect(last.value).toBe('Lovelace');
++    expect(first.$data).toEqual({ first: 'Grace' });
++    expect(Object.isFrozen(first.$data)).toBe(true);
++
++    await destroy(scope, first, last, output);
++  });
++
++  it('should remove keyed data when its last source is destroyed', async () => {
++    const root = h('div', { dataOptionGroup: 'person' });
++    const primaryInput = h('input', {
++      name: 'first',
++      value: 'Ada',
++      dataOptionImmediate: true,
++    });
++    const secondaryInput = h('input', {
++      name: 'first',
++      value: 'Ada',
++      dataOptionImmediate: true,
++    });
++    root.append(primaryInput, secondaryInput);
++
++    const scope = new DataScope(root);
++    const primary = new DataModel(primaryInput);
++    const secondary = new DataModel(secondaryInput);
++    await mount(scope, primary, secondary);
++    await nextTick();
++    expect(scope.getData('person')).toEqual({ first: 'Ada' });
++
++    await destroy(primary);
++    expect(scope.getData('person')).toEqual({ first: 'Ada' });
++
++    await destroy(secondary);
++    expect(scope.getData('person')).toEqual({});
++
++    await destroy(scope);
++  });
++
++  it('should track only actual keyed sources during teardown', async () => {
++    const root = h('div', { dataOptionGroup: 'person' });
++    const input = h('input', {
++      name: 'first',
++      value: 'Ada',
++      dataOptionImmediate: true,
++    });
++    const outputA = h('div', { dataOptionKey: 'first' });
++    const outputB = h('div', { dataOptionKey: 'first' });
++    root.append(input, outputA, outputB);
++
++    const scope = new DataScope(root);
++    const source = new DataModel(input);
++    const subscriberA = new DataBind(outputA);
++    const subscriberB = new DataBind(outputB);
++    await mount(scope, source, subscriberA, subscriberB);
++    await nextTick();
++    expect(outputB.textContent).toBe('Ada');
++
++    await destroy(subscriberA);
++    expect(scope.getData('person')).toEqual({ first: 'Ada' });
++
++    await destroy(source);
++    expect(scope.getData('person')).toEqual({});
++    expect(outputB.textContent).toBe('');
++
++    await destroy(scope, subscriberB);
++  });
++
++  it('should retain mirrored keyed models as live sources', async () => {
++    const root = h('div', { dataOptionGroup: 'person' });
++    const primaryElement = h('input', {
++      name: 'first',
++      value: 'Ada',
++      dataOptionImmediate: true,
++    });
++    const mirroredElement = h('input', {
++      name: 'first',
++      value: '',
++    });
++    root.append(primaryElement, mirroredElement);
++
++    const scope = new DataScope(root);
++    const primary = new DataModel(primaryElement);
++    const mirrored = new DataModel(mirroredElement);
++    await mount(scope, primary, mirrored);
++    await nextTick();
++    expect(mirrored.value).toBe('Ada');
++    expect(scope.getData('person')).toEqual({ first: 'Ada' });
++
++    await destroy(primary);
++    expect(scope.getData('person')).toEqual({ first: 'Ada' });
++
++    mirroredElement.value = 'Grace';
++    mirrored.dispatch();
++    expect(scope.getData('person')).toEqual({ first: 'Grace' });
++
++    await destroy(mirrored);
++    expect(scope.getData('person')).toEqual({});
++
++    await destroy(scope);
++  });
++
++  it('should recompute multiple values when a checkbox source is removed', async () => {
++    const root = h('div', { dataOptionGroup: 'choices[]' });
++    const firstElement = h('input', {
++      type: 'checkbox',
++      name: 'items',
++      value: 'first',
++      dataOptionImmediate: true,
++    });
++    const secondElement = h('input', {
++      type: 'checkbox',
++      name: 'items',
++      value: 'second',
++      dataOptionImmediate: true,
++    });
++    firstElement.checked = true;
++    secondElement.checked = true;
++    const computedElement = h('div', {
++      dataOptionCompute: '$data.items?.join(", ") ?? ""',
++    });
++    root.append(firstElement, secondElement, computedElement);
++
++    const scope = new DataScope(root);
++    const first = new DataModel(firstElement);
++    const second = new DataModel(secondElement);
++    const computed = new DataComputed(computedElement);
++    await mount(scope, first, second, computed);
++    await nextTick();
++    expect(scope.getData('choices[]')).toEqual({ items: ['first', 'second'] });
++    expect(computed.value).toBe('first, second');
++
++    secondElement.remove();
++    expect(scope.getData('choices[]')).toEqual({ items: ['first'] });
++    expect(computed.value).toBe('first');
++
++    await destroy(first);
++    expect(scope.getData('choices[]')).toEqual({});
++    expect(computed.value).toBe('');
++
++    await destroy(scope, second, computed);
++  });
++
++  it('should remove keyed values from disconnected sources', async () => {
++    const root = h('div', { dataOptionGroup: 'person' });
++    const input = h('input', {
++      name: 'first',
++      value: 'Ada',
++      dataOptionImmediate: true,
++    });
++    const computedElement = h('div', {
++      dataOptionCompute: '$data.first ?? "missing"',
++    });
++    root.append(input, computedElement);
++
++    const scope = new DataScope(root);
++    const source = new DataModel(input);
++    const computed = new DataComputed(computedElement);
++    await mount(scope, source, computed);
++    await nextTick();
++    expect(scope.getData('person')).toEqual({ first: 'Ada' });
++    expect(computed.value).toBe('Ada');
++
++    input.remove();
++    expect(scope.getData('person')).toEqual({});
++    expect(computed.value).toBe('missing');
++
++    await destroy(scope, source, computed);
++  });
++
++  it('should recompute subscribers when the last keyed source is destroyed', async () => {
++    const root = h('div', { dataOptionGroup: 'person' });
++    const input = h('input', {
++      name: 'first',
++      value: 'Ada',
++      dataOptionImmediate: true,
++    });
++    const computedElement = h('div', {
++      dataOptionCompute: '$data.first ?? "missing"',
++    });
++    const effectElement = h('div', {
++      dataOptionEffect: 'target.dataset.value = $data.first ?? "missing"',
++    });
++    root.append(input, computedElement, effectElement);
++
++    const scope = new DataScope(root);
++    const source = new DataModel(input);
++    const computed = new DataComputed(computedElement);
++    const effect = new DataEffect(effectElement);
++    await mount(scope, source, computed, effect);
++    await nextTick();
++    expect(computed.value).toBe('Ada');
++    expect(effectElement.dataset.value).toBe('Ada');
++
++    await destroy(source);
++    expect(scope.getData('person')).toEqual({});
++    expect(computed.value).toBe('missing');
++    expect(effectElement.dataset.value).toBe('missing');
++
++    await destroy(scope, computed, effect);
++  });
++
++  it('should clone and freeze mutable snapshot values', () => {
++    const scope = new DataScope(h('div'));
++    const items = ['one'];
++    const date = new Date('2026-01-01');
++
++    scope.setValue('values', 'items', items);
++    scope.setValue('values', 'date', date);
++    const data = scope.getData('values');
++
++    expect(data.items).toEqual(items);
++    expect(data.items).not.toBe(items);
++    expect(Object.isFrozen(data.items)).toBe(true);
++    expect(data.date).toEqual(date);
++    expect(data.date).not.toBe(date);
++    expect(Object.isFrozen(data.date)).toBe(true);
++
++    items.push('two');
++    date.setFullYear(2030);
++    (data.date as Date).setFullYear(2031);
++    scope.setValue('values', 'other', 'value');
++
++    expect(data.items).toEqual(['one']);
++    expect(scope.getData('values')).toEqual({
++      items: ['one'],
++      date: new Date('2026-01-01'),
++      other: 'value',
++    });
++  });
++
++  it('should synchronously notify scoped subscribers for repeated equal writes', async () => {
++    const root = h('div', { dataOptionGroup: 'person' });
++    const input = h('input', { name: 'first' });
++    const output = h('div', { dataOptionKey: 'first' });
++    const effectElement = h('div', {
++      dataOptionEffect:
++        'target.dataset.calls = String(Number(target.dataset.calls || 0) + 1); target.dataset.value = value',
++    });
++    root.append(input, output, effectElement);
++
++    const scope = new DataScope(root);
++    const model = new DataModel(input);
++    const bind = new DataBind(output);
++    const effect = new DataEffect(effectElement);
++    await mount(scope, model, bind, effect);
++
++    model.set('Ada');
++    const firstSnapshot = model.$data;
++    expect(bind.value).toBe('Ada');
++    expect(effectElement.dataset.calls).toBe('1');
++    expect(effectElement.dataset.value).toBe('Ada');
++
++    model.set('Ada');
++    expect(bind.value).toBe('Ada');
++    expect(effectElement.dataset.calls).toBe('2');
++    expect(model.$data).toEqual({ first: 'Ada' });
++    expect(model.$data).not.toBe(firstSnapshot);
++
++    await destroy(scope, model, bind, effect);
++  });
++
++  it('should recompute unkeyed subscribers for every keyed update', async () => {
++    const root = h('div', { dataOptionGroup: 'values' });
++    const firstInput = h('input', {
++      name: 'first',
++      value: 'A',
++      dataOptionImmediate: true,
++    });
++    const lastInput = h('input', {
++      name: 'last',
++      value: 'B',
++      dataOptionImmediate: true,
++    });
++    const computedElement = h('div', {
++      dataOptionCompute: '$data.first + $data.last',
++    });
++    root.append(firstInput, lastInput, computedElement);
++
++    const scope = new DataScope(root);
++    const first = new DataModel(firstInput);
++    const last = new DataModel(lastInput);
++    const computed = new DataComputed(computedElement);
++    await mount(scope, first, last, computed);
++    await nextTick();
++    expect(computed.value).toBe('AB');
++
++    firstInput.value = 'AB';
++    firstInput.dispatchEvent(new Event('input'));
++    expect(computed.value).toBe('ABB');
++
++    await destroy(scope, first, last, computed);
++  });
++
++  it('should hydrate all immediate keyed sources before notifying subscribers', async () => {
++    const root = h('div', { dataOptionGroup: 'person' });
++    const firstInput = h('input', {
++      name: 'first',
++      value: 'Ada',
++      dataOptionImmediate: true,
++    });
++    const lastInput = h('input', {
++      name: 'last',
++      value: 'Lovelace',
++      dataOptionImmediate: true,
++    });
++    const computedElement = h('div', {
++      dataOptionCompute: '$data.first + " " + $data.last',
++    });
++    const effectElement = h('div', {
++      dataOptionEffect:
++        'target.dataset.values = (target.dataset.values || "") + $data.first + " " + $data.last + "|"; target.dataset.frozen = Object.isFrozen($data)',
++    });
++    root.append(firstInput, lastInput, computedElement, effectElement);
++
++    const scope = new DataScope(root);
++    const first = new DataModel(firstInput);
++    const last = new DataModel(lastInput);
++    const computed = new DataComputed(computedElement);
++    const effect = new DataEffect(effectElement);
++    await mount(scope, first, last, computed, effect);
++    await nextTick();
++
++    expect(computed.value).toBe('Ada Lovelace');
++    expect(effectElement.dataset.values?.split('|').filter(Boolean)).toEqual([
++      'Ada Lovelace',
++      'Ada Lovelace',
++    ]);
++    expect(effectElement.dataset.frozen).toBe('true');
++
++    await destroy(scope, first, last, computed, effect);
++  });
++
++  it('should notify once when hydrating multiple immediate sources for the same key', async () => {
++    const root = h('div', { dataOptionGroup: 'person' });
++    const firstInput = h('input', {
++      name: 'first',
++      value: 'Ada',
++      dataOptionImmediate: true,
++    });
++    const secondInput = h('input', {
++      name: 'first',
++      value: 'Ada',
++      dataOptionImmediate: true,
++    });
++    const effectElement = h('div', {
++      dataOptionEffect:
++        'target.dataset.values = (target.dataset.values || "") + $data.first + "|"',
++    });
++    root.append(firstInput, secondInput, effectElement);
++
++    const scope = new DataScope(root);
++    const first = new DataModel(firstInput);
++    const second = new DataModel(secondInput);
++    const effect = new DataEffect(effectElement);
++    await mount(scope, first, second, effect);
++    await nextTick();
++
++    expect(effectElement.dataset.values?.split('|').filter(Boolean)).toEqual(['Ada']);
++    expect(scope.getData('person')).toEqual({ first: 'Ada' });
++
++    await destroy(scope, first, second, effect);
++  });
++
++  it('should hydrate and track only the selected radio', async () => {
++    const root = h('div', { dataOptionGroup: 'tabs' });
++    const overviewElement = h('input', {
++      type: 'radio',
++      name: 'tab',
++      value: 'overview',
++      dataOptionImmediate: true,
++    });
++    const detailsElement = h('input', {
++      type: 'radio',
++      name: 'tab',
++      value: 'details',
++      dataOptionImmediate: true,
++    });
++    overviewElement.checked = true;
++    root.append(overviewElement, detailsElement);
++
++    const scope = new DataScope(root);
++    const overview = new DataModel(overviewElement);
++    const details = new DataModel(detailsElement);
++    await mount(scope, overview, details);
++    await nextTick();
++    expect(scope.getData('tabs')).toEqual({ tab: 'overview' });
++
++    overview.set('details');
++    expect(detailsElement.checked).toBe(true);
++    expect(scope.getData('tabs')).toEqual({ tab: 'details' });
++
++    await destroy(overview);
++    expect(scope.getData('tabs')).toEqual({ tab: 'details' });
++
++    await destroy(details);
++    expect(scope.getData('tabs')).toEqual({});
++
++    await destroy(scope);
++  });
++
++  it('should track the initiating radio when values are duplicated', async () => {
++    const root = h('div', { dataOptionGroup: 'tabs' });
++    const firstElement = h('input', {
++      type: 'radio',
++      name: 'tab',
++      value: 'shared',
++    });
++    const secondElement = h('input', {
++      type: 'radio',
++      name: 'tab',
++      value: 'shared',
++    });
++    root.append(firstElement, secondElement);
++
++    const scope = new DataScope(root);
++    const first = new DataModel(firstElement);
++    const second = new DataModel(secondElement);
++    await mount(scope, first, second);
++
++    second.set('shared');
++    expect(secondElement.checked).toBe(true);
++    expect(scope.getData('tabs')).toEqual({ tab: 'shared' });
++
++    await destroy(second);
++    expect(scope.getData('tabs')).toEqual({});
++
++    await destroy(scope, first);
++  });
++
++  it('should ignore immediate sources destroyed before hydration', async () => {
++    const root = h('div', { dataOptionGroup: 'person' });
++    const input = h('input', {
++      name: 'first',
++      value: 'Ada',
++      dataOptionImmediate: true,
++    });
++    const effectElement = h('div', {
++      dataOptionEffect: 'target.dataset.called = "true"',
++    });
++    root.append(input, effectElement);
++
++    const scope = new DataScope(root);
++    const source = new DataModel(input);
++    const effect = new DataEffect(effectElement);
++    await mount(scope, source, effect);
++    await destroy(source);
++    await nextTick();
++
++    expect(scope.getData('person')).toEqual({});
++    expect(effectElement.dataset.called).toBeUndefined();
++
++    await destroy(scope, effect);
++  });
++
++  it('should preserve value and target callback arguments with scoped data', () => {
++    const root = h('div');
++    const computedElement = h('div', {
++      dataOptionCompute: 'value + target.dataset.suffix + Object.isFrozen($data)',
++      dataSuffix: '-target-',
++    });
++    root.append(computedElement);
++
++    new DataScope(root);
++    const computed = new DataComputed(computedElement);
++    computed.set('value');
++
++    expect(computed.value).toBe('value-target-true');
++  });
++});
+diff --git a/packages/tests/index.spec.ts b/packages/tests/index.spec.ts
+index 151da8b6..3a47264b 100644
+--- a/packages/tests/index.spec.ts
++++ b/packages/tests/index.spec.ts
+@@ -21,6 +21,7 @@ test('components exports', () => {
+       "DataComputed",
+       "DataEffect",
+       "DataModel",
++      "DataScope",
+       "Draggable",
+       "Fetch",
+       "Figure",
+diff --git a/packages/ui/Action/ActionEvent.ts b/packages/ui/Action/ActionEvent.ts
+index 156e3df1..d6388ce6 100644
+--- a/packages/ui/Action/ActionEvent.ts
++++ b/packages/ui/Action/ActionEvent.ts
+@@ -1,6 +1,7 @@
+ import { getInstances } from '@studiometa/js-toolkit';
+ import type { Base } from '@studiometa/js-toolkit';
+ import { isFunction } from '@studiometa/js-toolkit/utils';
++import { getDataScope } from '../Data/DataScope.js';
+ 
+ /**
+  * Extract component name and an optional additional selector from a string.
+@@ -129,10 +130,15 @@ export class ActionEvent<T extends Base> {
+     });
+ 
+     const targets = [] as Array<Record<string, Base>>;
++    const actionScope = getDataScope(this.action.$el);
+ 
+     for (const instance of getInstances()) {
+       const { name } = instance.__config;
+ 
++      if (actionScope && getDataScope(instance.$el) !== actionScope) {
++        continue;
++      }
++
+       for (const part of parts) {
+         const shouldPush =
+           part[0] === name && (!part[1] || (part[1] && instance.$el.matches(part[1])));
+diff --git a/packages/ui/Data/DataBind.ts b/packages/ui/Data/DataBind.ts
+index 894e436d..536315c7 100644
+--- a/packages/ui/Data/DataBind.ts
++++ b/packages/ui/Data/DataBind.ts
+@@ -1,28 +1,111 @@
+ import { Base, withGroup } from '@studiometa/js-toolkit';
+ import type { BaseConfig, BaseProps } from '@studiometa/js-toolkit';
+-import { isArray, nextTick } from '@studiometa/js-toolkit/utils';
+-import { isInput, isCheckbox, isSelect } from './utils.js';
++import { nextTick } from '@studiometa/js-toolkit/utils';
++import { getDataChannel } from './DataChannel.js';
++import { DataScope, getDataScope } from './DataScope.js';
++import type { DataScopeMember, DataValue } from './DataScope.js';
++import {
++  type DataControlContext,
++  isCheckbox,
++  isInput,
++  readControlValue,
++  resolvePropertyName,
++  setProperty,
++  valuesEqual,
++  writeControlValue,
++} from './formControl.js';
++import { getCallback } from './utils.js';
+ 
+ export interface DataBindProps extends BaseProps {
+   $options: {
+     prop: string;
+     immediate: boolean;
++    key: string;
+   };
+ }
+ 
++const EMPTY_DATA = Object.freeze({});
++
++type VirtualBinding =
++  | { type: 'text'; expression: string }
++  | { type: 'prop' | 'attr' | 'class' | 'style'; name: string; expression: string };
++
+ /**
+  * DataBind class.
+  * @link https://ui.studiometa.dev/components/DataBind/
+  */
+-export class DataBind<T extends BaseProps = BaseProps> extends withGroup(Base, 'data:')<DataBindProps & T> {
++export class DataBind<T extends BaseProps = BaseProps> extends withGroup(Base, 'data:')<
++  DataBindProps & T
++> {
+   static config: BaseConfig = {
+     name: 'DataBind',
+     options: {
+       prop: String,
+       immediate: Boolean,
++      key: String,
+     },
+   };
+ 
++  private __dataScopeResolved = false;
++  private __dataScope?: DataScope;
++  private __stopUpdates?: () => void;
++  private __virtualBindings?: VirtualBinding[];
++  private __virtualValue?: DataValue;
++  private __hasVirtualValue = false;
++
++  get isDataSource() {
++    return false;
++  }
++
++  protected get supportsMutations() {
++    return true;
++  }
++
++  get virtualBindings() {
++    if (!this.__virtualBindings) {
++      this.__virtualBindings = [];
++
++      for (const attribute of this.$el.attributes) {
++        if (attribute.name === 'data-bind:text') {
++          this.__virtualBindings.push({ type: 'text', expression: attribute.value });
++          continue;
++        }
++
++        const match = attribute.name.match(/^data-bind:(prop|attr|class|style)\.(.+)$/);
++        if (match) {
++          this.__virtualBindings.push({
++            type: match[1] as 'prop' | 'attr' | 'class' | 'style',
++            name: match[2],
++            expression: attribute.value,
++          });
++        }
++      }
++    }
++
++    return this.__virtualBindings;
++  }
++
++  get hasVirtualBindings() {
++    return this.virtualBindings.length > 0;
++  }
++
++  get dataScope() {
++    if (!this.__dataScopeResolved) {
++      this.__dataScope = getDataScope(this.$el);
++      this.__dataScopeResolved = true;
++    }
++
++    return this.__dataScope;
++  }
++
++  get group() {
++    return this.$options.group || this.dataScope?.$options.group || '';
++  }
++
++  override get $group() {
++    return this.dataScope?.getGroup(this.group) ?? super.$group;
++  }
++
+   /**
+    * @deprecated Use the `$group` getter instead.
+    */
+@@ -30,8 +113,50 @@ export class DataBind<T extends BaseProps = BaseProps> extends withGroup(Base, '
+     return this.$group as Set<this>;
+   }
+ 
++  get dataKey() {
++    if (!this.dataScope) {
++      return '';
++    }
++
++    if (this.$options.key) {
++      return this.$options.key;
++    }
++
++    const { target } = this;
++    if (
++      target instanceof HTMLInputElement ||
++      target instanceof HTMLSelectElement ||
++      target instanceof HTMLTextAreaElement
++    ) {
++      return target.name;
++    }
++
++    return '';
++  }
++
++  get $data() {
++    return this.dataScope?.getData(this.group) ?? EMPTY_DATA;
++  }
++
+   get multiple() {
+-    return this.$options.group.endsWith('[]');
++    return this.group.endsWith('[]');
++  }
++
++  private get channel() {
++    return (
++      this.dataScope?.getChannel(this.group) ??
++      getDataChannel(this.$group as Set<DataScopeMember>)
++    );
++  }
++
++  protected get controlContext(): DataControlContext {
++    return {
++      dataKey: this.dataKey,
++      members: this.relatedInstances,
++      multiple: this.multiple,
++      prop: this.prop,
++      target: this.target,
++    };
+   }
+ 
+   get target() {
+@@ -66,83 +191,211 @@ export class DataBind<T extends BaseProps = BaseProps> extends withGroup(Base, '
+     this.set(value);
+   }
+ 
+-  get() {
+-    const { target, multiple } = this;
++  get(): DataValue {
++    if (this.hasVirtualBindings && this.__hasVirtualValue) {
++      return this.__virtualValue;
++    }
+ 
+-    if (isSelect(target)) {
+-      if (multiple) {
+-        const values = [] as string[];
+-        // @ts-ignore
+-        for (const option of target.options) {
+-          if (option.selected) {
+-            values.push(option.value);
+-          }
+-        }
++    return this.getTargetValue();
++  }
+ 
+-        return values;
+-      }
++  protected getTargetValue(): DataValue {
++    return readControlValue(this.controlContext);
++  }
+ 
+-      const option = target.options.item(target.selectedIndex);
+-      return option?.value;
++  set(value: DataValue, dispatch = true) {
++    const publication = dispatch ? this.publishValue(value) : undefined;
++
++    if (!publication || publication.channel.isCurrent(publication.frame)) {
++      this.applyValue(value);
+     }
++  }
+ 
+-    if (isCheckbox(target)) {
+-      if (multiple) {
+-        const values = new Set();
+-        for (const instance of this.relatedInstances) {
+-          if (isCheckbox(instance.target) && instance.target.checked) {
+-            values.add(instance.target.value);
+-          }
+-        }
+-        return Array.from(values);
+-      } else {
+-        return target.checked;
++  private applyValue(value: DataValue) {
++    if (this.hasVirtualBindings) {
++      this.__virtualValue = value;
++      this.__hasVirtualValue = true;
++      this.applyVirtualBindings(value);
++      return;
++    }
++
++    writeControlValue(this.controlContext, value);
++  }
++
++  /**
++   * Publish a value to the resolved Data group without applying it locally.
++   * @internal
++   */
++  protected publishValue(value: DataValue, force = false, updateData = true) {
++    if (this.dataScope && this.dataKey) {
++      if (updateData) {
++        this.dataScope.setValue(this.group, this.dataKey, value, this);
+       }
++
++      const channel = this.dataScope.getChannel(this.group);
++      const frame = channel.publish({
++        force: true,
++        key: this.dataKey,
++        source: this,
++        value,
++      });
++      return { channel, frame };
+     }
+ 
+-    return target[this.prop];
++    const channel = this.channel;
++    const frame = channel.publish({
++      force,
++      source: this,
++      value,
++    });
++    return { channel, frame };
+   }
+ 
+-  set(value: boolean | string | string[], dispatch = true) {
+-    const { target, multiple, relatedInstances } = this;
++  private applyVirtualBindings(value: DataValue) {
++    for (const binding of this.virtualBindings) {
++      let result: unknown = value;
+ 
+-    if (dispatch) {
+-      for (const instance of relatedInstances) {
+-        if (instance !== this && instance.value !== value) {
+-          instance.set(value, false);
++      if (binding.expression) {
++        try {
++          result = getCallback(this.group, `return ${binding.expression};`)(
++            value,
++            this.target,
++            this.$data,
++          );
++        } catch (error) {
++          // @todo better handling of errors?
++          console.error('Failed', error);
++          continue;
+         }
+       }
+-    }
+ 
+-    if (isSelect(target)) {
+-      // @ts-ignore
+-      for (const option of target.options) {
+-        option.selected =
+-          multiple && isArray(value) ? value.includes(option.value) : option.value === value;
++      switch (binding.type) {
++        case 'prop':
++          setProperty(this.target, resolvePropertyName(this.target, binding.name), result);
++          break;
++        case 'attr':
++          if (result === false || result === null || result === undefined) {
++            this.target.removeAttribute(binding.name);
++          } else {
++            this.target.setAttribute(binding.name, result === true ? '' : String(result));
++          }
++          break;
++        case 'class':
++          this.target.classList.toggle(binding.name, Boolean(result));
++          break;
++        case 'style':
++          this.target.style.setProperty(
++            binding.name,
++            result === false || result === null || result === undefined ? '' : String(result),
++          );
++          break;
++        case 'text':
++          this.target.textContent = (result ?? '') as string;
++          break;
+       }
++    }
++  }
++
++  /**
++   * Publish a keyed value to the scoped group and synchronize matching subscribers.
++   * @internal
++   */
++  __dispatchScopedValue(value: DataValue, updateData = true) {
++    const publication = this.publishValue(value, true, updateData);
++
++    if (publication.channel.isCurrent(publication.frame)) {
++      this.set(value, false);
++    }
++  }
++
++  private validateMutation(method: string) {
++    if (this.supportsMutations) {
++      return true;
++    }
++
++    this.$warn(`The ${method}() method can not be used with this component.`);
++    return false;
++  }
++
++  toggle(onValue: DataValue = true, offValue: DataValue = false) {
++    if (!this.validateMutation('toggle')) {
+       return;
+     }
+ 
+-    if (isInput(target)) {
+-      switch (target.type) {
+-        case 'radio':
+-          target.checked = target.value === value;
+-          return;
+-        case 'checkbox':
+-          target.checked =
+-            multiple && isArray(value) ? value.includes(target.value) : Boolean(value);
+-          return;
+-      }
++    const isRadio = isInput(this.target) && this.target.type === 'radio';
++    const hasCustomCheckboxValues =
++      isCheckbox(this.target) &&
++      (typeof onValue !== 'boolean' || typeof offValue !== 'boolean');
++
++    if (isRadio || hasCustomCheckboxValues) {
++      this.$warn('The toggle() values can not be represented by this input.');
++      return;
+     }
+ 
+-    target[this.prop] = value;
++    this.set(valuesEqual(this.value, onValue) ? offValue : onValue);
++  }
++
++  increment(step = 1) {
++    if (!this.validateMutation('increment')) {
++      return;
++    }
++
++    if (isInput(this.target) && this.target.type === 'date') {
++      this.$warn('The increment() method can not be used with date inputs.');
++      return;
++    }
++
++    const value = Number(this.value);
++    this.set((Number.isNaN(value) ? 0 : value) + step);
++  }
++
++  cycle(values: readonly DataValue[]) {
++    if (!this.validateMutation('cycle') || values.length === 0) {
++      return;
++    }
++
++    const index = values.findIndex((value) => valuesEqual(value, this.value));
++    this.set(values[(index + 1) % values.length]);
+   }
+ 
+   mounted() {
+-    if (this.$options.immediate) {
+-      nextTick().then(() => {
+-        this.set(this.get());
+-      });
++    this.__stopUpdates?.();
++    this.__stopUpdates = this.channel.subscribe((update) => {
++      if (!this.$el.isConnected) {
++        this.__stopUpdates?.();
++        this.__stopUpdates = undefined;
++        return;
++      }
++
++      if (
++        update.source !== this &&
++        (!update.key || !this.dataKey || update.key === this.dataKey) &&
++        (update.force || this.hasVirtualBindings || this.value !== update.value)
++      ) {
++        this.set(update.value, false);
++      }
++    });
++
++    if (!this.$options.immediate) {
++      return;
++    }
++
++    if (this.dataScope && this.dataKey) {
++      this.dataScope.hydrate(this.group, this);
++      return;
++    }
++
++    nextTick().then(() => {
++      this.set(this.get());
++    });
++  }
++
++  destroyed() {
++    this.__stopUpdates?.();
++    this.__stopUpdates = undefined;
++
++    if (this.dataScope && this.dataKey) {
++      this.dataScope.deleteValue(this.group, this.dataKey, this);
+     }
+   }
+ }
+diff --git a/packages/ui/Data/DataChannel.ts b/packages/ui/Data/DataChannel.ts
+new file mode 100644
+index 00000000..b4bb36f1
+--- /dev/null
++++ b/packages/ui/Data/DataChannel.ts
+@@ -0,0 +1,80 @@
++import { effect, signal } from 'alien-signals';
++import type { DataScopeMember, DataValue } from './DataScope.js';
++
++const INITIAL = Symbol('initial-data-update');
++
++export interface DataUpdate {
++  readonly force: boolean;
++  readonly key?: string;
++  readonly source?: DataScopeMember;
++  readonly value: DataValue;
++}
++
++type DataUpdateSubscriber = (update: DataUpdate) => void;
++
++/**
++ * Synchronously publish Data group updates through a signal-backed channel.
++ * @internal
++ */
++export class DataChannel {
++  private update = signal<DataUpdate | typeof INITIAL>(INITIAL);
++  private latest?: DataUpdate;
++
++  publish(update: DataUpdate) {
++    // Always publish a fresh frame so equal values remain observable events.
++    const frame = { ...update };
++    this.latest = frame;
++    this.update(frame);
++    return frame;
++  }
++
++  isCurrent(frame: DataUpdate) {
++    return this.latest === frame;
++  }
++
++  subscribe(subscriber: DataUpdateSubscriber) {
++    let initialized = false;
++
++    return effect(() => {
++      const update = this.update();
++
++      if (!initialized) {
++        initialized = true;
++        return;
++      }
++
++      if (update !== INITIAL) {
++        subscriber(update);
++      }
++    });
++  }
++}
++
++type GlobalWithDataChannels = typeof globalThis & {
++  __STUDIOMETA_UI_DATA_CHANNELS__?: WeakMap<Set<DataScopeMember>, DataChannel>;
++};
++
++/**
++ * Get the global Data channel storage so it can be shared between different
++ * instances of the package.
++ */
++function getChannelsStorage() {
++  const global = globalThis as GlobalWithDataChannels;
++  return (global.__STUDIOMETA_UI_DATA_CHANNELS__ ??= new WeakMap());
++}
++
++/**
++ * Get the signal channel associated with a legacy Data group.
++ * @internal
++ */
++export function getDataChannel(group: Set<DataScopeMember>) {
++  const channels = getChannelsStorage();
++  let channel = channels.get(group);
++
++  if (!channel) {
++    channel = new DataChannel();
++    channels.set(group, channel);
++  }
++
++  return channel;
++}
+diff --git a/packages/ui/Data/DataComputed.ts b/packages/ui/Data/DataComputed.ts
+index dd3cf926..66c0ef63 100644
+--- a/packages/ui/Data/DataComputed.ts
++++ b/packages/ui/Data/DataComputed.ts
+@@ -1,6 +1,7 @@
+ import type { BaseConfig, BaseProps } from '@studiometa/js-toolkit';
+ import { DataBind } from './DataBind.js';
+ import type { DataBindProps } from './DataBind.js';
++import type { DataValue } from './DataScope.js';
+ import { getCallback } from './utils.js';
+ 
+ export interface DataComputedProps extends DataBindProps {
+@@ -17,16 +18,20 @@ export class DataComputed<T extends BaseProps = BaseProps> extends DataBind<Data
+     },
+   };
+ 
++  protected get supportsMutations() {
++    return false;
++  }
++
+   get compute() {
+     const { group, compute } = this.$options;
+     return getCallback(group, `return ${compute};`);
+   }
+ 
+-  set(value: boolean | string | string[]) {
++  set(value: DataValue) {
+     let newValue = value;
+ 
+     try {
+-      newValue = this.compute(value, this.target);
++      newValue = this.compute(value, this.target, this.$data);
+     } catch (error) {
+       // @todo better handling of errors?
+       console.error('Failed', error);
+diff --git a/packages/ui/Data/DataEffect.ts b/packages/ui/Data/DataEffect.ts
+index c4e2e151..d79db125 100644
+--- a/packages/ui/Data/DataEffect.ts
++++ b/packages/ui/Data/DataEffect.ts
+@@ -1,6 +1,7 @@
+ import type { BaseConfig, BaseProps } from '@studiometa/js-toolkit';
+ import { DataBind } from './DataBind.js';
+ import type { DataBindProps } from './DataBind.js';
++import type { DataValue } from './DataScope.js';
+ import { getCallback } from './utils.js';
+ 
+ export interface DataEffectProps extends DataBindProps {
+@@ -17,14 +18,18 @@ export class DataEffect<T extends BaseProps = BaseProps> extends DataBind<DataEf
+     },
+   };
+ 
++  protected get supportsMutations() {
++    return false;
++  }
++
+   get effect() {
+     const { group, effect } = this.$options;
+     return getCallback(group, effect);
+   }
+ 
+-  set(value: boolean | string | string[]) {
++  set(value: DataValue) {
+     try {
+-      this.effect(value, this.target);
++      this.effect(value, this.target, this.$data);
+     } catch (error) {
+       // @todo better handling of errors?
+       console.error('Failed', error);
+diff --git a/packages/ui/Data/DataModel.ts b/packages/ui/Data/DataModel.ts
+index 352674c5..7369e3b9 100644
+--- a/packages/ui/Data/DataModel.ts
++++ b/packages/ui/Data/DataModel.ts
+@@ -1,7 +1,7 @@
+ import type { BaseConfig, BaseProps } from '@studiometa/js-toolkit';
+ import { DataBind } from './DataBind.js';
+ import type { DataBindProps } from './DataBind.js';
+-import { isCheckbox } from './utils.js';
++import { serializeControlValue } from './formControl.js';
+ 
+ export interface DataModelProps extends DataBindProps {}
+ 
+@@ -10,18 +10,16 @@ export class DataModel<T extends BaseProps = BaseProps> extends DataBind<DataMod
+     name: 'DataModel',
+   };
+ 
+-  dispatch() {
+-    const { target, multiple } = this;
+-    let value = this.get();
++  override get isDataSource() {
++    return true;
++  }
+ 
+-    if (multiple && isCheckbox(target) && !target.checked) {
+-      const set = new Set(value);
+-      set.delete(target.value);
+-      value = Array.from(set);
+-    }
++  dispatch() {
++    const value = serializeControlValue(this.controlContext);
++    const publication = this.publishValue(value, true);
+ 
+-    for (const instance of this.relatedInstances) {
+-      instance.set(value, false);
++    if (publication.channel.isCurrent(publication.frame)) {
++      this.set(value, false);
+     }
+   }
+ 
+diff --git a/packages/ui/Data/DataScope.ts b/packages/ui/Data/DataScope.ts
+new file mode 100644
+index 00000000..ac225287
+--- /dev/null
++++ b/packages/ui/Data/DataScope.ts
+@@ -0,0 +1,315 @@
++import { Base } from '@studiometa/js-toolkit';
++import type { BaseConfig, BaseProps } from '@studiometa/js-toolkit';
++import { nextTick } from '@studiometa/js-toolkit/utils';
++import { DataChannel } from './DataChannel.js';
++
++export interface DataScopeProps extends BaseProps {
++  $options: {
++    group: string;
++  };
++}
++
++export type DataValue = boolean | string | string[] | number | Date | null | undefined;
++
++export interface DataScopeMember extends Base {
++  readonly dataKey: string;
++  readonly isDataSource: boolean;
++  get(): DataValue;
++  set(value: DataValue, dispatch?: boolean): void;
++  __dispatchScopedValue(value: DataValue, updateData?: boolean): void;
++}
++
++interface DataScopeGroup {
++  channel: DataChannel;
++  instances: Set<DataScopeMember>;
++  sources: Map<string, Set<DataScopeMember>>;
++  values: Map<string, DataValue>;
++  data: Readonly<Record<string, DataValue>>;
++  hydration: Set<DataScopeMember>;
++  hydrationPending: boolean;
++}
++
++const EMPTY_DATA = Object.freeze({});
++
++function cloneValue(value: DataValue): DataValue {
++  if (Array.isArray(value)) {
++    return [...value];
++  }
++
++  if (value instanceof Date) {
++    return new Date(value.getTime());
++  }
++
++  return value;
++}
++
++function createSnapshot(values: Map<string, DataValue>): Readonly<Record<string, DataValue>> {
++  const entries = Array.from(values, ([key, value]) => {
++    const snapshotValue = cloneValue(value);
++
++    if (Array.isArray(snapshotValue) || snapshotValue instanceof Date) {
++      Object.freeze(snapshotValue);
++    }
++
++    return [key, snapshotValue] as const;
++  });
++
++  return Object.freeze(Object.fromEntries(entries));
++}
++
++function isCurrentValueSource(instance: DataScopeMember) {
++  const { $el } = instance;
++  return !($el instanceof HTMLInputElement && $el.type === 'radio' && !$el.checked);
++}
++
++/**
++ * Define a local boundary and a default group for descendant Data components.
++ * @link https://ui.studiometa.dev/components/DataScope/
++ */
++export class DataScope<T extends BaseProps = BaseProps> extends Base<DataScopeProps & T> {
++  static config: BaseConfig = {
++    name: 'DataScope',
++    options: {
++      group: {
++        type: String,
++        default: 'default',
++      },
++    },
++  };
++
++  private groups = new Map<string, DataScopeGroup>();
++
++  private getRecord(group: string) {
++    let record = this.groups.get(group);
++
++    if (!record) {
++      record = {
++        channel: new DataChannel(),
++        instances: new Set(),
++        sources: new Map(),
++        values: new Map(),
++        data: EMPTY_DATA,
++        hydration: new Set(),
++        hydrationPending: false,
++      };
++      this.groups.set(group, record);
++    }
++
++    for (const instance of record.instances) {
++      if (!instance.$el.isConnected) {
++        record.instances.delete(instance);
++      }
++    }
++
++    const deletedKeys = [] as string[];
++    const updatedValues = new Map<string, DataValue>();
++    for (const [key, sources] of record.sources) {
++      let sourcesChanged = false;
++      for (const source of sources) {
++        if (!source.$el.isConnected) {
++          sources.delete(source);
++          sourcesChanged = true;
++        }
++      }
++
++      if (sources.size === 0) {
++        record.sources.delete(key);
++        if (record.values.delete(key)) {
++          deletedKeys.push(key);
++        }
++      } else if (sourcesChanged && group.endsWith('[]')) {
++        const value = this.getMultipleSourcesValue(sources);
++        record.values.set(key, value);
++        updatedValues.set(key, value);
++      }
++    }
++
++    if (deletedKeys.length > 0 || updatedValues.size > 0) {
++      record.data = createSnapshot(record.values);
++      for (const key of deletedKeys) {
++        this.notifyValue(record, key, undefined);
++      }
++      for (const [key, value] of updatedValues) {
++        this.notifyValue(record, key, value);
++      }
++    }
++
++    return record;
++  }
++
++  private getMultipleSourcesValue(sources: Set<DataScopeMember>) {
++    const values = new Set<string>();
++
++    for (const source of sources) {
++      if (source.$el instanceof HTMLInputElement && source.$el.type === 'checkbox') {
++        if (source.$el.checked) {
++          values.add(source.$el.value);
++        }
++        continue;
++      }
++
++      const value = source.get();
++      if (Array.isArray(value)) {
++        for (const item of value) {
++          values.add(item);
++        }
++      }
++    }
++
++    return Array.from(values);
++  }
++
++  private notifyValue(
++    record: DataScopeGroup,
++    key: string,
++    value: DataValue,
++    excludedSource?: DataScopeMember,
++  ) {
++    record.channel.publish({
++      force: true,
++      key,
++      source: excludedSource,
++      value,
++    });
++  }
++
++  getGroup(group: string) {
++    return this.getRecord(group).instances;
++  }
++
++  getData(group: string) {
++    return this.getRecord(group).data;
++  }
++
++  /**
++   * Get the signal channel for a scoped Data group.
++   * @internal
++   */
++  getChannel(group: string) {
++    return this.getRecord(group).channel;
++  }
++
++  setValue(group: string, key: string, value: DataValue, source?: DataScopeMember) {
++    const record = this.getRecord(group);
++
++    if (source) {
++      if (source.$el instanceof HTMLInputElement && source.$el.type === 'radio') {
++        const matchingSource =
++          source.$el.value === value
++            ? source
++            : Array.from(record.instances).find(
++                (instance) =>
++                  instance.dataKey === key &&
++                  instance.$el instanceof HTMLInputElement &&
++                  instance.$el.type === 'radio' &&
++                  instance.$el.value === value,
++              );
++        record.sources.set(key, new Set([matchingSource ?? source]));
++      } else {
++        const sources = record.sources.get(key) ?? new Set();
++        sources.add(source);
++        for (const instance of record.instances) {
++          if (instance.isDataSource && instance.dataKey === key) {
++            sources.add(instance);
++          }
++        }
++        record.sources.set(key, sources);
++      }
++    }
++
++    record.values.set(key, cloneValue(value));
++    record.data = createSnapshot(record.values);
++  }
++
++  deleteValue(group: string, key: string, source: DataScopeMember) {
++    const record = this.getRecord(group);
++    const sources = record.sources.get(key);
++
++    if (!sources?.delete(source)) {
++      return;
++    }
++
++    if (sources.size === 0) {
++      record.sources.delete(key);
++      record.values.delete(key);
++      record.data = createSnapshot(record.values);
++      this.notifyValue(record, key, undefined, source);
++    } else if (group.endsWith('[]')) {
++      const value = this.getMultipleSourcesValue(sources);
++      record.values.set(key, value);
++      record.data = createSnapshot(record.values);
++      this.notifyValue(record, key, value, source);
++    }
++  }
++
++  hydrate(group: string, instance: DataScopeMember) {
++    const record = this.getRecord(group);
++    record.hydration.add(instance);
++
++    if (record.hydrationPending) {
++      return;
++    }
++
++    record.hydrationPending = true;
++    nextTick().then(() => {
++      const sources = new Map<string, DataScopeMember>();
++
++      if (this.$isMounted) {
++        for (const source of record.hydration) {
++          if (
++            source.$isMounted &&
++            source.$el.isConnected &&
++            source.dataKey &&
++            isCurrentValueSource(source)
++          ) {
++            sources.set(source.dataKey, source);
++            record.values.set(source.dataKey, cloneValue(source.get()));
++
++            if (source.$el instanceof HTMLInputElement && source.$el.type === 'radio') {
++              record.sources.set(source.dataKey, new Set([source]));
++            } else {
++              const valueSources = record.sources.get(source.dataKey) ?? new Set();
++              valueSources.add(source);
++              for (const instance of record.instances) {
++                if (instance.isDataSource && instance.dataKey === source.dataKey) {
++                  valueSources.add(instance);
++                }
++              }
++              record.sources.set(source.dataKey, valueSources);
++            }
++          }
++        }
++      }
++
++      record.hydration.clear();
++      record.hydrationPending = false;
++      record.data = createSnapshot(record.values);
++
++      for (const source of sources.values()) {
++        source.__dispatchScopedValue(source.get(), false);
++      }
++    });
++  }
++}
++
++type ElementWithInstances = HTMLElement & {
++  __base__?: Map<string, Base | 'terminated'>;
++};
++
++/**
++ * Find the nearest DataScope mounted on the given element or one of its ancestors.
++ * @internal
++ */
++export function getDataScope(element: HTMLElement): DataScope | undefined {
++  let current: ElementWithInstances | null = element;
++
++  while (current) {
++    const scope = current.__base__?.get(DataScope.config.name);
++    if (scope && scope !== 'terminated') {
++      return scope as DataScope;
++    }
++    current = current.parentElement;
++  }
++
++  return undefined;
++}
+diff --git a/packages/ui/Data/formControl.ts b/packages/ui/Data/formControl.ts
+new file mode 100644
+index 00000000..e124e66c
+--- /dev/null
++++ b/packages/ui/Data/formControl.ts
+@@ -0,0 +1,177 @@
++import type { DataValue } from './DataScope.js';
++
++export interface DataControlMember {
++  readonly dataKey: string;
++  readonly target: HTMLElement;
++}
++
++export interface DataControlContext {
++  readonly dataKey: string;
++  readonly members: Iterable<DataControlMember>;
++  readonly multiple: boolean;
++  readonly prop: string;
++  readonly target: HTMLElement;
++}
++
++export function isInput(element: Element): element is HTMLInputElement {
++  return element instanceof HTMLInputElement;
++}
++
++export function isCheckbox(element: Element): element is HTMLInputElement {
++  return isInput(element) && element.type === 'checkbox';
++}
++
++export function isSelect(element: Element): element is HTMLSelectElement {
++  return element instanceof HTMLSelectElement;
++}
++
++export function valuesEqual(left: DataValue, right: DataValue) {
++  if (Object.is(left, right)) {
++    return true;
++  }
++
++  if (left instanceof Date && right instanceof Date) {
++    return left.getTime() === right.getTime();
++  }
++
++  if (Array.isArray(left) && Array.isArray(right)) {
++    return left.length === right.length && left.every((value, index) => value === right[index]);
++  }
++
++  const isNumberAndString =
++    (typeof left === 'number' && typeof right === 'string') ||
++    (typeof left === 'string' && typeof right === 'number');
++  const isArrayAndString =
++    (Array.isArray(left) && typeof right === 'string') ||
++    (typeof left === 'string' && Array.isArray(right));
++
++  return (isNumberAndString || isArrayAndString) && String(left) === String(right);
++}
++
++export function setProperty(target: HTMLElement, name: string, value: unknown) {
++  if (value !== null && value !== undefined) {
++    target[name] = value;
++    return;
++  }
++
++  switch (name) {
++    case 'valueAsDate':
++      target[name] = null;
++      break;
++    case 'valueAsNumber':
++      target[name] = Number.NaN;
++      break;
++    default:
++      target[name] = '';
++  }
++}
++
++export function resolvePropertyName(target: HTMLElement, name: string) {
++  const normalizedName = name.replaceAll('-', '').toLowerCase();
++  let current: object | null = target;
++
++  while (current) {
++    const property = Object.getOwnPropertyNames(current).find(
++      (candidate) => candidate.toLowerCase() === normalizedName,
++    );
++    if (property) {
++      return property;
++    }
++    current = Object.getPrototypeOf(current);
++  }
++
++  return name.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase());
++}
++
++/**
++ * Read a value from a form control or generic element property.
++ * @internal
++ */
++export function readControlValue({
++  dataKey,
++  members,
++  multiple,
++  prop,
++  target,
++}: DataControlContext): DataValue {
++  if (isSelect(target)) {
++    if (multiple) {
++      const values = [] as string[];
++      for (const option of target.options) {
++        if (option.selected) {
++          values.push(option.value);
++        }
++      }
++
++      return values;
++    }
++
++    return target.options.item(target.selectedIndex)?.value;
++  }
++
++  if (isCheckbox(target)) {
++    if (multiple) {
++      const values = new Set<string>();
++      for (const member of members) {
++        if ((!dataKey || member.dataKey === dataKey) && isCheckbox(member.target)) {
++          if (member.target.checked) {
++            values.add(member.target.value);
++          }
++        }
++      }
++      return Array.from(values);
++    }
++
++    return target.checked;
++  }
++
++  return target[prop];
++}
++
++/**
++ * Serialize a model event while preserving grouped checkbox semantics.
++ * @internal
++ */
++export function serializeControlValue(context: DataControlContext): DataValue {
++  const value = readControlValue(context);
++  const { multiple, target } = context;
++
++  if (multiple && isCheckbox(target) && !target.checked && Array.isArray(value)) {
++    const values = new Set(value);
++    values.delete(target.value);
++    return Array.from(values);
++  }
++
++  return value;
++}
++
++/**
++ * Write a value to a form control or generic element property.
++ * @internal
++ */
++export function writeControlValue(
++  { multiple, prop, target }: DataControlContext,
++  value: DataValue,
++) {
++  if (isSelect(target)) {
++    for (const option of target.options) {
++      option.selected =
++        multiple && Array.isArray(value) ? value.includes(option.value) : option.value === value;
++    }
++    return;
++  }
++
++  if (isInput(target)) {
++    switch (target.type) {
++      case 'radio':
++        target.checked = target.value === value;
++        return;
++      case 'checkbox':
++        target.checked =
++          multiple && Array.isArray(value) ? value.includes(target.value) : Boolean(value);
++        return;
++    }
++  }
++
++  setProperty(target, prop, value);
++}
+diff --git a/packages/ui/Data/index.ts b/packages/ui/Data/index.ts
+index 0455c769..728e2a8b 100644
+--- a/packages/ui/Data/index.ts
++++ b/packages/ui/Data/index.ts
+@@ -2,3 +2,5 @@ export * from './DataBind.js';
+ export * from './DataComputed.js';
+ export * from './DataEffect.js';
+ export * from './DataModel.js';
++export { DataScope } from './DataScope.js';
++export type { DataScopeProps, DataValue } from './DataScope.js';
+diff --git a/packages/ui/Data/utils.ts b/packages/ui/Data/utils.ts
+index 25c65aec..3ad9df1f 100644
+--- a/packages/ui/Data/utils.ts
++++ b/packages/ui/Data/utils.ts
+@@ -1,22 +1,10 @@
+-export function isInput(el: Element): el is HTMLInputElement {
+-  return el instanceof HTMLInputElement;
+-}
+-
+-export function isCheckbox(el: Element): el is HTMLInputElement {
+-  return isInput(el) && el.type === 'checkbox';
+-}
+-
+-export function isSelect(el: Element): el is HTMLSelectElement {
+-  return el instanceof HTMLSelectElement;
+-}
+-
+ const callbacks = new Map<string, Function>();
+ 
+ export function getCallback(name: string, code: string): Function {
+   const key = code + name;
+ 
+   if (!callbacks.has(key)) {
+-    callbacks.set(key, new Function('value', 'target', code));
++    callbacks.set(key, new Function('value', 'target', '$data', code));
+   }
+ 
+   return callbacks.get(key);
+diff --git a/packages/ui/package.json b/packages/ui/package.json
+index 306de82d..e82148b6 100644
+--- a/packages/ui/package.json
++++ b/packages/ui/package.json
+@@ -29,6 +29,7 @@
+   },
+   "homepage": "https://github.com/studiometa/ui#readme",
+   "dependencies": {
++    "alien-signals": "^3.2.1",
+     "deepmerge": "^4.3.1",
+     "morphdom": "^2.7.8"
+   },

@@ -10,6 +10,7 @@ import { createReadOnlyTools } from '@earendil-works/pi-coding-agent';
 import type { Config } from './config.js';
 import { resolveProviderApiKey } from './config.js';
 import { isQuotaExceededMessage, ReviewerError } from './errors.js';
+import { createGitTools } from './git-tool.js';
 import type { Logger } from './logger.js';
 import { noopLogger } from './logger.js';
 import { parseReviewMarkdownWithWarnings } from './parser.js';
@@ -146,6 +147,12 @@ export interface RunReviewOptions {
    * The returned function, if any, is called after the review completes.
    */
   attachTelemetry?: (agent: AgentLike) => (() => void) | undefined;
+  /**
+   * `commits` input mode only: the last-reviewed commit (a ref/sha). When set,
+   * the commit-exploration prompt tells the agent to review only the commits
+   * after it (incremental review); when absent, the whole history is in scope.
+   */
+  sinceRef?: string;
 }
 
 const DEFAULT_REVIEW_TIMEOUT_MS = 10 * 60 * 1000;
@@ -354,6 +361,12 @@ export interface FilteredDiff {
    * demand instead of losing them entirely (opt-in retrieval).
    */
   sizeSkippedSections: Array<{ path: string; section: string }>;
+  /**
+   * Every non-noise file section (path + raw diff), regardless of the char
+   * budget. Disk input mode stages all of these so the reviewer reads them on
+   * demand instead of receiving any diff inline.
+   */
+  allSections: Array<{ path: string; section: string; changedLines: number }>;
 }
 
 function parseFilePath(header: string): string | null {
@@ -470,6 +483,17 @@ export function filterDiff(raw: string, maxChars = DEFAULT_MAX_DIFF_CHARS): Filt
     reviewedChangedLines += changedLines;
   }
 
+  const allSections = kept
+    .map((section) => {
+      const filePath = parseFilePath(section.split('\n', 1)[0] ?? '');
+      return filePath
+        ? { path: filePath, section, changedLines: countChangedLines(section) }
+        : null;
+    })
+    .filter(
+      (entry): entry is { path: string; section: string; changedLines: number } => entry !== null,
+    );
+
   return {
     diff: included.join(''),
     noiseSkippedFiles,
@@ -477,6 +501,7 @@ export function filterDiff(raw: string, maxChars = DEFAULT_MAX_DIFF_CHARS): Filt
     reviewedChangedLines,
     skippedChangedLines,
     sizeSkippedSections,
+    allSections,
   };
 }
 
@@ -728,6 +753,8 @@ export function buildUserPrompt(
   intent?: ReviewIntent,
   coverage?: { reviewedLines: number; totalLines: number },
   retrievableSkipped?: SkippedDiffFile[],
+  omitInlineDiff = false,
+  commitExploration?: { sinceRef?: string },
 ): string {
   const parts: string[] = [];
   const intentBlock = renderIntentBlock(intent);
@@ -739,10 +766,33 @@ export function buildUserPrompt(
   if (commitLog?.trim()) {
     parts.push(`Commits in this MR (oldest first):\n<commits>\n${commitLog.trim()}\n</commits>`);
   }
-  parts.push(`Review this diff:\n<diff>\n${diff}\n</diff>`);
+  // Commit-exploration mode (Mode C): no diff is inlined; the agent walks the
+  // change with the read-only git tools.
+  if (commitExploration) {
+    const since = commitExploration.sinceRef;
+    parts.push(
+      [
+        'This review has NO diff inline. Explore the change with the read-only git tools:',
+        since
+          ? `- \`git_log\` with since="${since}" lists the commits you have NOT reviewed yet (everything after ${since}). Review exactly those commits.`
+          : '- `git_log` lists the commits in this change. Review all of them.',
+        "- `git_show <sha>` shows a commit's message and full diff. Open every commit in scope.",
+        '- `git_diff <from> <to>` shows the combined diff between two points if you prefer to review the range at once.',
+        'A commit you do not open is code you did not review. In your summary, state which commits you reviewed.',
+      ].join('\n'),
+    );
+  }
+  // Disk input mode (omitInlineDiff): the whole change is staged on disk, so no
+  // <diff> block is emitted and the staged-files block carries the full change.
+  if (!omitInlineDiff && !commitExploration) {
+    parts.push(`Review this diff:\n<diff>\n${diff}\n</diff>`);
+  }
   if (retrievableSkipped && retrievableSkipped.length > 0) {
-    // Retrieval mode: size-dropped diffs are staged on disk for the agent to read.
-    parts.push(renderRetrievableSkippedBlock(retrievableSkipped));
+    // Retrieval mode (partial): size-dropped diffs are staged alongside an inline
+    // diff. Disk mode (full): the staged files ARE the whole change.
+    parts.push(
+      renderRetrievableSkippedBlock(retrievableSkipped, omitInlineDiff ? 'full' : 'partial'),
+    );
   } else if (skippedFiles.length > 0) {
     parts.push(
       `<skipped_files>\n${skippedFiles
@@ -1042,10 +1092,42 @@ function accumulateUsage(
   }
 }
 
+/**
+ * The "consider decomposing this MR" hint: present when a threshold is set
+ * (`> 0`) and the change exceeds it. `changedLines` is the count the caller
+ * deems reviewed — the budget-fitted subset for inline mode, the whole change
+ * for disk/commits mode.
+ */
+export function resolveDecomposeHint(
+  threshold: number,
+  reviewedLines: number,
+): { lines: number; threshold: number } | undefined {
+  return threshold > 0 && reviewedLines > threshold
+    ? { lines: reviewedLines, threshold }
+    : undefined;
+}
+
 export async function runReview(config: Config, options: RunReviewOptions): Promise<ReviewUsage> {
   const cwd = options.cwd ?? config.cwd;
   const minSeverity = toGitLabReviewSeverity(config.minSeverity);
   const logger = options.logger ?? noopLogger;
+
+  const inputMode = config.inputMode ?? 'auto';
+  // The read-only git tools are empty unless `cwd` is a real checkout.
+  const gitTools = createGitTools(cwd);
+  // `commits` mode drives the review entirely through the git tools with no diff
+  // inline. Without a checkout those tools are absent, which would leave the
+  // agent with neither a diff nor tools — a silent no-op review. Fall back to the
+  // size-adaptive `auto` behaviour (the diff is available regardless) instead.
+  let commitsMode = inputMode === 'commits';
+  if (commitsMode && gitTools.length === 0) {
+    logger.warn(
+      'Commit-exploration input mode requires a git checkout, but none was found in cwd; falling back to auto input mode.',
+    );
+    commitsMode = false;
+  }
+  // After the possible downgrade, `effectiveMode` is what actually drives staging.
+  const effectiveMode = commitsMode ? 'commits' : inputMode === 'commits' ? 'auto' : inputMode;
 
   const maxDiffChars = config.maxDiffChars > 0 ? config.maxDiffChars : DEFAULT_MAX_DIFF_CHARS;
   const {
@@ -1055,59 +1137,129 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     reviewedChangedLines,
     skippedChangedLines,
     sizeSkippedSections,
+    allSections,
   } = filterDiff(options.diff, maxDiffChars);
-  if (!diff.trim()) {
+
+  // Size-adaptive `auto`: review inline while the diff fits the char budget, and
+  // switch to disk staging once it overflows. Evals show inline's retrieval
+  // fallback is under-used on large diffs, where disk is both more thorough
+  // (the agent actually opens every file) and cheaper (the huge diff is never
+  // inlined). Explicit `disk` / `commits` / `inline` always win over `auto`.
+  const overflowed = sizeSkippedSections.length > 0;
+  const diskMode = effectiveMode === 'disk' || (effectiveMode === 'auto' && overflowed);
+  if (effectiveMode === 'auto') {
+    logger.info(
+      diskMode
+        ? `Auto input mode: diff exceeds the ${maxDiffChars}-char budget — staging all files on disk for the agent to read.`
+        : 'Auto input mode: diff fits the budget — reviewing inline.',
+    );
+  }
+
+  // Inline mode needs a non-empty inlined diff; disk/commits modes present the
+  // change out-of-band, so they require non-noise sections rather than inline text.
+  const hasContent = diskMode || commitsMode ? allSections.length > 0 : diff.trim().length > 0;
+  if (!hasContent) {
     throw new ReviewerError('No reviewable diff content after filtering noise files.', {
       hint: 'Ensure the merge request introduces changes outside of generated/lock files.',
     });
   }
 
-  // The agent still needs to know which files went unreviewed (size + noise), so
-  // it can mention them; the prominent split/decompose callout is surfaced
-  // separately in the MR summary via `sizeNotice`.
-  const skippedFiles = [...sizeSkippedFiles.map((f) => f.path), ...noiseSkippedFiles];
+  // In disk/commits mode the agent reviews the WHOLE change (nothing is dropped
+  // to the char budget), so the hint must count all changed lines, not just the
+  // budget-fitted subset — otherwise it under-fires on exactly the oversized MRs
+  // that trigger disk mode in the first place.
+  const decomposeHint = resolveDecomposeHint(
+    config.decomposeHintLines,
+    diskMode || commitsMode ? reviewedChangedLines + skippedChangedLines : reviewedChangedLines,
+  );
 
-  const decomposeHint =
-    config.decomposeHintLines > 0 && reviewedChangedLines > config.decomposeHintLines
-      ? { lines: reviewedChangedLines, threshold: config.decomposeHintLines }
-      : undefined;
-  // Coverage is only meaningful when the budget actually dropped files.
-  const coverage =
-    sizeSkippedFiles.length > 0
-      ? {
-          reviewedLines: reviewedChangedLines,
-          totalLines: reviewedChangedLines + skippedChangedLines,
-        }
-      : undefined;
-  // Retrieval mode (default on): stage dropped-file diffs on disk so the agent
-  // can read the ones it deems risky instead of losing them to the char budget.
-  const retrievableSkipped =
-    config.retrieveSkipped && sizeSkippedSections.length > 0
-      ? await writeSkippedDiffs(cwd, sizeSkippedSections)
-      : ([] as SkippedDiffFile[]);
-  if (retrievableSkipped.length > 0) {
-    logger.info(`Staged ${retrievableSkipped.length} dropped-file diff(s) on disk for retrieval.`);
+  // Resolve how the change reaches the reviewer, and stage diffs on disk.
+  let promptDiff: string;
+  let promptSkippedFiles: string[];
+  let promptCoverage: { reviewedLines: number; totalLines: number } | undefined;
+  let retrievableSkipped: SkippedDiffFile[];
+  let sizeNotice: ReviewSizeNotice;
+
+  if (commitsMode) {
+    // Commit-exploration mode: nothing inlined or staged — the agent walks the
+    // change with the git tools (wired into `tools` below).
+    retrievableSkipped = [];
+    promptDiff = '';
+    promptSkippedFiles = [];
+    promptCoverage = undefined;
+    sizeNotice = { sizeSkippedFiles: [], decomposeHint, retrieved: false };
+    logger.info(
+      options.sinceRef
+        ? `Commit-exploration input mode: reviewing commits since ${options.sinceRef}.`
+        : 'Commit-exploration input mode: reviewing the full commit range.',
+    );
+  } else if (diskMode) {
+    // Stage the ENTIRE change on disk; nothing is inlined. The same manifest
+    // drives the Verify stage so verifiers read from disk too.
+    retrievableSkipped =
+      allSections.length > 0
+        ? await writeSkippedDiffs(
+            cwd,
+            allSections.map(({ path, section }) => ({ path, section })),
+          )
+        : [];
+    if (retrievableSkipped.length > 0) {
+      logger.info(
+        `Disk input mode: staged ${retrievableSkipped.length} file diff(s) for on-demand review.`,
+      );
+    }
+    promptDiff = '';
+    promptSkippedFiles = [];
+    promptCoverage = undefined;
+    // Staging is the mode here, not a budget truncation, so no partial-coverage
+    // callout — that would falsely read as "we couldn't review this".
+    sizeNotice = { sizeSkippedFiles: [], decomposeHint, retrieved: false };
+  } else {
+    // The agent still needs to know which files went unreviewed (size + noise);
+    // the split/decompose callout is surfaced separately via `sizeNotice`.
+    promptSkippedFiles = [...sizeSkippedFiles.map((f) => f.path), ...noiseSkippedFiles];
+    // Coverage is only meaningful when the budget actually dropped files.
+    promptCoverage =
+      sizeSkippedFiles.length > 0
+        ? {
+            reviewedLines: reviewedChangedLines,
+            totalLines: reviewedChangedLines + skippedChangedLines,
+          }
+        : undefined;
+    // Retrieval mode (default on): stage dropped-file diffs on disk so the agent
+    // can read the ones it deems risky instead of losing them to the char budget.
+    retrievableSkipped =
+      config.retrieveSkipped && sizeSkippedSections.length > 0
+        ? await writeSkippedDiffs(cwd, sizeSkippedSections)
+        : ([] as SkippedDiffFile[]);
+    if (retrievableSkipped.length > 0) {
+      logger.info(
+        `Staged ${retrievableSkipped.length} dropped-file diff(s) on disk for retrieval.`,
+      );
+    }
+    promptDiff = diff;
+    sizeNotice = {
+      sizeSkippedFiles,
+      decomposeHint,
+      coverage: promptCoverage,
+      retrieved: retrievableSkipped.length > 0,
+    };
   }
-
-  const sizeNotice: ReviewSizeNotice = {
-    sizeSkippedFiles,
-    decomposeHint,
-    coverage,
-    retrieved: retrievableSkipped.length > 0,
-  };
 
   const context = await loadReviewContext(cwd, config.skills, (msg) => logger.warn(msg), {
     refreshGitSkills: config.refreshGitSkills,
   });
   const systemPrompt = buildJSONSystemPrompt(context, minSeverity);
   const userPrompt = buildUserPrompt(
-    diff,
-    skippedFiles,
+    promptDiff,
+    promptSkippedFiles,
     options.commitLog,
     options.priorThreads,
     options.intent,
-    coverage,
+    promptCoverage,
     retrievableSkipped,
+    diskMode,
+    commitsMode ? { sinceRef: options.sinceRef } : undefined,
   );
 
   const skillNames = context.skills.map((s) => s.name);
@@ -1126,7 +1278,11 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     logger.info(`Model pool: ${pool.map((m) => m.id).join(', ')}.`);
   }
   const primary = pool[0];
-  const tools = createReadOnlyTools(cwd) as AgentTool[];
+  // Always offer the read-only file tools plus the read-only git tools (the
+  // latter are empty unless `cwd` is a real checkout). This way the agent CAN
+  // explore commit history in any mode if it helps, without being forced to;
+  // only `commits` mode's prompt actively directs it to walk the change that way.
+  const tools = [...createReadOnlyTools(cwd), ...gitTools] as AgentTool[];
 
   const createAgent = options.createAgent ?? defaultCreateAgent;
   const timeoutMs = options.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS;
@@ -1140,6 +1296,8 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     logger,
     aggregated,
     verifyMember: resolveVerifyMember(config, primary, logger),
+    attachTelemetry: options.attachTelemetry,
+    verifyStaged: diskMode ? retrievableSkipped : undefined,
   };
 
   let outputText: string;
@@ -1340,6 +1498,22 @@ interface StageDeps {
    * pool-based selection.
    */
   verifyMember?: PoolMember | null;
+  /**
+   * Optional telemetry attach hook, applied to EVERY agent the stages spawn
+   * (multi-angle finders and per-finding verifiers), not just the single/verify
+   * Find agent. Returns a detach callback run when that agent finishes. Without
+   * this, read-coverage/trajectory measurement silently misses every agent above
+   * `single` depth.
+   */
+  attachTelemetry?: (agent: AgentLike) => (() => void) | undefined;
+  /**
+   * Disk input mode: the staged manifest for the whole change. When set, the
+   * Verify stage omits the inline diff from its system prompt and points
+   * verifiers at the staged files instead, so "nothing inline" holds at every
+   * depth (otherwise verifiers would still receive the diff and the mode's cost
+   * profile wouldn't transfer past `single`).
+   */
+  verifyStaged?: SkippedDiffFile[];
 }
 
 /**
@@ -1381,6 +1555,7 @@ async function runMultiAngleFind(
       thinkingLevel: deps.thinkingLevel,
       getApiKey: member.getApiKey,
     });
+    const detachTelemetry = deps.attachTelemetry?.(agent);
     try {
       const text = await runAgentToCompletion(agent, userPrompt, {
         timeoutMs: deps.timeoutMs,
@@ -1396,6 +1571,8 @@ async function runMultiAngleFind(
       summaries[index] = parsed.summary;
     } catch (error) {
       deps.logger.warn(`Find angle "${angle.key}" failed: ${(error as Error).message}; skipping.`);
+    } finally {
+      detachTelemetry?.();
     }
   });
 
@@ -1434,7 +1611,8 @@ async function verifyAndSynthesize(
 
   const verdicts = new Map<number, Verdict>();
   if (severe.length > 0) {
-    const verifySystemPrompt = buildVerifySystemPrompt(diff, commitLog);
+    // Disk input mode: verifiers read the staged files instead of an inline diff.
+    const verifySystemPrompt = buildVerifySystemPrompt(diff, commitLog, deps.verifyStaged);
     const tasks = severe.map(({ finding, index }) => async () => {
       const comment = finding.comment;
       // Explicit --verify-model wins; otherwise a cross-family verifier: a pool
@@ -1448,6 +1626,7 @@ async function verifyAndSynthesize(
         thinkingLevel: deps.thinkingLevel,
         getApiKey: verifierMember.getApiKey,
       });
+      const detachTelemetry = deps.attachTelemetry?.(verifier);
       try {
         const text = await runAgentToCompletion(verifier, buildVerifyUserPrompt(comment), {
           timeoutMs: deps.timeoutMs,
@@ -1460,6 +1639,8 @@ async function verifyAndSynthesize(
           `Verify failed for ${comment.file}:${comment.line}: ${(error as Error).message}; keeping finding.`,
         );
         verdicts.set(index, { decision: 'keep', reason: 'verifier error; finding kept' });
+      } finally {
+        detachTelemetry?.();
       }
     });
     await runBounded(tasks, VERIFY_CONCURRENCY);

@@ -1,3 +1,4 @@
+import type { SkippedDiffFile } from './skipped-retrieval.js';
 import type { ReviewComment, Severity } from './types.js';
 
 /**
@@ -38,11 +39,18 @@ export interface SynthesisResult {
 
 // --- Prompts --------------------------------------------------------------
 
-export function buildVerifySystemPrompt(diff: string, commitLog?: string): string {
+export function buildVerifySystemPrompt(
+  diff: string,
+  commitLog?: string,
+  staged?: SkippedDiffFile[],
+): string {
+  const diskMode = staged !== undefined && staged.length > 0;
   const parts: string[] = [
     'You are a strict, adversarial verifier of a SINGLE code-review finding. Your job is to REFUTE the finding, not to agree with it.',
     '',
-    'Each request gives you one proposed finding (file, line, severity, confidence, and body) to check against the diff below. You may read referenced files to confirm reachability. Decide whether the finding survives scrutiny.',
+    diskMode
+      ? "Each request gives you one proposed finding (file, line, severity, confidence, and body). The change is NOT inline below — every file diff is staged on disk (see <staged_files>). Open the finding's file (and any others you need) with your file-read tool to check reachability. Decide whether the finding survives scrutiny."
+      : 'Each request gives you one proposed finding (file, line, severity, confidence, and body) to check against the diff below. You may read referenced files to confirm reachability. Decide whether the finding survives scrutiny.',
     '',
     'Apply this bar:',
     '- The finding must point to a concrete defect demonstrable from the diff (and any file you read): a specific input, state, or execution path triggers it, and a violated contract is visible.',
@@ -68,7 +76,15 @@ export function buildVerifySystemPrompt(diff: string, commitLog?: string): strin
       `Commit messages for this change (oldest first):\n<commits>\n${commitLog.trim()}\n</commits>`,
     );
   }
-  parts.push('', `Verify each finding against this diff:\n<diff>\n${diff}\n</diff>`);
+  if (diskMode) {
+    const list = staged!.map((f) => `- ${f.path} → ${f.diskPath}`).join('\n');
+    parts.push(
+      '',
+      `The change is staged on disk — open the relevant file(s) to verify:\n<staged_files>\n${list}\n</staged_files>`,
+    );
+  } else {
+    parts.push('', `Verify each finding against this diff:\n<diff>\n${diff}\n</diff>`);
+  }
   return parts.join('\n');
 }
 

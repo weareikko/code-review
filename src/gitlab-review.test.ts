@@ -266,6 +266,38 @@ describe('runReview pipeline', () => {
     }
   });
 
+  it('filterDiff exposes every non-noise section in allSections regardless of the budget', () => {
+    const bigBody = '+x\n'.repeat(50);
+    const raw = [
+      'diff --git a/package-lock.json b/package-lock.json',
+      '--- a/package-lock.json',
+      '+++ b/package-lock.json',
+      '@@ -1 +1 @@',
+      '+new',
+      'diff --git a/src/big-a.ts b/src/big-a.ts',
+      '--- a/src/big-a.ts',
+      '+++ b/src/big-a.ts',
+      '@@ -1 +1 @@',
+      bigBody,
+      'diff --git a/src/big-b.ts b/src/big-b.ts',
+      '--- a/src/big-b.ts',
+      '+++ b/src/big-b.ts',
+      '@@ -1 +1 @@',
+      bigBody,
+      '',
+    ].join('\n');
+
+    const result = filterDiff(raw, 200); // budget drops one source file
+
+    // allSections carries both source files (the budget is irrelevant to it) but
+    // excludes the noise lockfile.
+    expect(result.allSections.map((s) => s.path).sort()).toEqual(['src/big-a.ts', 'src/big-b.ts']);
+    for (const section of result.allSections) {
+      expect(section.section).toContain(`b/${section.path}`);
+      expect(section.changedLines).toBeGreaterThan(0);
+    }
+  });
+
   it('filterDiff preserves diff order and reports full coverage when under budget', () => {
     const raw = [
       'diff --git a/src/a.ts b/src/a.ts',
@@ -366,7 +398,7 @@ describe('runReview pipeline', () => {
     };
 
     await runReview(
-      { ...minimalConfig, cwd, maxDiffChars: 300, retrieveSkipped: true },
+      { ...minimalConfig, cwd, maxDiffChars: 300, retrieveSkipped: true, inputMode: 'inline' },
       { cwd, diff: raw, createAgent: () => capturingAgent, logger },
     );
 
@@ -379,6 +411,151 @@ describe('runReview pipeline', () => {
     await expect(
       readFile(join(cwd, '.code-review-skipped', 'src__big-b.ts.diff')),
     ).rejects.toThrow();
+  });
+
+  it('auto input mode: switches to disk staging when the diff overflows the budget', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    const bigBody = '+x\n'.repeat(50);
+    const raw = [
+      'diff --git a/src/big-a.ts b/src/big-a.ts',
+      '--- a/src/big-a.ts',
+      '+++ b/src/big-a.ts',
+      '@@ -1 +1 @@',
+      bigBody,
+      'diff --git a/src/big-b.ts b/src/big-b.ts',
+      '--- a/src/big-b.ts',
+      '+++ b/src/big-b.ts',
+      '@@ -1 +1 @@',
+      bigBody,
+      '',
+    ].join('\n');
+    let capturedPrompt = '';
+    const infos: string[] = [];
+    const logger = {
+      debug: () => {},
+      info: (m: string) => infos.push(m),
+      warn: () => {},
+      error: () => {},
+    };
+    const messages = [makeAssistant('done', { input: 1, output: 1 })];
+    const listeners: Array<(e: AgentEvent) => void | Promise<void>> = [];
+    const agent: AgentLike = {
+      subscribe(fn) {
+        listeners.push(fn);
+        return () => {};
+      },
+      async prompt(prompt: string) {
+        capturedPrompt = prompt;
+        for (const fn of listeners) {
+          for (const message of messages) await fn({ type: 'message_end', message });
+          await fn({ type: 'agent_end', messages });
+        }
+      },
+    };
+
+    // inputMode defaults to `auto`; a 300-char budget forces overflow.
+    await runReview(
+      { ...minimalConfig, cwd, maxDiffChars: 300 },
+      { cwd, diff: raw, createAgent: () => agent, logger },
+    );
+
+    expect(infos.some((m) => /Auto input mode: diff exceeds/.test(m))).toBe(true);
+    // Disk behaviour: no inline <diff>, and BOTH files staged (not just the dropped one).
+    expect(capturedPrompt).not.toContain('<diff>');
+    expect(capturedPrompt).toContain('NO diff inline');
+    expect(capturedPrompt).toContain('src/big-a.ts');
+    expect(capturedPrompt).toContain('src/big-b.ts');
+  });
+
+  it('commits input mode falls back to auto when cwd is not a git checkout', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-')); // no .git → no git tools
+    const raw = [
+      'diff --git a/src/a.ts b/src/a.ts',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -1 +1 @@',
+      '+const a = 1;',
+      '',
+    ].join('\n');
+    let capturedPrompt = '';
+    const warns: string[] = [];
+    const logger = {
+      debug: () => {},
+      info: () => {},
+      warn: (m: string) => warns.push(m),
+      error: () => {},
+    };
+    const messages = [makeAssistant('done', { input: 1, output: 1 })];
+    const listeners: Array<(e: AgentEvent) => void | Promise<void>> = [];
+    const agent: AgentLike = {
+      subscribe(fn) {
+        listeners.push(fn);
+        return () => {};
+      },
+      async prompt(prompt: string) {
+        capturedPrompt = prompt;
+        for (const fn of listeners) {
+          for (const message of messages) await fn({ type: 'message_end', message });
+          await fn({ type: 'agent_end', messages });
+        }
+      },
+    };
+
+    await runReview(
+      { ...minimalConfig, cwd, inputMode: 'commits' },
+      { cwd, diff: raw, createAgent: () => agent, logger },
+    );
+
+    // Warns about the missing checkout and reviews inline (auto) rather than
+    // emitting a commit-exploration prompt with no git tools to back it.
+    expect(warns.some((m) => /requires a git checkout/.test(m))).toBe(true);
+    expect(capturedPrompt).not.toContain('git_log');
+    expect(capturedPrompt).toContain('<diff>');
+    expect(capturedPrompt).toContain('+const a = 1;');
+  });
+
+  it('auto input mode: reviews inline when the diff fits the budget', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    const raw = [
+      'diff --git a/src/a.ts b/src/a.ts',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -1 +1 @@',
+      '+const a = 1;',
+      '',
+    ].join('\n');
+    let capturedPrompt = '';
+    const infos: string[] = [];
+    const logger = {
+      debug: () => {},
+      info: (m: string) => infos.push(m),
+      warn: () => {},
+      error: () => {},
+    };
+    const messages = [makeAssistant('done', { input: 1, output: 1 })];
+    const listeners: Array<(e: AgentEvent) => void | Promise<void>> = [];
+    const agent: AgentLike = {
+      subscribe(fn) {
+        listeners.push(fn);
+        return () => {};
+      },
+      async prompt(prompt: string) {
+        capturedPrompt = prompt;
+        for (const fn of listeners) {
+          for (const message of messages) await fn({ type: 'message_end', message });
+          await fn({ type: 'agent_end', messages });
+        }
+      },
+    };
+
+    await runReview(
+      { ...minimalConfig, cwd },
+      { cwd, diff: raw, createAgent: () => agent, logger },
+    );
+
+    expect(infos.some((m) => /Auto input mode: diff fits/.test(m))).toBe(true);
+    expect(capturedPrompt).toContain('<diff>');
+    expect(capturedPrompt).toContain('+const a = 1;');
   });
 
   it('filterDiff reports reviewed changed-line count for the included diff', () => {
@@ -1419,6 +1596,64 @@ describe('buildUserPrompt', () => {
     // Retrieval block replaces the plain "not reviewed" list, not appends to it.
     expect(prompt).not.toContain('The above files were not included because the diff exceeded');
     expect(prompt.indexOf('<diff>')).toBeLessThan(prompt.indexOf('<skipped_files>'));
+  });
+
+  it('with omitInlineDiff (disk mode): omits the <diff> block and uses the full staged-files wording', () => {
+    const prompt = buildUserPrompt(
+      diff,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      [
+        { path: 'src/a.ts', diskPath: '.code-review-skipped/src__a.ts.diff' },
+        { path: 'src/b.ts', diskPath: '.code-review-skipped/src__b.ts.diff' },
+      ],
+      true,
+    );
+
+    expect(prompt).not.toContain('<diff>');
+    expect(prompt).toContain('<skipped_files>');
+    expect(prompt).toContain('- src/a.ts → .code-review-skipped/src__a.ts.diff');
+    expect(prompt).toContain('NO diff inline');
+    expect(prompt).toContain('a file you do not open is a file you did not review');
+  });
+
+  it('with commitExploration: omits the diff and instructs git-tool exploration scoped to sinceRef', () => {
+    const prompt = buildUserPrompt(
+      diff,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      { sinceRef: 'abc1234' },
+    );
+
+    expect(prompt).not.toContain('<diff>');
+    expect(prompt).toContain('git_log');
+    expect(prompt).toContain('git_show');
+    expect(prompt).toContain('since="abc1234"');
+    expect(prompt).toContain('state which commits you reviewed');
+  });
+
+  it('with commitExploration and no sinceRef: reviews the full commit range', () => {
+    const prompt = buildUserPrompt(
+      diff,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      {},
+    );
+    expect(prompt).not.toContain('<diff>');
+    expect(prompt).toContain('`git_log` lists the commits in this change. Review all of them.');
   });
 });
 

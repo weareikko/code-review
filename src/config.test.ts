@@ -186,6 +186,15 @@ describe('config env defaults', () => {
       resolveConfig([], { ...baseEnv, CODE_REVIEW_RETRIEVE_SKIPPED: 'false' }).retrieveSkipped,
     ).toBe(false);
   });
+
+  it('resolves inputMode from the flag and env, default auto', () => {
+    expect(resolveConfig([], { ...baseEnv }).inputMode).toBe('auto');
+    expect(resolveConfig(['--input-mode', 'disk'], { ...baseEnv }).inputMode).toBe('disk');
+    expect(resolveConfig(['--input-mode', 'inline'], { ...baseEnv }).inputMode).toBe('inline');
+    expect(resolveConfig([], { ...baseEnv, CODE_REVIEW_INPUT_MODE: 'commits' }).inputMode).toBe(
+      'commits',
+    );
+  });
 });
 
 describe('parsePrNumberFromEvent', () => {
