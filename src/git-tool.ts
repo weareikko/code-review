@@ -15,6 +15,7 @@
  */
 
 import nodeFs from 'node:fs';
+import { join } from 'node:path';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { createTwoFilesPatch } from 'diff';
 import * as git from 'isomorphic-git';
@@ -120,6 +121,10 @@ async function diffCommits(
  */
 export function createGitTools(dir: string, options: GitToolOptions = {}): AgentTool[] {
   const fs = options.fs ?? nodeFs;
+  // Only offer the git tools when `dir` is actually a git repository (a `.git`
+  // dir or worktree file). Lets callers wire them unconditionally: present at a
+  // real repo root, absent when reviewing a bare diff with no checkout.
+  if (!fs.existsSync(join(dir, '.git'))) return [];
 
   const gitLog = {
     name: 'git_log',

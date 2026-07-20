@@ -154,11 +154,11 @@ export interface Config {
    */
   reviewDepth: ReviewDepth;
   /**
-   * How the change is presented to the reviewer (`inline` diff vs. `disk`-staged
-   * files the agent reads on demand). Sourced from `--input-mode` /
-   * `CODE_REVIEW_INPUT_MODE`; default `inline`. Optional on the type so existing
-   * `Config` fixtures need not set it — `resolveConfig` always populates it and
-   * read sites default to `inline`.
+   * How the change is presented to the reviewer: `auto` (inline while it fits the
+   * budget, disk on overflow), `inline`, `disk`, or `commits`. Sourced from
+   * `--input-mode` / `CODE_REVIEW_INPUT_MODE`; default `auto`. Optional on the
+   * type so existing `Config` fixtures need not set it — `resolveConfig` always
+   * populates it and read sites default to `auto`.
    */
   inputMode?: ReviewInputMode;
   /**
@@ -587,7 +587,7 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
       args.reviewDepth ?? env.CODE_REVIEW_DEPTH ?? 'single',
     ) as ReviewDepth,
     inputMode: normalizeChoice(
-      args.inputMode ?? env.CODE_REVIEW_INPUT_MODE ?? 'inline',
+      args.inputMode ?? env.CODE_REVIEW_INPUT_MODE ?? 'auto',
     ) as ReviewInputMode,
     verifyModel: String(args.verifyModel ?? env.CODE_REVIEW_VERIFY_MODEL ?? ''),
     postingMode: normalizeChoice(

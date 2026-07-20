@@ -124,7 +124,9 @@ describe('input-mode comparison harness (stub agent)', () => {
     }
   });
 
-  it('wires the git tools into the agent only for commit-exploration arms', async () => {
+  it('offers the git tools whenever a repo is present (all modes), not only commit-exploration', async () => {
+    // inline arm reviews from a bare temp cwd (no checkout) → no git tools, even
+    // though the toolbox now wires them in every mode.
     const inlineStub = makeStub(review);
     await runArm({ review, arm: ARMS[0], repo, createAgent: inlineStub.createAgent, model: M });
     expect(inlineStub.toolNames).not.toContain('git_show');

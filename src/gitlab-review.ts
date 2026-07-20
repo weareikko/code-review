@@ -1097,8 +1097,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   const minSeverity = toGitLabReviewSeverity(config.minSeverity);
   const logger = options.logger ?? noopLogger;
 
-  const inputMode = config.inputMode ?? 'inline';
-  const diskMode = inputMode === 'disk';
+  const inputMode = config.inputMode ?? 'auto';
   const commitsMode = inputMode === 'commits';
 
   const maxDiffChars = config.maxDiffChars > 0 ? config.maxDiffChars : DEFAULT_MAX_DIFF_CHARS;
@@ -1111,6 +1110,22 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     sizeSkippedSections,
     allSections,
   } = filterDiff(options.diff, maxDiffChars);
+
+  // Size-adaptive `auto`: review inline while the diff fits the char budget, and
+  // switch to disk staging once it overflows. Evals show inline's retrieval
+  // fallback is under-used on large diffs, where disk is both more thorough
+  // (the agent actually opens every file) and cheaper (the huge diff is never
+  // inlined). Explicit `disk` / `commits` / `inline` always win over `auto`.
+  const overflowed = sizeSkippedSections.length > 0;
+  const diskMode = inputMode === 'disk' || (inputMode === 'auto' && overflowed);
+  if (inputMode === 'auto') {
+    logger.info(
+      diskMode
+        ? `Auto input mode: diff exceeds the ${maxDiffChars}-char budget — staging all files on disk for the agent to read.`
+        : 'Auto input mode: diff fits the budget — reviewing inline.',
+    );
+  }
+
   // Inline mode needs a non-empty inlined diff; disk/commits modes present the
   // change out-of-band, so they require non-noise sections rather than inline text.
   const hasContent = diskMode || commitsMode ? allSections.length > 0 : diff.trim().length > 0;
@@ -1230,11 +1245,11 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     logger.info(`Model pool: ${pool.map((m) => m.id).join(', ')}.`);
   }
   const primary = pool[0];
-  // Commit-exploration mode adds the read-only git tools so the agent can walk
-  // the change; other modes keep the plain read-only file tools.
-  const tools = (
-    commitsMode ? [...createReadOnlyTools(cwd), ...createGitTools(cwd)] : createReadOnlyTools(cwd)
-  ) as AgentTool[];
+  // Always offer the read-only file tools plus the read-only git tools (the
+  // latter are empty unless `cwd` is a real checkout). This way the agent CAN
+  // explore commit history in any mode if it helps, without being forced to;
+  // only `commits` mode's prompt actively directs it to walk the change that way.
+  const tools = [...createReadOnlyTools(cwd), ...createGitTools(cwd)] as AgentTool[];
 
   const createAgent = options.createAgent ?? defaultCreateAgent;
   const timeoutMs = options.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS;

@@ -98,10 +98,11 @@ Options:
   --review-depth <depth>  single (one pass), verify (adversarial re-check of each
                           severe finding), or full (multi-angle finders → triage →
                           verify). (default: single; env: CODE_REVIEW_DEPTH)
-  --input-mode <mode>     How the change is fed to the reviewer: inline (diff in the
-                          prompt), disk (every file diff staged on disk; the agent
-                          reads on demand), or commits (agent explores the change via
-                          read-only git tools). (default: inline; env: CODE_REVIEW_INPUT_MODE)
+  --input-mode <mode>     How the change is fed to the reviewer: auto (inline while it
+                          fits the budget, disk on overflow), inline (diff in the prompt),
+                          disk (every file diff staged on disk; the agent reads on demand),
+                          or commits (agent explores via read-only git tools).
+                          (default: auto; env: CODE_REVIEW_INPUT_MODE)
   --verify-model <p/id>   Model for the Verify stage (verify/full depth). Pairs a cheap
                           finder with a strong, high-precision verifier. Warns if it looks
                           cheaper than --model. Empty (default) = pool selection.

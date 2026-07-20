@@ -398,7 +398,7 @@ describe('runReview pipeline', () => {
     };
 
     await runReview(
-      { ...minimalConfig, cwd, maxDiffChars: 300, retrieveSkipped: true },
+      { ...minimalConfig, cwd, maxDiffChars: 300, retrieveSkipped: true, inputMode: 'inline' },
       { cwd, diff: raw, createAgent: () => capturingAgent, logger },
     );
 
@@ -411,6 +411,104 @@ describe('runReview pipeline', () => {
     await expect(
       readFile(join(cwd, '.code-review-skipped', 'src__big-b.ts.diff')),
     ).rejects.toThrow();
+  });
+
+  it('auto input mode: switches to disk staging when the diff overflows the budget', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    const bigBody = '+x\n'.repeat(50);
+    const raw = [
+      'diff --git a/src/big-a.ts b/src/big-a.ts',
+      '--- a/src/big-a.ts',
+      '+++ b/src/big-a.ts',
+      '@@ -1 +1 @@',
+      bigBody,
+      'diff --git a/src/big-b.ts b/src/big-b.ts',
+      '--- a/src/big-b.ts',
+      '+++ b/src/big-b.ts',
+      '@@ -1 +1 @@',
+      bigBody,
+      '',
+    ].join('\n');
+    let capturedPrompt = '';
+    const infos: string[] = [];
+    const logger = {
+      debug: () => {},
+      info: (m: string) => infos.push(m),
+      warn: () => {},
+      error: () => {},
+    };
+    const messages = [makeAssistant('done', { input: 1, output: 1 })];
+    const listeners: Array<(e: AgentEvent) => void | Promise<void>> = [];
+    const agent: AgentLike = {
+      subscribe(fn) {
+        listeners.push(fn);
+        return () => {};
+      },
+      async prompt(prompt: string) {
+        capturedPrompt = prompt;
+        for (const fn of listeners) {
+          for (const message of messages) await fn({ type: 'message_end', message });
+          await fn({ type: 'agent_end', messages });
+        }
+      },
+    };
+
+    // inputMode defaults to `auto`; a 300-char budget forces overflow.
+    await runReview(
+      { ...minimalConfig, cwd, maxDiffChars: 300 },
+      { cwd, diff: raw, createAgent: () => agent, logger },
+    );
+
+    expect(infos.some((m) => /Auto input mode: diff exceeds/.test(m))).toBe(true);
+    // Disk behaviour: no inline <diff>, and BOTH files staged (not just the dropped one).
+    expect(capturedPrompt).not.toContain('<diff>');
+    expect(capturedPrompt).toContain('NO diff inline');
+    expect(capturedPrompt).toContain('src/big-a.ts');
+    expect(capturedPrompt).toContain('src/big-b.ts');
+  });
+
+  it('auto input mode: reviews inline when the diff fits the budget', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    const raw = [
+      'diff --git a/src/a.ts b/src/a.ts',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -1 +1 @@',
+      '+const a = 1;',
+      '',
+    ].join('\n');
+    let capturedPrompt = '';
+    const infos: string[] = [];
+    const logger = {
+      debug: () => {},
+      info: (m: string) => infos.push(m),
+      warn: () => {},
+      error: () => {},
+    };
+    const messages = [makeAssistant('done', { input: 1, output: 1 })];
+    const listeners: Array<(e: AgentEvent) => void | Promise<void>> = [];
+    const agent: AgentLike = {
+      subscribe(fn) {
+        listeners.push(fn);
+        return () => {};
+      },
+      async prompt(prompt: string) {
+        capturedPrompt = prompt;
+        for (const fn of listeners) {
+          for (const message of messages) await fn({ type: 'message_end', message });
+          await fn({ type: 'agent_end', messages });
+        }
+      },
+    };
+
+    await runReview(
+      { ...minimalConfig, cwd },
+      { cwd, diff: raw, createAgent: () => agent, logger },
+    );
+
+    expect(infos.some((m) => /Auto input mode: diff fits/.test(m))).toBe(true);
+    expect(capturedPrompt).toContain('<diff>');
+    expect(capturedPrompt).toContain('+const a = 1;');
   });
 
   it('filterDiff reports reviewed changed-line count for the included diff', () => {

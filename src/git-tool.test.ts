@@ -83,4 +83,13 @@ describe('createGitTools', () => {
     const [, gitShow] = createGitTools(dir);
     await expect(runText(gitShow, { ref: 'a; rm -rf /' })).rejects.toThrow(/Invalid git ref/);
   });
+
+  it('returns no tools when the directory is not a git repository', async () => {
+    const bare = await mkdtemp(join(tmpdir(), 'not-a-repo-'));
+    try {
+      expect(createGitTools(bare)).toEqual([]);
+    } finally {
+      await rm(bare, { recursive: true, force: true });
+    }
+  });
 });

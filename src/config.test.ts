@@ -187,11 +187,12 @@ describe('config env defaults', () => {
     ).toBe(false);
   });
 
-  it('resolves inputMode from the flag and env, default inline', () => {
-    expect(resolveConfig([], { ...baseEnv }).inputMode).toBe('inline');
+  it('resolves inputMode from the flag and env, default auto', () => {
+    expect(resolveConfig([], { ...baseEnv }).inputMode).toBe('auto');
     expect(resolveConfig(['--input-mode', 'disk'], { ...baseEnv }).inputMode).toBe('disk');
-    expect(resolveConfig([], { ...baseEnv, CODE_REVIEW_INPUT_MODE: 'disk' }).inputMode).toBe(
-      'disk',
+    expect(resolveConfig(['--input-mode', 'inline'], { ...baseEnv }).inputMode).toBe('inline');
+    expect(resolveConfig([], { ...baseEnv, CODE_REVIEW_INPUT_MODE: 'commits' }).inputMode).toBe(
+      'commits',
     );
   });
 });
