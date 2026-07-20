@@ -467,6 +467,53 @@ describe('runReview pipeline', () => {
     expect(capturedPrompt).toContain('src/big-b.ts');
   });
 
+  it('commits input mode falls back to auto when cwd is not a git checkout', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-')); // no .git → no git tools
+    const raw = [
+      'diff --git a/src/a.ts b/src/a.ts',
+      '--- a/src/a.ts',
+      '+++ b/src/a.ts',
+      '@@ -1 +1 @@',
+      '+const a = 1;',
+      '',
+    ].join('\n');
+    let capturedPrompt = '';
+    const warns: string[] = [];
+    const logger = {
+      debug: () => {},
+      info: () => {},
+      warn: (m: string) => warns.push(m),
+      error: () => {},
+    };
+    const messages = [makeAssistant('done', { input: 1, output: 1 })];
+    const listeners: Array<(e: AgentEvent) => void | Promise<void>> = [];
+    const agent: AgentLike = {
+      subscribe(fn) {
+        listeners.push(fn);
+        return () => {};
+      },
+      async prompt(prompt: string) {
+        capturedPrompt = prompt;
+        for (const fn of listeners) {
+          for (const message of messages) await fn({ type: 'message_end', message });
+          await fn({ type: 'agent_end', messages });
+        }
+      },
+    };
+
+    await runReview(
+      { ...minimalConfig, cwd, inputMode: 'commits' },
+      { cwd, diff: raw, createAgent: () => agent, logger },
+    );
+
+    // Warns about the missing checkout and reviews inline (auto) rather than
+    // emitting a commit-exploration prompt with no git tools to back it.
+    expect(warns.some((m) => /requires a git checkout/.test(m))).toBe(true);
+    expect(capturedPrompt).not.toContain('git_log');
+    expect(capturedPrompt).toContain('<diff>');
+    expect(capturedPrompt).toContain('+const a = 1;');
+  });
+
   it('auto input mode: reviews inline when the diff fits the budget', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const raw = [

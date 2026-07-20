@@ -99,12 +99,15 @@ async function diffCommits(
   });
 
   const patches: string[] = [];
+  let patchBytes = 0; // running total (incl. the '\n' join separators) — avoids O(n²) re-joins.
   for (const filepath of changed.sort()) {
     const before = oldOid ? ((await readFileAt(dir, fs, oldOid, filepath)) ?? '') : '';
     const after = (await readFileAt(dir, fs, newOid, filepath)) ?? '';
     if (before === after) continue; // binary-skipped or no textual change
-    patches.push(createTwoFilesPatch(`a/${filepath}`, `b/${filepath}`, before, after));
-    if (patches.join('\n').length > MAX_PATCH_BYTES) {
+    const patch = createTwoFilesPatch(`a/${filepath}`, `b/${filepath}`, before, after);
+    patches.push(patch);
+    patchBytes += patch.length + 1;
+    if (patchBytes > MAX_PATCH_BYTES) {
       patches.push(
         `\n[diff truncated at ${MAX_PATCH_BYTES} bytes — open the file directly for the rest]`,
       );
@@ -145,7 +148,15 @@ export function createGitTools(dir: string, options: GitToolOptions = {}): Agent
       let stop = -1;
       if (params.since) {
         const sinceOid = await resolveOid(dir, fs, params.since);
-        stop = commits.findIndex((c) => c.oid === sinceOid || c.oid.startsWith(sinceOid));
+        stop = commits.findIndex((c) => c.oid === sinceOid);
+        if (stop < 0) {
+          // The base is outside the fetched window. Returning the full list here
+          // would silently report already-reviewed commits as unreviewed, so be
+          // explicit and let the agent widen the window instead.
+          return text(
+            `(base ref ${params.since} is not within the ${depth} most recent commits — re-run git_log with a larger maxCount to cover the full unreviewed range)`,
+          );
+        }
       }
       const list = (stop >= 0 ? commits.slice(0, stop) : commits).map((c) => {
         const subject = c.commit.message.split('\n', 1)[0];

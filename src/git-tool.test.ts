@@ -53,6 +53,15 @@ describe('createGitTools', () => {
     expect(out).not.toContain('feat: add a');
   });
 
+  it('git_log with a since base outside the fetched window reports it instead of listing everything', async () => {
+    const [gitLog] = createGitTools(dir);
+    // maxCount 1 fetches only the newest commit, so the older base is out of range.
+    const out = await runText(gitLog, { since: firstOid, maxCount: 1 });
+    expect(out).toContain('not within the 1 most recent commits');
+    expect(out).toContain('larger maxCount');
+    expect(out).not.toContain('feat: add a');
+  });
+
   it('git_show renders the commit message and a unified diff vs the parent', async () => {
     const [, gitShow] = createGitTools(dir);
     const out = await runText(gitShow, { ref: secondOid });

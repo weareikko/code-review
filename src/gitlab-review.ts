@@ -1092,13 +1092,42 @@ function accumulateUsage(
   }
 }
 
+/**
+ * The "consider decomposing this MR" hint: present when a threshold is set
+ * (`> 0`) and the change exceeds it. `changedLines` is the count the caller
+ * deems reviewed — the budget-fitted subset for inline mode, the whole change
+ * for disk/commits mode.
+ */
+export function resolveDecomposeHint(
+  threshold: number,
+  reviewedLines: number,
+): { lines: number; threshold: number } | undefined {
+  return threshold > 0 && reviewedLines > threshold
+    ? { lines: reviewedLines, threshold }
+    : undefined;
+}
+
 export async function runReview(config: Config, options: RunReviewOptions): Promise<ReviewUsage> {
   const cwd = options.cwd ?? config.cwd;
   const minSeverity = toGitLabReviewSeverity(config.minSeverity);
   const logger = options.logger ?? noopLogger;
 
   const inputMode = config.inputMode ?? 'auto';
-  const commitsMode = inputMode === 'commits';
+  // The read-only git tools are empty unless `cwd` is a real checkout.
+  const gitTools = createGitTools(cwd);
+  // `commits` mode drives the review entirely through the git tools with no diff
+  // inline. Without a checkout those tools are absent, which would leave the
+  // agent with neither a diff nor tools — a silent no-op review. Fall back to the
+  // size-adaptive `auto` behaviour (the diff is available regardless) instead.
+  let commitsMode = inputMode === 'commits';
+  if (commitsMode && gitTools.length === 0) {
+    logger.warn(
+      'Commit-exploration input mode requires a git checkout, but none was found in cwd; falling back to auto input mode.',
+    );
+    commitsMode = false;
+  }
+  // After the possible downgrade, `effectiveMode` is what actually drives staging.
+  const effectiveMode = commitsMode ? 'commits' : inputMode === 'commits' ? 'auto' : inputMode;
 
   const maxDiffChars = config.maxDiffChars > 0 ? config.maxDiffChars : DEFAULT_MAX_DIFF_CHARS;
   const {
@@ -1117,8 +1146,8 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   // (the agent actually opens every file) and cheaper (the huge diff is never
   // inlined). Explicit `disk` / `commits` / `inline` always win over `auto`.
   const overflowed = sizeSkippedSections.length > 0;
-  const diskMode = inputMode === 'disk' || (inputMode === 'auto' && overflowed);
-  if (inputMode === 'auto') {
+  const diskMode = effectiveMode === 'disk' || (effectiveMode === 'auto' && overflowed);
+  if (effectiveMode === 'auto') {
     logger.info(
       diskMode
         ? `Auto input mode: diff exceeds the ${maxDiffChars}-char budget — staging all files on disk for the agent to read.`
@@ -1135,10 +1164,14 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     });
   }
 
-  const decomposeHint =
-    config.decomposeHintLines > 0 && reviewedChangedLines > config.decomposeHintLines
-      ? { lines: reviewedChangedLines, threshold: config.decomposeHintLines }
-      : undefined;
+  // In disk/commits mode the agent reviews the WHOLE change (nothing is dropped
+  // to the char budget), so the hint must count all changed lines, not just the
+  // budget-fitted subset — otherwise it under-fires on exactly the oversized MRs
+  // that trigger disk mode in the first place.
+  const decomposeHint = resolveDecomposeHint(
+    config.decomposeHintLines,
+    diskMode || commitsMode ? reviewedChangedLines + skippedChangedLines : reviewedChangedLines,
+  );
 
   // Resolve how the change reaches the reviewer, and stage diffs on disk.
   let promptDiff: string;
@@ -1249,7 +1282,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   // latter are empty unless `cwd` is a real checkout). This way the agent CAN
   // explore commit history in any mode if it helps, without being forced to;
   // only `commits` mode's prompt actively directs it to walk the change that way.
-  const tools = [...createReadOnlyTools(cwd), ...createGitTools(cwd)] as AgentTool[];
+  const tools = [...createReadOnlyTools(cwd), ...gitTools] as AgentTool[];
 
   const createAgent = options.createAgent ?? defaultCreateAgent;
   const timeoutMs = options.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS;
