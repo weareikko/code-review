@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `--input-mode` / `CODE_REVIEW_INPUT_MODE` with a new default `auto`: the reviewer receives the diff inline while it fits the char budget and switches to on-disk staging once it overflows (the agent reads files on demand), which raised recall on large over-budget diffs in evals where inline's retrieval fallback went under-used. Explicit `inline`, `disk`, and `commits` modes are also selectable, and read-only git tools (`git_log`/`git_show`/`git_diff`) are available to the reviewer in every mode when run against a checkout ([#131]).
 
+### Changed
+
+- On diffs that overflow the char budget, the default (`auto`) now stages the whole change on disk for the reviewer to read on demand, instead of reviewing the fitted diff inline with on-disk retrieval of only the dropped files. The previous inline-plus-retrieval behaviour is unchanged but now opt-in via `--input-mode inline` ([#131]).
+
 ## [0.8.4] - 2026-07-16
 
 ### Changed
