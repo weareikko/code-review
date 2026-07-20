@@ -41,6 +41,7 @@ export interface Arm {
 export const ARMS: Arm[] = [
   { label: 'inline', inputMode: 'inline' },
   { label: 'disk', inputMode: 'disk' },
+  { label: 'auto', inputMode: 'auto' },
   { label: 'commits-full', inputMode: 'commits' },
   { label: 'commits-incremental', inputMode: 'commits', incremental: true },
 ];
