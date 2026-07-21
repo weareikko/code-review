@@ -1669,6 +1669,21 @@ describe('loadReviewContext', () => {
     });
     expect(ctx.skills.map((s) => s.name)).toContain('code-review');
   });
+
+  it('warns and skips a named skill that fails to load instead of aborting the review', async () => {
+    // A missing/unresolvable skill (e.g. an external skill that can't be
+    // downloaded) must not fail the whole review — it should warn and skip,
+    // while any valid skills still load.
+    const cwd = await mkdtemp(join(tmpdir(), 'lrc-'));
+    const warnings: string[] = [];
+    const ctx = await loadReviewContext(
+      cwd,
+      ['file:/nonexistent/skill/dir', 'code-review'],
+      (msg) => warnings.push(msg),
+    );
+    expect(ctx.skills.map((s) => s.name)).toEqual(['code-review']);
+    expect(warnings.some((w) => w.includes('file:/nonexistent/skill/dir'))).toBe(true);
+  });
 });
 
 const poolAngleJson = (comments: unknown[]) =>

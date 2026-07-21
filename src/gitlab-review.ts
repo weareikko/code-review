@@ -9,7 +9,7 @@ import { getModel } from '@earendil-works/pi-ai';
 import { createReadOnlyTools } from '@earendil-works/pi-coding-agent';
 import type { Config } from './config.js';
 import { resolveProviderApiKey } from './config.js';
-import { isQuotaExceededMessage, ReviewerError } from './errors.js';
+import { formatError, isQuotaExceededMessage, ReviewerError } from './errors.js';
 import { createGitTools } from './git-tool.js';
 import type { Logger } from './logger.js';
 import { noopLogger } from './logger.js';
@@ -338,9 +338,20 @@ export async function loadReviewContext(
   const named = await Promise.all(
     skillNames
       .filter((n) => !discoveredNames.has(n))
-      .map((n) => loadNamedSkill(n, cwd, { refresh: options.refreshGitSkills })),
+      .map(async (n) => {
+        try {
+          return await loadNamedSkill(n, cwd, { refresh: options.refreshGitSkills });
+        } catch (error) {
+          // A skill is auxiliary guidance, not part of the diff under review.
+          // Failing to load one (e.g. an external `git:` clone that can't be
+          // downloaded) must not abort the whole review — warn and skip so the
+          // review still runs with whatever skills did load.
+          warn?.(`Skipping skill "${n}": ${formatError(error)}`);
+          return null;
+        }
+      }),
   );
-  skills.push(...named);
+  skills.push(...named.filter((s): s is Skill => s !== null));
 
   return { conventions, reviewRules, skills };
 }
