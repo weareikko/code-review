@@ -271,32 +271,47 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
 
     logger.info('Running review...');
     let usage: ReviewUsage;
+    // Latest usage snapshot from runReview, updated even if the run then throws.
+    // Lets the error/quota paths below record the real partial cost/tokens the
+    // run incurred, so the review-level metrics match the per-turn
+    // gen_ai.client.cost telemetry instead of silently dropping failed-run spend.
+    let partialUsage: ReviewUsage | undefined;
     try {
       usage = await traceDiagnosticPhase('reviewer.run', config, runId, async (context) => {
-        const result = await runReview(config, {
-          cwd: config.cwd,
-          diff,
-          commitLog,
-          priorThreads,
-          intent: { title: mr.title, description: mr.description },
-          logger,
-          // Subscribe the OTel bridge to the agent's event stream so per-turn
-          // and per-tool-call spans/metrics fire in real time.
-          attachTelemetry: bridges?.otel?.createAgentTelemetry(runId),
-          // `commits` mode: scope the review to commits after the last-reviewed
-          // one (from the prior summary footer) for an incremental pass. Only
-          // when it differs from head — equal-to-head would leave nothing to
-          // review (and that case is only reachable under --force-review, which
-          // wants a full re-review anyway).
-          sinceRef:
-            config.inputMode === 'commits' &&
-            reviewedCommitSha &&
-            reviewedCommitSha !== refs.head_sha
-              ? reviewedCommitSha
-              : undefined,
-        });
-        context.usage = result;
-        return result;
+        try {
+          const result = await runReview(config, {
+            cwd: config.cwd,
+            diff,
+            commitLog,
+            priorThreads,
+            intent: { title: mr.title, description: mr.description },
+            logger,
+            // Subscribe the OTel bridge to the agent's event stream so per-turn
+            // and per-tool-call spans/metrics fire in real time.
+            attachTelemetry: bridges?.otel?.createAgentTelemetry(runId),
+            onUsage: (u) => {
+              partialUsage = u;
+            },
+            // `commits` mode: scope the review to commits after the last-reviewed
+            // one (from the prior summary footer) for an incremental pass. Only
+            // when it differs from head — equal-to-head would leave nothing to
+            // review (and that case is only reachable under --force-review, which
+            // wants a full re-review anyway).
+            sinceRef:
+              config.inputMode === 'commits' &&
+              reviewedCommitSha &&
+              reviewedCommitSha !== refs.head_sha
+                ? reviewedCommitSha
+                : undefined,
+          });
+          context.usage = result;
+          return result;
+        } catch (error) {
+          // Attribute the partial spend accumulated before the failure to the
+          // errored run's context so closeSpan records it on the error path.
+          if (partialUsage) context.usage = partialUsage;
+          throw error;
+        }
       });
     } catch (error) {
       // A provider credit/quota exhaustion (e.g. HTTP 402) means the review
@@ -304,7 +319,9 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
       // rather than failing the pipeline, so a billing dead-end does not block
       // every MR. Any other error still propagates and fails the job.
       if (!isQuotaExceededError(error)) throw error;
-      const skipUsage = zeroReviewUsage(config.model, config.thinkingLevel);
+      // Prefer the real partial spend captured before the 402 over a hard zero,
+      // so a quota-exhausted run still reports what it actually cost.
+      const skipUsage = partialUsage ?? zeroReviewUsage(config.model, config.thinkingLevel);
       runContext.usage = skipUsage;
       runContext.generated = 0;
       runContext.newComments = 0;

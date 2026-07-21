@@ -148,6 +148,15 @@ export interface RunReviewOptions {
    */
   attachTelemetry?: (agent: AgentLike) => (() => void) | undefined;
   /**
+   * Called with the latest accumulated usage snapshot as the review runs —
+   * always at least once, and crucially even when the review then throws
+   * (timeout, agent error, quota exhaustion). Callers use it to record the real
+   * partial cost/tokens of a run that failed mid-flight; without it the per-turn
+   * `gen_ai.client.cost` telemetry counts money already spent while the
+   * review-level total silently drops it, so the two diverge on failed runs.
+   */
+  onUsage?: (usage: ReviewUsage) => void;
+  /**
    * `commits` input mode only: the last-reviewed commit (a ref/sha). When set,
    * the commit-exploration prompt tells the agent to review only the commits
    * after it (incremental review); when absent, the whole history is in scope.
@@ -1311,50 +1320,69 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     verifyStaged: diskMode ? retrievableSkipped : undefined,
   };
 
+  // Snapshot builder for the accumulated usage. Used for the normal return and,
+  // via the `finally` below, even when a stage throws — so a run that fails
+  // mid-flight (timeout, agent error) still reports the partial cost/tokens it
+  // already incurred, matching the per-turn `gen_ai.client.cost` telemetry that
+  // fires live as each turn completes.
+  const buildUsage = (): ReviewUsage => ({
+    model: config.model,
+    thinkingLevel: config.thinkingLevel,
+    tokens: aggregated.tokens,
+    cost: aggregated.cost,
+    byModel: buildByModelUsage(aggregated),
+    skills: context.skills.map((s) => s.name),
+    sizeNotice,
+  });
+
   let outputText: string;
 
-  if (config.reviewDepth === 'full') {
-    // --- Multi-angle Find → Triage → Verify → Synthesize.
-    const { findings, summary } = await runMultiAngleFind(context, minSeverity, userPrompt, deps);
-    outputText = await verifyAndSynthesize(findings, summary, diff, options.commitLog, deps);
-  } else {
-    // --- single / verify: one Find pass on the primary model. In `single` depth
-    // its output is written verbatim, byte-identical to legacy runs.
-    const findAgent = createAgent({
-      systemPrompt,
-      model: primary.model,
-      tools,
-      thinkingLevel: config.thinkingLevel,
-      getApiKey: primary.getApiKey,
-    });
-
-    // Attach telemetry before the first prompt so all events fire.
-    const detachTelemetry = options.attachTelemetry?.(findAgent);
-    let turnCount = 0;
-    let toolCallCount = 0;
-    let finalText: string;
-    try {
-      finalText = await runAgentToCompletion(findAgent, userPrompt, {
-        timeoutMs,
-        onAssistantMessage: (message) => accumulateUsage(aggregated, message, primary.id),
-        onTurnStart: (turn) => {
-          turnCount = turn;
-          logger.debug(`Turn ${turn} started`);
-        },
-        onToolStart: (toolName, args) => {
-          toolCallCount += 1;
-          logger.debug(`  → ${toolName}${formatToolArgs(toolName, args)}`);
-        },
+  try {
+    if (config.reviewDepth === 'full') {
+      // --- Multi-angle Find → Triage → Verify → Synthesize.
+      const { findings, summary } = await runMultiAngleFind(context, minSeverity, userPrompt, deps);
+      outputText = await verifyAndSynthesize(findings, summary, diff, options.commitLog, deps);
+    } else {
+      // --- single / verify: one Find pass on the primary model. In `single` depth
+      // its output is written verbatim, byte-identical to legacy runs.
+      const findAgent = createAgent({
+        systemPrompt,
+        model: primary.model,
+        tools,
+        thinkingLevel: config.thinkingLevel,
+        getApiKey: primary.getApiKey,
       });
-    } finally {
-      detachTelemetry?.();
-    }
-    logger.debug(`Agent finished: ${turnCount} turn(s), ${toolCallCount} tool call(s)`);
 
-    outputText =
-      config.reviewDepth === 'verify'
-        ? await runVerifyStage(finalText, diff, options.commitLog, deps)
-        : finalText;
+      // Attach telemetry before the first prompt so all events fire.
+      const detachTelemetry = options.attachTelemetry?.(findAgent);
+      let turnCount = 0;
+      let toolCallCount = 0;
+      let finalText: string;
+      try {
+        finalText = await runAgentToCompletion(findAgent, userPrompt, {
+          timeoutMs,
+          onAssistantMessage: (message) => accumulateUsage(aggregated, message, primary.id),
+          onTurnStart: (turn) => {
+            turnCount = turn;
+            logger.debug(`Turn ${turn} started`);
+          },
+          onToolStart: (toolName, args) => {
+            toolCallCount += 1;
+            logger.debug(`  → ${toolName}${formatToolArgs(toolName, args)}`);
+          },
+        });
+      } finally {
+        detachTelemetry?.();
+      }
+      logger.debug(`Agent finished: ${turnCount} turn(s), ${toolCallCount} tool call(s)`);
+
+      outputText =
+        config.reviewDepth === 'verify'
+          ? await runVerifyStage(finalText, diff, options.commitLog, deps)
+          : finalText;
+    }
+  } finally {
+    options.onUsage?.(buildUsage());
   }
 
   const reviewPath = resolve(cwd, config.reviewFile);
@@ -1364,15 +1392,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   // Remove the staged dropped-file diffs now the agent is done reading them.
   if (retrievableSkipped.length > 0) await cleanupSkippedDiffs(cwd);
 
-  return {
-    model: config.model,
-    thinkingLevel: config.thinkingLevel,
-    tokens: aggregated.tokens,
-    cost: aggregated.cost,
-    byModel: buildByModelUsage(aggregated),
-    skills: context.skills.map((s) => s.name),
-    sizeNotice,
-  };
+  return buildUsage();
 }
 
 /**

@@ -683,6 +683,64 @@ describe('runReview pipeline', () => {
     ).rejects.toBeInstanceOf(ReviewerError);
   });
 
+  it('surfaces the accumulated partial usage via onUsage even when the run fails', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    // A message that carries cost but no text: its usage is accumulated, then the
+    // run throws "empty response". onUsage must still fire with the partial spend
+    // so callers can record what a failed run actually cost (matching the per-turn
+    // gen_ai.client.cost telemetry) instead of dropping it to zero.
+    const messages = [
+      makeAssistant('', {
+        input: 100,
+        output: 20,
+        cost: { input: 0.01, output: 0.02, total: 0.03 },
+      }),
+    ];
+    const costs: number[] = [];
+
+    await expect(
+      runReview(
+        { ...minimalConfig, cwd },
+        {
+          cwd,
+          diff: sampleDiff,
+          createAgent: () => fakeAgent(messages),
+          onUsage: (u) => costs.push(u.cost.total),
+        },
+      ),
+    ).rejects.toBeInstanceOf(ReviewerError);
+
+    expect(costs).toHaveLength(1);
+    expect(costs[0]).toBeCloseTo(0.03, 10);
+  });
+
+  it('calls onUsage with the final totals on a successful run', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    const messages = [
+      makeAssistant('Final review.', {
+        input: 50,
+        output: 40,
+        cost: { input: 0.005, output: 0.003, total: 0.008 },
+      }),
+    ];
+    let reported: number | undefined;
+
+    const usage = await runReview(
+      { ...minimalConfig, cwd },
+      {
+        cwd,
+        diff: sampleDiff,
+        createAgent: () => fakeAgent(messages),
+        onUsage: (u) => {
+          reported = u.cost.total;
+        },
+      },
+    );
+
+    expect(reported).toBeCloseTo(0.008, 10);
+    expect(usage.cost.total).toBeCloseTo(0.008, 10);
+  });
+
   it('emits turn_start and tool_execution_start debug lines to the logger', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const messages = [makeAssistant('Done.', { input: 1, output: 1 })];
