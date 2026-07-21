@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A configured skill that fails to load (e.g. an external `git:` skill that can't be downloaded) now warns and is skipped instead of aborting the whole review ([#133]).
+
 ## [0.8.5] - 2026-07-20
 
 ### Added
@@ -69,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [Unreleased]: https://github.com/weareikko/code-review/compare/0.8.5...HEAD
 [0.8.5]: https://github.com/weareikko/code-review/compare/0.8.4...0.8.5
 [0.8.4]: https://github.com/weareikko/code-review/compare/0.8.3...0.8.4
+[#133]: https://github.com/weareikko/code-review/pull/133
 [#131]: https://github.com/weareikko/code-review/pull/131
 [#129]: https://github.com/weareikko/code-review/pull/129
 [#128]: https://github.com/weareikko/code-review/pull/128
