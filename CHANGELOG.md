@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - A configured skill that fails to load (e.g. an external `git:` skill that can't be downloaded) now warns and is skipped instead of aborting the whole review ([#134]).
+- GitHub: a fixed finding whose review thread went outdated (but was never manually resolved) is no longer re-listed under "Still open from earlier reviews" — outdated threads are now treated as settled, mirroring GitLab's auto-resolve-outdated behaviour ([#135]).
 
 ## [0.8.5] - 2026-07-20
 
@@ -73,6 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [Unreleased]: https://github.com/weareikko/code-review/compare/0.8.5...HEAD
 [0.8.5]: https://github.com/weareikko/code-review/compare/0.8.4...0.8.5
 [0.8.4]: https://github.com/weareikko/code-review/compare/0.8.3...0.8.4
+[#135]: https://github.com/weareikko/code-review/pull/135
 [#134]: https://github.com/weareikko/code-review/pull/134
 [#131]: https://github.com/weareikko/code-review/pull/131
 [#129]: https://github.com/weareikko/code-review/pull/129

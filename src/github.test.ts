@@ -186,7 +186,7 @@ describe('GitHub write endpoints', () => {
 });
 
 function graphqlThreadsResponse(
-  nodes: { isResolved: boolean; ids: number[] }[],
+  nodes: { isResolved: boolean; isOutdated?: boolean; ids: number[] }[],
   pageInfo: { hasNextPage: boolean; endCursor: string | null } = {
     hasNextPage: false,
     endCursor: null,
@@ -201,6 +201,7 @@ function graphqlThreadsResponse(
               pageInfo,
               nodes: nodes.map((n) => ({
                 isResolved: n.isResolved,
+                isOutdated: n.isOutdated ?? false,
                 comments: { nodes: n.ids.map((id) => ({ databaseId: id })) },
               })),
             },
@@ -211,8 +212,8 @@ function graphqlThreadsResponse(
   );
 }
 
-describe('GitHub resolved review-thread ids (GraphQL)', () => {
-  it('returns only the comment ids of resolved threads', async () => {
+describe('GitHub settled review-thread ids (GraphQL)', () => {
+  it('returns the comment ids of resolved threads', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       graphqlThreadsResponse([
         { isResolved: true, ids: [1, 2] },
@@ -221,15 +222,31 @@ describe('GitHub resolved review-thread ids (GraphQL)', () => {
     );
     const client = new GitHubClient({ token: 't', fetchImpl });
 
-    const resolved = await client.listResolvedReviewCommentIds('o', 'r', 7);
+    const settled = await client.listSettledReviewCommentIds('o', 'r', 7);
 
-    expect([...resolved].toSorted((a, b) => a - b)).toEqual([1, 2]);
+    expect([...settled].toSorted((a, b) => a - b)).toEqual([1, 2]);
     expect(fetchImpl.mock.calls[0][0]).toBe('https://api.github.com/graphql');
     const init = fetchImpl.mock.calls[0][1];
     expect(init.method).toBe('POST');
     const body = JSON.parse(init.body as string);
     expect(body.variables).toEqual({ owner: 'o', repo: 'r', pull: 7, cursor: null });
     expect(body.query).toContain('reviewThreads');
+  });
+
+  it('also returns the comment ids of outdated (but unresolved) threads', async () => {
+    // GitHub flips a thread to outdated (not resolved) when the fixed line moves;
+    // those comments must still count as settled so carry-over drops them (#133).
+    const fetchImpl = vi.fn().mockResolvedValue(
+      graphqlThreadsResponse([
+        { isResolved: false, isOutdated: true, ids: [1] },
+        { isResolved: false, isOutdated: false, ids: [2] },
+      ]),
+    );
+    const client = new GitHubClient({ token: 't', fetchImpl });
+
+    const settled = await client.listSettledReviewCommentIds('o', 'r', 7);
+
+    expect([...settled]).toEqual([1]);
   });
 
   it('targets the /api/graphql endpoint on GitHub Enterprise Server', async () => {
@@ -240,7 +257,7 @@ describe('GitHub resolved review-thread ids (GraphQL)', () => {
       fetchImpl,
     });
 
-    await client.listResolvedReviewCommentIds('o', 'r', 7);
+    await client.listSettledReviewCommentIds('o', 'r', 7);
 
     expect(fetchImpl.mock.calls[0][0]).toBe('https://ghe.example.com/api/graphql');
   });
@@ -257,9 +274,9 @@ describe('GitHub resolved review-thread ids (GraphQL)', () => {
       .mockResolvedValueOnce(graphqlThreadsResponse([{ isResolved: true, ids: [2] }]));
     const client = new GitHubClient({ token: 't', fetchImpl });
 
-    const resolved = await client.listResolvedReviewCommentIds('o', 'r', 7);
+    const settled = await client.listSettledReviewCommentIds('o', 'r', 7);
 
-    expect([...resolved].toSorted((a, b) => a - b)).toEqual([1, 2]);
+    expect([...settled].toSorted((a, b) => a - b)).toEqual([1, 2]);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(JSON.parse(fetchImpl.mock.calls[1][1].body as string).variables.cursor).toBe('CUR');
   });
@@ -272,7 +289,7 @@ describe('GitHub resolved review-thread ids (GraphQL)', () => {
       );
     const client = new GitHubClient({ token: 't', fetchImpl });
 
-    await expect(client.listResolvedReviewCommentIds('o', 'r', 7)).rejects.toMatchObject({
+    await expect(client.listSettledReviewCommentIds('o', 'r', 7)).rejects.toMatchObject({
       name: 'GitHubApiError',
       method: 'POST',
       path: '/graphql',

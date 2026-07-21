@@ -189,14 +189,17 @@ function reviewCommentPosition(comment: PullRequestReviewComment): DiscussionNot
  * comments that render identically on GitHub, so `extractExistingFingerprints`,
  * `findExistingSummaryNote`, and the reviewed-commit scan all work as-is.
  *
- * `resolvedCommentIds` carries the database ids of comments in resolved review
- * threads (from the GraphQL `reviewThreads` query, since REST omits resolution),
- * so each note gets a `resolved` flag mirroring GitLab's per-note field.
+ * `settledCommentIds` carries the database ids of comments in settled review
+ * threads — resolved or outdated (from the GraphQL `reviewThreads` query, since
+ * REST omits both). Each such note gets a `resolved` flag mirroring GitLab's
+ * per-note field: an outdated GitHub thread maps to `resolved: true` because
+ * GitHub, unlike GitLab, does not auto-resolve a thread when its anchored line
+ * changes, so treating outdated as resolved matches GitLab's behaviour (#133).
  */
 export function normalizeGitHubDiscussions(
   reviewComments: PullRequestReviewComment[],
   issueComments: IssueComment[],
-  resolvedCommentIds: Set<number> = new Set(),
+  settledCommentIds: Set<number> = new Set(),
 ): Discussion[] {
   const threads = new Map<number, DiscussionNote[]>();
   const order: number[] = [];
@@ -213,10 +216,11 @@ export function normalizeGitHubDiscussions(
       id: comment.id,
       body: comment.body ?? '',
       // GitHub's REST comments carry no resolution state; it comes from the
-      // GraphQL `reviewThreads` query, keyed by comment database id. A resolved
-      // thread marks all its comments, so any note being resolved flags the
-      // whole thread for the shared `notes.some((n) => n.resolved)` checks.
-      resolved: resolvedCommentIds.has(comment.id),
+      // GraphQL `reviewThreads` query, keyed by comment database id. A settled
+      // (resolved or outdated) thread marks all its comments, so any note being
+      // settled flags the whole thread for the shared `notes.some((n) => n.resolved)`
+      // checks.
+      resolved: settledCommentIds.has(comment.id),
       position: reviewCommentPosition(comment),
     });
   }
@@ -304,12 +308,12 @@ export class GitHubPlatform implements ReviewPlatform {
   }
 
   async getDiscussions(): Promise<Discussion[]> {
-    const [reviewComments, issueComments, resolvedCommentIds] = await Promise.all([
+    const [reviewComments, issueComments, settledCommentIds] = await Promise.all([
       this.client.listReviewComments(this.owner, this.repo, this.pull),
       this.client.listIssueComments(this.owner, this.repo, this.pull),
-      this.client.listResolvedReviewCommentIds(this.owner, this.repo, this.pull),
+      this.client.listSettledReviewCommentIds(this.owner, this.repo, this.pull),
     ]);
-    return normalizeGitHubDiscussions(reviewComments, issueComments, resolvedCommentIds);
+    return normalizeGitHubDiscussions(reviewComments, issueComments, settledCommentIds);
   }
 
   buildComments(

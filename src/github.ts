@@ -129,6 +129,7 @@ interface ReviewThreadsResponse {
         pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
         nodes?: {
           isResolved?: boolean;
+          isOutdated?: boolean;
           comments?: { nodes?: { databaseId?: number | null }[] };
         }[];
       };
@@ -144,6 +145,7 @@ const REVIEW_THREADS_QUERY = `
           pageInfo { hasNextPage endCursor }
           nodes {
             isResolved
+            isOutdated
             comments(first: 100) { nodes { databaseId } }
           }
         }
@@ -404,18 +406,26 @@ export class GitHubClient {
   }
 
   /**
-   * Return the database IDs of review comments that belong to a **resolved**
-   * review thread. GitHub's REST comment endpoints omit thread-resolution state;
-   * it is only exposed via GraphQL `reviewThreads.isResolved`. Callers use this
-   * set to mark normalized notes resolved so resolved threads are excluded from
-   * summary carry-over and prior-thread context. Paginates over threads.
+   * Return the database IDs of review comments that belong to a **settled**
+   * review thread — one that is either resolved or outdated. GitHub's REST
+   * comment endpoints omit both states; they are only exposed via GraphQL
+   * `reviewThreads.isResolved` / `isOutdated`. Callers use this set to mark
+   * normalized notes resolved so settled threads are excluded from summary
+   * carry-over and prior-thread context. Paginates over threads.
+   *
+   * Outdated counts as settled because GitHub, unlike GitLab, does not
+   * auto-resolve a thread when the line it anchors to changes: fixing a finding
+   * flips the thread to outdated but leaves `isResolved` false until someone
+   * manually resolves it. Treating outdated as settled mirrors GitLab's
+   * "automatically resolve outdated diff discussions" behaviour, so a fixed
+   * finding stops being re-listed under "Still open from earlier reviews" (#133).
    */
-  async listResolvedReviewCommentIds(
+  async listSettledReviewCommentIds(
     owner: string,
     repo: string,
     pull: number,
   ): Promise<Set<number>> {
-    const resolved = new Set<number>();
+    const settled = new Set<number>();
     let cursor: string | null = null;
     let hasNext = true;
     while (hasNext) {
@@ -428,15 +438,15 @@ export class GitHubClient {
       const threads = data.repository?.pullRequest?.reviewThreads;
       if (!threads) break;
       for (const thread of threads.nodes ?? []) {
-        if (!thread.isResolved) continue;
+        if (!thread.isResolved && !thread.isOutdated) continue;
         for (const comment of thread.comments?.nodes ?? []) {
-          if (typeof comment.databaseId === 'number') resolved.add(comment.databaseId);
+          if (typeof comment.databaseId === 'number') settled.add(comment.databaseId);
         }
       }
       hasNext = threads.pageInfo?.hasNextPage ?? false;
       cursor = threads.pageInfo?.endCursor ?? null;
       if (!cursor) hasNext = false;
     }
-    return resolved;
+    return settled;
   }
 }
