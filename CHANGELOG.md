@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking (telemetry):** OTel/diagnostics identifiers renamed to platform-neutral names so one dashboard set serves GitLab MRs and GitHub PRs — metrics `gitlab_review_*` → `code_review_*`, app attributes `gitlab_review.*` → `code_review.*`, repository/change attributes → OTel `vcs.*`, CI attributes → `cicd.*`. Existing dashboards, alerts, and recording rules must be updated (full mapping in [docs/observability.md](docs/observability.md)) ([#137]).
+
+### Added
+
+- `code_review.dry_run` label on the per-turn `gen_ai.client.*` metrics (cost, tokens, duration) so dry-run LLM spend can be excluded from the GenAI panels, matching the review-level metrics ([#137]).
+
+### Fixed
+
+- Review-level cost/token metrics (`code_review_total_cost_usd`, `code_review_llm_*_tokens_total`) now report the partial spend of runs that fail, time out, or exhaust provider quota mid-flight instead of dropping it to zero, so they reconcile with the per-turn `gen_ai.client.cost` telemetry ([#137]).
+
 ## [0.8.6] - 2026-07-21
 
 ### Fixed
@@ -77,6 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.8.6]: https://github.com/weareikko/code-review/compare/0.8.5...0.8.6
 [0.8.5]: https://github.com/weareikko/code-review/compare/0.8.4...0.8.5
 [0.8.4]: https://github.com/weareikko/code-review/compare/0.8.3...0.8.4
+[#137]: https://github.com/weareikko/code-review/pull/137
 [#135]: https://github.com/weareikko/code-review/pull/135
 [#134]: https://github.com/weareikko/code-review/pull/134
 [#131]: https://github.com/weareikko/code-review/pull/131

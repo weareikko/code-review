@@ -114,7 +114,7 @@ export interface DiagnosticContext {
   posted?: number;
   /**
    * Breakdown of posted comments by severity, populated on the `run` context so
-   * the OTel bridge can split `gitlab_review_comments_total` by severity. Counts
+   * the OTel bridge can split `code_review_comments_total` by severity. Counts
    * the non-duplicate (posted-intent) comments; absent on dry-run/skip paths.
    */
   postedBySeverity?: Partial<Record<Severity, number>>;
