@@ -315,7 +315,7 @@ describe('OpenTelemetry bridge', () => {
       'gen_ai.usage.output_tokens': 340,
       'gen_ai.usage.cache_read.input_tokens': 50,
       'gen_ai.usage.cache_creation.input_tokens': 10,
-      'gen_ai.usage.cost.total_usd': 0.049,
+      'code_review.cost.total_usd': 0.049,
     });
   });
 
@@ -346,7 +346,7 @@ describe('OpenTelemetry bridge', () => {
 
     // No token or cost metrics from phase-close — those are per-turn only.
     expect(metricsRecorded.filter((m) => m.name === 'gen_ai.client.token.usage')).toHaveLength(0);
-    expect(metricsRecorded.filter((m) => m.name === 'gen_ai.client.cost')).toHaveLength(0);
+    expect(metricsRecorded.filter((m) => m.name === 'code_review_llm_cost_usd')).toHaveLength(0);
   });
 
   it('records exceptions and ERROR status on rejected phases', async () => {
@@ -573,7 +573,7 @@ describe('OpenTelemetry bridge', () => {
     }
   });
 
-  it('does not emit gen_ai.client.cost from phase close alone (prevents double-count)', async () => {
+  it('does not emit code_review_llm_cost_usd from phase close alone (prevents double-count)', async () => {
     // Regression test for Gap 1: cost was previously emitted from BOTH
     // recordGenAiMetrics (phase-close) and buildAgentSubscriber (per-turn),
     // creating two Prometheus series that differed only by gen_ai_system and
@@ -586,7 +586,7 @@ describe('OpenTelemetry bridge', () => {
         cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
       };
     });
-    const costMetrics = metricsRecorded.filter((m) => m.name === 'gen_ai.client.cost');
+    const costMetrics = metricsRecorded.filter((m) => m.name === 'code_review_llm_cost_usd');
     expect(costMetrics).toHaveLength(0);
   });
 
@@ -719,7 +719,7 @@ describe('OpenTelemetry bridge', () => {
       'gen_ai.usage.input_tokens.cached': 50,
       'gen_ai.usage.output_tokens': 80,
       'gen_ai.usage.cache_read.input_tokens': 50,
-      'gen_ai.usage.cost.total_usd': 0.0115,
+      'code_review.cost.total_usd': 0.0115,
       'gen_ai.response.model': 'claude-haiku-4-5',
       'gen_ai.response.stop_reason': 'end_turn',
       'gen_ai.agent.name': 'code-review',
@@ -755,7 +755,7 @@ describe('OpenTelemetry bridge', () => {
     expect(perTurnInput).toBeDefined();
     expect(perTurnOutput).toBeDefined();
 
-    const costMetrics = metricsRecorded.filter((m) => m.name === 'gen_ai.client.cost');
+    const costMetrics = metricsRecorded.filter((m) => m.name === 'code_review_llm_cost_usd');
     const costByType = new Map(costMetrics.map((m) => [m.attributes['gen_ai.token.type'], m]));
     // GAP 1 fix: cost is broken down by token type, no single total observation.
     expect(costByType.get('input')?.value).toBeCloseTo(0.004);
@@ -819,7 +819,7 @@ describe('OpenTelemetry bridge', () => {
     }
 
     // GAP 1 fix: cost is also broken down by token type.
-    const costMetrics = metricsRecorded.filter((m) => m.name === 'gen_ai.client.cost');
+    const costMetrics = metricsRecorded.filter((m) => m.name === 'code_review_llm_cost_usd');
     const costByType = new Map(costMetrics.map((m) => [m.attributes['gen_ai.token.type'], m]));
     expect(costByType.get('input')?.value).toBeCloseTo(0.00003);
     expect(costByType.get('output')?.value).toBeCloseTo(0.00453);
@@ -851,7 +851,7 @@ describe('OpenTelemetry bridge', () => {
 
     // Every per-turn metric must carry the dry_run label so dry-run LLM spend can
     // be excluded from the GenAI panels, matching the review-level metrics.
-    const cost = metricsRecorded.find((m) => m.name === 'gen_ai.client.cost');
+    const cost = metricsRecorded.find((m) => m.name === 'code_review_llm_cost_usd');
     expect(cost!.attributes['code_review.dry_run']).toBe(true);
     const tokens = metricsRecorded.find((m) => m.name === 'gen_ai.client.token.usage');
     expect(tokens!.attributes['code_review.dry_run']).toBe(true);
@@ -880,10 +880,12 @@ describe('OpenTelemetry bridge', () => {
       await agent.emit({ type: 'message_end', message: fakeMsg });
     });
 
-    const costMetric = metricsRecorded.find((m) => m.name === 'gen_ai.client.cost');
+    const costMetric = metricsRecorded.find((m) => m.name === 'code_review_llm_cost_usd');
     expect(costMetric).toBeDefined();
-    // gen_ai.system must be populated from configuredModel even though msg.model
-    // had no slash.
+    // The provider must be populated from configuredModel even though msg.model
+    // had no slash — emitted as the current gen_ai.provider.name and, during the
+    // transition, the deprecated gen_ai.system alias.
+    expect(costMetric!.attributes['gen_ai.provider.name']).toBe('anthropic');
     expect(costMetric!.attributes['gen_ai.system']).toBe('anthropic');
     expect(costMetric!.attributes['gen_ai.request.model']).toBe('claude-haiku-4-5');
 
@@ -894,7 +896,7 @@ describe('OpenTelemetry bridge', () => {
     expect(tokenInput!.attributes['gen_ai.system']).toBe('anthropic');
   });
 
-  it('emits gen_ai.client.cost exactly once when reviewer phase and agent both fire', async () => {
+  it('emits code_review_llm_cost_usd exactly once when reviewer phase and agent both fire', async () => {
     // Full regression test for Gap 1: when both ctx.usage (phase result) and
     // agent message_end (per-turn events) carry cost data, cost must appear
     // exactly once in Prometheus — not twice as two series differing by
@@ -942,7 +944,7 @@ describe('OpenTelemetry bridge', () => {
     });
     await bridge!.shutdown();
 
-    const costMetrics = fake.metricsRecorded.filter((m) => m.name === 'gen_ai.client.cost');
+    const costMetrics = fake.metricsRecorded.filter((m) => m.name === 'code_review_llm_cost_usd');
     // Exactly two cost metrics (input + output by type) — no double-count from phase-close.
     expect(costMetrics).toHaveLength(2);
     const costByType = new Map(costMetrics.map((m) => [m.attributes['gen_ai.token.type'], m]));
@@ -966,14 +968,16 @@ describe('OpenTelemetry bridge', () => {
       await agent.emit({ type: 'message_end', message: fakeMsg });
     });
 
-    const ttft = metricsRecorded.find((m) => m.name === 'gen_ai.client.time_to_first_token');
+    const ttft = metricsRecorded.find(
+      (m) => m.name === 'gen_ai.client.operation.time_to_first_chunk',
+    );
     expect(ttft).toBeDefined();
     expect(typeof ttft!.value).toBe('number');
     expect(ttft!.value).toBeGreaterThanOrEqual(0);
 
     const turn = spans.find((s) => s.name === 'gen_ai.agent.turn');
     const attrs = Object.fromEntries(turn!.attributes.map((a) => [a.key, a.value]));
-    expect(typeof attrs['gen_ai.client.time_to_first_token_s']).toBe('number');
+    expect(typeof attrs['gen_ai.client.operation.time_to_first_chunk_s']).toBe('number');
   });
 
   it('does not record TTFT when no message_update fires', async () => {
@@ -988,7 +992,7 @@ describe('OpenTelemetry bridge', () => {
       await agent.emit({ type: 'message_end', message: fakeMsg });
     });
     expect(
-      metricsRecorded.find((m) => m.name === 'gen_ai.client.time_to_first_token'),
+      metricsRecorded.find((m) => m.name === 'gen_ai.client.operation.time_to_first_chunk'),
     ).toBeUndefined();
   });
 
@@ -1174,7 +1178,7 @@ describe('OpenTelemetry bridge', () => {
       'vcs.repository.id': 'proj',
       'vcs.change.id': '1',
       'gen_ai.request.model': 'claude-haiku-4-5',
-      'gen_ai.usage.cost.total_usd': 0.006,
+      'code_review.cost.total_usd': 0.006,
       // Total input = non-cached (100) + cached (200) — Sentry AI monitoring model.
       'gen_ai.usage.input_tokens': 300,
       'gen_ai.usage.input_tokens.cached': 200,

@@ -9,15 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking (telemetry):** OTel/diagnostics identifiers renamed to platform-neutral names so one dashboard set serves GitLab MRs and GitHub PRs — metrics `gitlab_review_*` → `code_review_*`, app attributes `gitlab_review.*` → `code_review.*`, repository/change attributes → OTel `vcs.*`, CI attributes → `cicd.*`. Existing dashboards, alerts, and recording rules must be updated (full mapping in [docs/observability.md](docs/observability.md)) ([#137]).
+- **Breaking (telemetry):** renamed all OTel/diagnostics identifiers to platform-neutral names (`code_review_*`, `code_review.*`, `vcs.*`, `cicd.*`) and aligned the GenAI signals with current OTel semconv (`gen_ai.provider.name`, `gen_ai.client.operation.time_to_first_chunk`, cost off the `gen_ai.*` namespace). Dashboards and queries must be updated — mapping in [docs/observability.md](docs/observability.md) ([#137]).
 
 ### Added
 
-- `code_review.dry_run` label on the per-turn `gen_ai.client.*` metrics (cost, tokens, duration) so dry-run LLM spend can be excluded from the GenAI panels, matching the review-level metrics ([#137]).
+- `code_review.dry_run` label on the per-turn `gen_ai.client.*` metrics ([#137]).
 
 ### Fixed
 
-- Review-level cost/token metrics (`code_review_total_cost_usd`, `code_review_llm_*_tokens_total`) now report the partial spend of runs that fail, time out, or exhaust provider quota mid-flight instead of dropping it to zero, so they reconcile with the per-turn `gen_ai.client.cost` telemetry ([#137]).
+- Review-level cost/token metrics now capture the partial spend of runs that fail mid-flight instead of dropping it to zero ([#137]).
 
 ## [0.8.6] - 2026-07-21
 

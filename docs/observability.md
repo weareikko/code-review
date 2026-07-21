@@ -84,12 +84,13 @@ The bridge emits two sets of metrics.
 
 **GenAI client metrics** follow the [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/) (`gen_ai.*`) and are emitted per LLM call:
 
-| Metric                              | Unit    | Purpose                                           |
-| ----------------------------------- | ------- | ------------------------------------------------- |
-| `gen_ai.client.operation.duration`  | s       | Overall agent call duration                       |
-| `gen_ai.client.token.usage`         | {token} | Token counts per turn by type                     |
-| `gen_ai.client.cost`                | usd     | Cost per turn                                     |
-| `gen_ai.client.time_to_first_token` | s       | TTFT per turn (recorded on first streaming event) |
+| Metric                                        | Unit    | Purpose                                           |
+| --------------------------------------------- | ------- | ------------------------------------------------- |
+| `gen_ai.client.operation.duration`            | s       | Overall agent call duration                       |
+| `gen_ai.client.token.usage`                   | {token} | Token counts per turn by type                     |
+| `gen_ai.client.operation.time_to_first_chunk` | s       | TTFT per turn (recorded on first streaming event) |
+
+Provider is emitted as `gen_ai.provider.name` (the current semconv discriminator); the deprecated `gen_ai.system` is emitted alongside it during the transition. OTel does not standardize token **cost**, so per-turn cost is emitted as `code_review_llm_cost_usd` (histogram, USD, broken down by `gen_ai.token.type`) — a deliberate local extension kept out of the reserved `gen_ai.*` namespace so it cannot collide if the spec later defines a cost metric. Per-turn cost span attributes use the `code_review.cost.*_usd` keys for the same reason.
 
 **Review-level metrics** are emitted once per complete run (success or failure):
 

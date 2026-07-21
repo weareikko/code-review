@@ -7,15 +7,15 @@
  * phase additionally carries OpenTelemetry GenAI semantic-convention
  * attributes (`gen_ai.*`) and emits the standardized GenAI client metrics
  * (`gen_ai.client.operation.duration`, `gen_ai.client.token.usage`,
- * `gen_ai.client.cost`, `gen_ai.client.time_to_first_token`) so
+ * `code_review_llm_cost_usd`, `gen_ai.client.operation.time_to_first_chunk`) so
  * metrics-driven AI observability surfaces auto-discover the service.
  *
  * Per-turn and per-tool-call telemetry is captured via `createAgentTelemetry`,
  * which subscribes to the agent's live event stream and emits:
  *   - `gen_ai.agent.turn` child spans under `invoke_agent code-review`
  *   - `execute_tool <name>` grandchild spans under each turn
- *   - Per-turn `gen_ai.client.token.usage` and `gen_ai.client.cost` metrics
- *   - `gen_ai.client.time_to_first_token` when streaming events fire
+ *   - Per-turn `gen_ai.client.token.usage` and `code_review_llm_cost_usd` metrics
+ *   - `gen_ai.client.operation.time_to_first_chunk` when streaming events fire
  *
  * Opt-in: set `CODE_REVIEW_OTEL=1`. Exporter selection and endpoint follow
  * the standard `OTEL_*` env vars (`OTEL_EXPORTER_OTLP_ENDPOINT`,
@@ -224,13 +224,19 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     unit: '{token}',
     advice: { explicitBucketBoundaries: TOKEN_BUCKETS },
   });
-  const operationCost = meter.createHistogram('gen_ai.client.cost', {
-    description: 'GenAI operation cost in USD',
+  // Per-turn LLM cost in USD, broken down by token type. Cost is NOT part of the
+  // OTel GenAI conventions (no gen_ai.* cost metric or attribute exists), so this
+  // is a deliberate local extension kept out of the reserved `gen_ai.*` namespace
+  // to avoid colliding if the spec later standardizes cost.
+  const operationCost = meter.createHistogram('code_review_llm_cost_usd', {
+    description: 'LLM cost in USD per turn, by token type (non-standard extension)',
     unit: '{usd}',
     advice: { explicitBucketBoundaries: COST_BUCKETS_USD },
   });
-  const timeToFirstToken = meter.createHistogram('gen_ai.client.time_to_first_token', {
-    description: 'Time to first token from the LLM',
+  // GenAI-semconv client streaming metric. The client-side name is
+  // `operation.time_to_first_chunk`; `time_to_first_token` exists only server-side.
+  const timeToFirstToken = meter.createHistogram('gen_ai.client.operation.time_to_first_chunk', {
+    description: 'Time to first chunk from the LLM',
     unit: 's',
     advice: { explicitBucketBoundaries: TTFT_BUCKETS_S },
   });
@@ -555,14 +561,18 @@ interface AgentSubscriberOptions {
 }
 
 /**
- * Builds the dynamic `gen_ai.system` / `gen_ai.request.model` metric labels
- * shared by the per-turn and per-phase GenAI metric emitters. Owning these in
- * one place keeps the two emission sites from drifting into separate Prometheus
- * series (the double-count `recordGenAiMetrics` documents).
+ * Builds the dynamic `gen_ai.provider.name` / `gen_ai.request.model` metric
+ * labels shared by the per-turn and per-phase GenAI metric emitters. Owning
+ * these in one place keeps the two emission sites from drifting into separate
+ * Prometheus series (the double-count `recordGenAiMetrics` documents).
+ *
+ * `gen_ai.provider.name` is the current GenAI-semconv discriminator; the
+ * deprecated `gen_ai.system` is emitted alongside it during the transition so
+ * backends still keyed on the old attribute keep working.
  */
 function genAiModelAttrs(provider?: string, modelId?: string): Attributes {
   return {
-    ...(provider ? { 'gen_ai.system': provider } : {}),
+    ...(provider ? { 'gen_ai.provider.name': provider, 'gen_ai.system': provider } : {}),
     ...(modelId ? { 'gen_ai.request.model': modelId } : {}),
   };
 }
@@ -626,9 +636,9 @@ function recordTurnUsage(
         ...metricAttrs,
         'gen_ai.token.type': 'cache_creation',
       });
-    span.setAttribute('gen_ai.usage.cost.input_usd', u.cost.input);
-    span.setAttribute('gen_ai.usage.cost.output_usd', u.cost.output);
-    span.setAttribute('gen_ai.usage.cost.total_usd', u.cost.total);
+    span.setAttribute('code_review.cost.input_usd', u.cost.input);
+    span.setAttribute('code_review.cost.output_usd', u.cost.output);
+    span.setAttribute('code_review.cost.total_usd', u.cost.total);
   }
 }
 
@@ -767,14 +777,17 @@ function buildAgentSubscriber(
         };
         // Spans carry gen_ai.response.model (the SDK's actual model); metrics
         // carry gen_ai.request.model (set above via genAiModelAttrs).
-        if (provider) span.setAttribute('gen_ai.system', provider);
+        if (provider) {
+          span.setAttribute('gen_ai.provider.name', provider);
+          span.setAttribute('gen_ai.system', provider);
+        }
         if (modelId) span.setAttribute('gen_ai.response.model', modelId);
         if (msg.stopReason) span.setAttribute('gen_ai.response.stop_reason', msg.stopReason);
 
         if (firstTokenMs !== undefined) {
           const ttftS = (firstTokenMs - startMs) / 1000;
           timeToFirstToken.record(ttftS, metricAttrs);
-          span.setAttribute('gen_ai.client.time_to_first_token_s', ttftS);
+          span.setAttribute('gen_ai.client.operation.time_to_first_chunk_s', ttftS);
         }
 
         if (msg.usage) {
@@ -1026,7 +1039,7 @@ function emitReviewCompletedLog(
       'code_review.comments.duplicate': ctx.duplicateComments ?? 0,
       'code_review.comments.posted': ctx.posted ?? 0,
       ...(modelId !== undefined && { 'gen_ai.request.model': modelId }),
-      ...(cost !== undefined && { 'gen_ai.usage.cost.total_usd': cost }),
+      ...(cost !== undefined && { 'code_review.cost.total_usd': cost }),
       ...(usage?.tokens.input !== undefined && {
         // Total (non-cached + cached) — Sentry AI monitoring model.
         'gen_ai.usage.input_tokens': usage.tokens.input + (usage.tokens.cacheRead ?? 0),
@@ -1246,7 +1259,10 @@ function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
   // via OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental.
   // Spec: https://opentelemetry.io/docs/specs/semconv/gen-ai/
   const { provider, modelId } = splitModel(ctx.model ?? '');
-  if (provider) span.setAttribute('gen_ai.system', provider);
+  if (provider) {
+    span.setAttribute('gen_ai.provider.name', provider);
+    span.setAttribute('gen_ai.system', provider);
+  }
   if (modelId) {
     span.setAttribute('gen_ai.request.model', modelId);
     span.setAttribute('gen_ai.response.model', modelId);
@@ -1259,17 +1275,17 @@ function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
   setTokenUsageSpanAttributes(span, usage.tokens);
   // Cost is not standardized by OTel GenAI semconv — emit under a clearly
   // namespaced custom attribute. Revisit when the spec stabilizes a cost field.
-  span.setAttribute('gen_ai.usage.cost.input_usd', usage.cost.input);
-  span.setAttribute('gen_ai.usage.cost.output_usd', usage.cost.output);
-  span.setAttribute('gen_ai.usage.cost.cache_read_usd', usage.cost.cacheRead);
-  span.setAttribute('gen_ai.usage.cost.cache_creation_usd', usage.cost.cacheWrite);
-  span.setAttribute('gen_ai.usage.cost.total_usd', usage.cost.total);
+  span.setAttribute('code_review.cost.input_usd', usage.cost.input);
+  span.setAttribute('code_review.cost.output_usd', usage.cost.output);
+  span.setAttribute('code_review.cost.cache_read_usd', usage.cost.cacheRead);
+  span.setAttribute('code_review.cost.cache_creation_usd', usage.cost.cacheWrite);
+  span.setAttribute('code_review.cost.total_usd', usage.cost.total);
 }
 
 /**
  * Records `gen_ai.client.operation.duration` for the `reviewer.run` phase.
  *
- * Token usage (`gen_ai.client.token.usage`) and cost (`gen_ai.client.cost`) are
+ * Token usage (`gen_ai.client.token.usage`) and cost (`code_review_llm_cost_usd`) are
  * intentionally NOT recorded here. They are emitted per-turn by
  * `buildAgentSubscriber` from the live agent event stream. Keeping a single
  * emission point for each metric prevents the double-count that previously
