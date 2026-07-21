@@ -238,11 +238,13 @@ describe('normalizeGitHubDiscussions', () => {
 });
 
 /**
- * A resolved review thread's comment ids, shaped as the GraphQL `reviewThreads`
- * query returns them. `ids` land in the resolved set only when `isResolved`.
+ * A review thread's comment ids, shaped as the GraphQL `reviewThreads` query
+ * returns them. `ids` land in the settled set when the thread is resolved or
+ * outdated.
  */
 interface ResolvedThreadStub {
   isResolved: boolean;
+  isOutdated?: boolean;
   ids: number[];
 }
 
@@ -271,6 +273,7 @@ function routedFetch(
                   pageInfo: { hasNextPage: false, endCursor: null },
                   nodes: (overrides.reviewThreads ?? []).map((t) => ({
                     isResolved: t.isResolved,
+                    isOutdated: t.isOutdated ?? false,
                     comments: { nodes: t.ids.map((id) => ({ databaseId: id })) },
                   })),
                 },
@@ -379,6 +382,27 @@ describe('GitHubPlatform', () => {
     const discussions = await makePlatform(fetchImpl).getDiscussions();
 
     // extractOpenBotFindings keeps only the still-open finding, mirroring GitLab.
+    const open = extractOpenBotFindings(discussions);
+    expect(open).toHaveLength(1);
+    expect(open[0].file).toBe('src/b.ts');
+  });
+
+  it('getDiscussions flags outdated threads so carry-over drops fixed findings', async () => {
+    // A fixed finding: GitHub marks its thread outdated (not resolved) once the
+    // line moves. It must be treated as settled so it stops being carried
+    // forward, mirroring GitLab's auto-resolve-outdated behaviour (#133).
+    const outdatedBody = '**issue: fixed bug**\n\n<!-- code-review:fingerprint-primary:aaaa -->';
+    const openBody = '**issue: open bug**\n\n<!-- code-review:fingerprint-primary:bbbb -->';
+    const { fetchImpl } = routedFetch({
+      reviewComments: [
+        { id: 1, body: outdatedBody, path: 'src/a.ts', line: 3, side: 'RIGHT' },
+        { id: 2, body: openBody, path: 'src/b.ts', line: 4, side: 'RIGHT' },
+      ],
+      reviewThreads: [{ isResolved: false, isOutdated: true, ids: [1] }],
+    });
+
+    const discussions = await makePlatform(fetchImpl).getDiscussions();
+
     const open = extractOpenBotFindings(discussions);
     expect(open).toHaveLength(1);
     expect(open[0].file).toBe('src/b.ts');
