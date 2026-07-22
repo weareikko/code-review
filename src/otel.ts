@@ -1170,29 +1170,41 @@ function resolveRunStatus(
 }
 
 /**
- * Extracts GitLab CI environment variables that add project/pipeline context
- * to every metric, span, and log record. Only populated when running inside a
- * GitLab CI pipeline; callers spread the result so missing vars add nothing.
+ * Extracts low-cardinality CI project/pipeline context (repository, owner, base
+ * branch, pipeline trigger) as platform-neutral `vcs.*` / `cicd.*` attributes
+ * added to every metric, span, and log record. Sourced from GitLab CI or GitHub
+ * Actions variables — a run is one or the other, so `??` picks whichever is set;
+ * callers spread the result so missing vars add nothing.
  */
 function buildCiAttrs(env: NodeJS.ProcessEnv): Record<string, string> {
   const attrs: Record<string, string> = {};
-  if (env.CI_PROJECT_PATH) attrs['vcs.repository.name'] = env.CI_PROJECT_PATH;
-  if (env.CI_PROJECT_NAMESPACE) attrs['vcs.owner.name'] = env.CI_PROJECT_NAMESPACE;
-  if (env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME)
-    attrs['vcs.ref.base.name'] = env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME;
-  if (env.CI_PIPELINE_SOURCE) attrs['cicd.pipeline.source'] = env.CI_PIPELINE_SOURCE;
+  // GITHUB_REPOSITORY / CI_PROJECT_PATH are both "owner/repo" ("group/project").
+  const repository = env.CI_PROJECT_PATH ?? env.GITHUB_REPOSITORY;
+  if (repository) attrs['vcs.repository.name'] = repository;
+  const owner = env.CI_PROJECT_NAMESPACE ?? env.GITHUB_REPOSITORY_OWNER;
+  if (owner) attrs['vcs.owner.name'] = owner;
+  // GITHUB_BASE_REF is set only on pull_request events (the PR's target branch).
+  const baseRef = env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME ?? env.GITHUB_BASE_REF;
+  if (baseRef) attrs['vcs.ref.base.name'] = baseRef;
+  // Pipeline trigger: GitLab CI_PIPELINE_SOURCE vs GitHub Actions event name.
+  const pipelineSource = env.CI_PIPELINE_SOURCE ?? env.GITHUB_EVENT_NAME;
+  if (pipelineSource) attrs['cicd.pipeline.source'] = pipelineSource;
   return attrs;
 }
 
 /**
- * Extracts high-cardinality GitLab CI identifiers that should appear on spans
- * and log records but NOT on metric data points (to avoid label explosion in
- * Prometheus/Mimir). Spread results via `ciSpanAttrs` stored in RunMeta.
+ * Extracts high-cardinality CI identifiers that should appear on spans and log
+ * records but NOT on metric data points (to avoid label explosion in
+ * Prometheus/Mimir). Sourced from GitLab CI or GitHub Actions. GitHub exposes no
+ * per-job run id in the environment, so the job's config-key (`GITHUB_JOB`) is
+ * used for the task identifier. Spread via `ciSpanAttrs` stored in RunMeta.
  */
 function buildCiSpanAttrs(env: NodeJS.ProcessEnv): Record<string, string> {
   const attrs: Record<string, string> = {};
-  if (env.CI_JOB_ID) attrs['cicd.pipeline.task.run.id'] = env.CI_JOB_ID;
-  if (env.CI_PIPELINE_ID) attrs['cicd.pipeline.run.id'] = env.CI_PIPELINE_ID;
+  const taskRunId = env.CI_JOB_ID ?? env.GITHUB_JOB;
+  if (taskRunId) attrs['cicd.pipeline.task.run.id'] = taskRunId;
+  const pipelineRunId = env.CI_PIPELINE_ID ?? env.GITHUB_RUN_ID;
+  if (pipelineRunId) attrs['cicd.pipeline.run.id'] = pipelineRunId;
   return attrs;
 }
 

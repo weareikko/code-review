@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `code_review.dry_run` label on the per-turn `gen_ai.client.*` metrics ([#137]).
+- Telemetry `vcs.*`/`cicd.*` CI attributes are now sourced from GitHub Actions env vars too (not just GitLab CI), so they populate on GitHub PR reviews ([#137]).
 
 ### Fixed
 

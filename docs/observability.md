@@ -6,7 +6,7 @@
 >
 > **Breaking change.** These replaced the earlier `gitlab_review_*` / `gitlab.*` identifiers. Dashboards, alerts, and recording rules built on the old names must be updated (mapping in the [CHANGELOG](../CHANGELOG.md)); historical series keep their old names, so a query spanning the rename boundary sees a gap.
 >
-> The `vcs.*` / `cicd.*` attributes are currently populated only from GitLab CI variables and are absent on GitHub Actions runs (neutral label keys today; GitHub CI sourcing is future work).
+> The `vcs.*` / `cicd.*` attributes are sourced from **either** GitLab CI **or** GitHub Actions environment variables (whichever the run provides): `vcs.repository.name` from `CI_PROJECT_PATH` / `GITHUB_REPOSITORY`, `vcs.owner.name` from `CI_PROJECT_NAMESPACE` / `GITHUB_REPOSITORY_OWNER`, `vcs.ref.base.name` from `CI_MERGE_REQUEST_TARGET_BRANCH_NAME` / `GITHUB_BASE_REF`, `cicd.pipeline.source` from `CI_PIPELINE_SOURCE` / `GITHUB_EVENT_NAME`, and (span/log only) `cicd.pipeline.run.id` from `CI_PIPELINE_ID` / `GITHUB_RUN_ID` and `cicd.pipeline.task.run.id` from `CI_JOB_ID` / `GITHUB_JOB`. Outside CI they are omitted.
 
 ## Diagnostics channels
 
@@ -108,7 +108,7 @@ Provider is emitted as `gen_ai.provider.name` (the current semconv discriminator
 | `code_review_llm_cache_read_tokens_total`     | Counter   | `vcs.repository.name`, `gen_ai.request.model`                                                                      |
 | `code_review_llm_cache_creation_tokens_total` | Counter   | `vcs.repository.name`, `gen_ai.request.model`                                                                      |
 
-`code_review.status` is `success`, `error`, or `timeout` (AbortError / ETIMEDOUT). `vcs.repository.name` is populated from `CI_PROJECT_PATH` when running inside a GitLab CI pipeline.
+`code_review.status` is `success`, `error`, or `timeout` (AbortError / ETIMEDOUT). `vcs.repository.name` is populated from `CI_PROJECT_PATH` (GitLab CI) or `GITHUB_REPOSITORY` (GitHub Actions) when running in CI.
 
 `code_review_runs_total` increments exactly once per run, so review volume is `sum(increase(code_review_runs_total[…]))` and the error rate is `code_review_errors_total / code_review_runs_total`. The unique per-run `run_id` is deliberately **not** a metric label — it would create one Prometheus/Mimir series per run (unbounded cardinality). `run_id` lives on spans and log records instead, which is where per-run correlation belongs.
 

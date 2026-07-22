@@ -1565,6 +1565,88 @@ describe('OpenTelemetry bridge', () => {
     expect(completedLog?.attributes).toMatchObject(expectedCiAttrs);
   });
 
+  it('propagates GitHub Actions env vars as neutral vcs.*/cicd.* attributes', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: {
+        CODE_REVIEW_OTEL: '1',
+        GITHUB_REPOSITORY: 'weareikko/code-review',
+        GITHUB_REPOSITORY_OWNER: 'weareikko',
+        GITHUB_BASE_REF: 'main',
+        GITHUB_EVENT_NAME: 'pull_request',
+        GITHUB_JOB: 'review',
+        GITHUB_RUN_ID: '99887766',
+      },
+    });
+
+    const config: Config = {
+      project: 'weareikko/code-review',
+      mr: '57',
+      gitlabUrl: 'https://github.com',
+      gitlabToken: 't',
+      gitlabAuthHeader: 'PRIVATE-TOKEN',
+      model: 'anthropic/claude-sonnet-4-5',
+      minSeverity: 'info',
+      thinkingLevel: 'off',
+      postingMode: 'direct',
+      reviewDepth: 'single',
+      apiKey: 'k',
+      reviewFile: 'code-review.md',
+      output: 'review-comments.json',
+      dryRun: false,
+      noPost: false,
+      postSummary: false,
+      forceReview: false,
+      verbose: false,
+      cwd: '/tmp',
+      skills: [],
+      refreshGitSkills: false,
+    };
+    const runContext = createDiagnosticContext('run', config, 'run-gha');
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      const reviewerContext = createDiagnosticContext('reviewer.run', config, 'run-gha');
+      await traceDiagnostic(diagnosticChannels.runReviewer, reviewerContext, async (ctx) => {
+        ctx.usage = {
+          model: 'anthropic/claude-sonnet-4-5',
+          tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+          cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+        };
+      });
+    });
+    await bridge!.shutdown();
+
+    const expectedCiAttrs = {
+      'vcs.repository.name': 'weareikko/code-review',
+      'vcs.owner.name': 'weareikko',
+      'vcs.ref.base.name': 'main',
+      'cicd.pipeline.source': 'pull_request',
+    };
+
+    for (const span of fake.spans) {
+      const attrs = Object.fromEntries(span.attributes.map((a) => [a.key, a.value]));
+      expect(attrs).toMatchObject(expectedCiAttrs);
+    }
+    const genAiMetrics = fake.metricsRecorded.filter((m) => m.name.startsWith('gen_ai.'));
+    for (const metric of genAiMetrics) {
+      expect(metric.attributes).toMatchObject(expectedCiAttrs);
+    }
+
+    // GITHUB_JOB / GITHUB_RUN_ID land on spans+logs as the high-cardinality
+    // cicd ids, but never on metric data points.
+    const completedLog = fake.logsEmitted.find(
+      (l) => l.attributes['event.name'] === 'code_review.completed',
+    );
+    expect(completedLog?.attributes).toMatchObject(expectedCiAttrs);
+    expect(completedLog?.attributes['cicd.pipeline.task.run.id']).toBe('review');
+    expect(completedLog?.attributes['cicd.pipeline.run.id']).toBe('99887766');
+    for (const metric of fake.metricsRecorded) {
+      expect(metric.attributes).not.toHaveProperty('cicd.pipeline.task.run.id');
+      expect(metric.attributes).not.toHaveProperty('cicd.pipeline.run.id');
+    }
+  });
+
   it('omits vcs.repository.name and siblings when CI vars are absent', async () => {
     const { metricsRecorded } = await runWithBridge(async (ctx) => {
       ctx.usage = {
