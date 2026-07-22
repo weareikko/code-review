@@ -1669,6 +1669,60 @@ describe('OpenTelemetry bridge', () => {
     }
   });
 
+  it('tags review metrics with code_review.first_review from the run context', async () => {
+    const { startOtelBridge } = await import('./otel.js');
+    const fake = createFakeRuntime();
+    const bridge = await startOtelBridge({
+      runtime: fake.runtime,
+      env: { CODE_REVIEW_OTEL: '1' },
+    });
+
+    const config: Config = {
+      project: 'proj',
+      mr: '1',
+      gitlabUrl: 'https://gitlab.example.com',
+      gitlabToken: 't',
+      gitlabAuthHeader: 'PRIVATE-TOKEN',
+      model: 'anthropic/claude-sonnet-4-5',
+      minSeverity: 'info',
+      thinkingLevel: 'off',
+      postingMode: 'direct',
+      reviewDepth: 'single',
+      apiKey: 'k',
+      reviewFile: 'code-review.md',
+      output: 'review-comments.json',
+      dryRun: false,
+      noPost: false,
+      postSummary: false,
+      forceReview: false,
+      verbose: false,
+      cwd: '/tmp',
+      skills: [],
+      refreshGitSkills: false,
+    };
+
+    const runContext = createDiagnosticContext('run', config, 'run-first');
+    runContext.firstReview = true;
+    await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
+      const reviewerContext = createDiagnosticContext('reviewer.run', config, 'run-first');
+      await traceDiagnostic(diagnosticChannels.runReviewer, reviewerContext, async (ctx) => {
+        ctx.usage = {
+          model: 'anthropic/claude-sonnet-4-5',
+          tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+          cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+        };
+      });
+    });
+    await bridge!.shutdown();
+
+    // The boolean rides on runs_total (for distinct-MR counting) and the other
+    // review-level metrics (to split spend between first reviews and re-reviews).
+    const runs = fake.metricsRecorded.find((m) => m.name === 'code_review_runs_total');
+    expect(runs!.attributes['code_review.first_review']).toBe(true);
+    const cost = fake.metricsRecorded.find((m) => m.name === 'code_review_total_cost_usd');
+    expect(cost!.attributes['code_review.first_review']).toBe(true);
+  });
+
   it('omits vcs.repository.name and siblings when CI vars are absent', async () => {
     const { metricsRecorded } = await runWithBridge(async (ctx) => {
       ctx.usage = {

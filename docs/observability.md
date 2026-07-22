@@ -96,23 +96,25 @@ Provider is emitted as `gen_ai.provider.name` (the current semconv discriminator
 
 **Review-level metrics** are emitted once per complete run (success or failure):
 
-| Metric                                        | Type      | Labels                                                                                                             |
-| --------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------ |
-| `code_review_runs_total`                      | Counter   | `vcs.repository.name`, `cicd.pipeline.source`, `code_review.dry_run`, `code_review.status`                         |
-| `code_review_errors_total`                    | Counter   | `vcs.repository.name`, `code_review.dry_run`, `code_review.status`, `error.type`                                   |
-| `code_review_run_duration_seconds`            | Histogram | `vcs.repository.name`, `cicd.pipeline.source`, `code_review.dry_run`, `code_review.status`, `gen_ai.request.model` |
-| `code_review_total_cost_usd`                  | Histogram | `vcs.repository.name`, `code_review.dry_run`, `code_review.status`, `gen_ai.request.model`                         |
-| `code_review_comments_total`                  | Counter   | `vcs.repository.name`, `code_review.dry_run`, `code_review.comment.severity`                                       |
-| `code_review_drafts_published_total`          | Counter   | `vcs.repository.name`, `code_review.dry_run`                                                                       |
-| `code_review_phase_duration_seconds`          | Histogram | `vcs.repository.name`, `code_review.phase`, `code_review.status`                                                   |
-| `code_review_llm_input_tokens_total`          | Counter   | `vcs.repository.name`, `gen_ai.request.model`                                                                      |
-| `code_review_llm_output_tokens_total`         | Counter   | `vcs.repository.name`, `gen_ai.request.model`                                                                      |
-| `code_review_llm_cache_read_tokens_total`     | Counter   | `vcs.repository.name`, `gen_ai.request.model`                                                                      |
-| `code_review_llm_cache_creation_tokens_total` | Counter   | `vcs.repository.name`, `gen_ai.request.model`                                                                      |
+| Metric                                        | Type      | Labels                                                                                                                 |
+| --------------------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `code_review_runs_total`                      | Counter   | `vcs.repository.name`, `cicd.pipeline.source`, `code_review.dry_run`, `code_review.status`, `code_review.first_review` |
+| `code_review_errors_total`                    | Counter   | `vcs.repository.name`, `code_review.dry_run`, `code_review.status`, `error.type`                                       |
+| `code_review_run_duration_seconds`            | Histogram | `vcs.repository.name`, `cicd.pipeline.source`, `code_review.dry_run`, `code_review.status`, `gen_ai.request.model`     |
+| `code_review_total_cost_usd`                  | Histogram | `vcs.repository.name`, `code_review.dry_run`, `code_review.status`, `gen_ai.request.model`                             |
+| `code_review_comments_total`                  | Counter   | `vcs.repository.name`, `code_review.dry_run`, `code_review.comment.severity`                                           |
+| `code_review_drafts_published_total`          | Counter   | `vcs.repository.name`, `code_review.dry_run`                                                                           |
+| `code_review_phase_duration_seconds`          | Histogram | `vcs.repository.name`, `code_review.phase`, `code_review.status`                                                       |
+| `code_review_llm_input_tokens_total`          | Counter   | `vcs.repository.name`, `gen_ai.request.model`                                                                          |
+| `code_review_llm_output_tokens_total`         | Counter   | `vcs.repository.name`, `gen_ai.request.model`                                                                          |
+| `code_review_llm_cache_read_tokens_total`     | Counter   | `vcs.repository.name`, `gen_ai.request.model`                                                                          |
+| `code_review_llm_cache_creation_tokens_total` | Counter   | `vcs.repository.name`, `gen_ai.request.model`                                                                          |
 
 `code_review.status` is `success`, `error`, or `timeout` (AbortError / ETIMEDOUT). `vcs.repository.name` is populated from `CI_PROJECT_PATH` (GitLab CI) or `GITHUB_REPOSITORY` (GitHub Actions) when running in CI.
 
-`code_review_runs_total` increments exactly once per run, so review volume is `sum(increase(code_review_runs_total[…]))` and the error rate is `code_review_errors_total / code_review_runs_total`. The unique per-run `run_id` is deliberately **not** a metric label — it would create one Prometheus/Mimir series per run (unbounded cardinality). `run_id` lives on spans and log records instead, which is where per-run correlation belongs.
+`code_review_runs_total` increments exactly once per run, so review volume is `sum(increase(code_review_runs_total[…]))` and the error rate is `code_review_errors_total / code_review_runs_total`. The unique per-run `run_id` and the MR/PR change id are deliberately **not** metric labels — they would create one Prometheus/Mimir series per run/change (unbounded cardinality) and live on spans and log records instead.
+
+Because a single MR/PR is re-reviewed on each push, `runs_total` counts _review runs_, not distinct MRs. The low-cardinality boolean `code_review.first_review` (true when no prior bot summary note exists on the MR/PR) bridges the gap without a per-change label: `sum(increase(code_review_runs_total{code_review_first_review="true"}[…]))` counts MRs/PRs newly entering review in the window, and pairing it with `code_review_total_cost_usd_sum` gives cost per MR/PR. `first_review="false"` is the re-review volume. (For an _exact_ distinct-MR count over an arbitrary window — including MRs first reviewed earlier — query the change id from spans/logs instead.)
 
 Grafana Application Observability auto-discovers the service from its `gen_ai.*` metrics without any dashboard import. The `code_review_*` metrics enable project-level Mimir queries such as `sum by (vcs_repository_name) (increase(code_review_total_cost_usd_sum[7d]))` to track spend per repository.
 

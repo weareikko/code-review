@@ -25,7 +25,7 @@ import { startOtelBridge } from './otel.js';
 import { parseReviewMarkdownWithWarnings } from './parser.js';
 import { createPlatform, type ScmResponseInfo } from './platform.js';
 import type { SummaryResult } from './posting.js';
-import { findExistingReviewedCommitSha } from './posting.js';
+import { findExistingReviewedCommitSha, findExistingSummaryNote } from './posting.js';
 import { extractChangedFiles, extractPriorThreads } from './prior-threads.js';
 import { withCarriedOverFindings } from './summary-carryover.js';
 import type { GeneratedComment, Severity, ThinkingLevel } from './types.js';
@@ -206,6 +206,10 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
     );
 
     const reviewedCommitSha = findExistingReviewedCommitSha(initialDiscussions);
+    // No prior bot summary note ⇒ this is the first review of this MR/PR (rather
+    // than a re-review after new pushes). Surfaced on the run's telemetry so
+    // distinct MRs/PRs can be counted without a high-cardinality change-id label.
+    runContext.firstReview = findExistingSummaryNote(initialDiscussions) === null;
     if (
       !config.forceReview &&
       !config.dryRun &&

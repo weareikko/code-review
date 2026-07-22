@@ -106,6 +106,14 @@ export interface DiagnosticContext {
   model: string;
   minSeverity: string;
   dryRun: boolean;
+  /**
+   * True when no prior bot summary note exists on the MR/PR — i.e. this is the
+   * first review of it (vs a re-review after new pushes). Emitted as the
+   * `code_review.first_review` label so distinct MRs/PRs can be counted from
+   * `code_review_runs_total{code_review_first_review="true"}` without putting the
+   * high-cardinality change id on metrics. Set at runtime, not from config.
+   */
+  firstReview?: boolean;
   noPost: boolean;
   startedAt: string;
   completedAt?: string;

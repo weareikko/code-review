@@ -365,6 +365,9 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         ...vcs,
         'vcs.repository.name': projectPath,
         'code_review.dry_run': ctx.dryRun,
+        // Low-cardinality boolean: lets `runs_total{first_review="true"}` count
+        // distinct MRs/PRs and split spend between first reviews and re-reviews.
+        ...(ctx.firstReview !== undefined ? { 'code_review.first_review': ctx.firstReview } : {}),
       };
       const usage = meta?.usage ?? ctx.usage;
       // gen_ai.request.model lets cost/duration/token series be compared across
