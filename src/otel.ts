@@ -300,6 +300,8 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         ciSpanAttrs,
         model: ctx.model,
         dryRun: ctx.dryRun,
+        platform: ctx.platform,
+        serverAddress: hostOf(ctx.gitlabUrl),
         rootSpanCtx,
       });
       // Emit a run-start log so log-only consumers can compute duration and
@@ -339,11 +341,15 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
 
     const status = resolveRunStatus(ctx, isError);
     const projectPath = ciAttrs['vcs.repository.name'] ?? '';
+    // Low-cardinality platform + instance-host labels on every review metric so
+    // dashboards can filter by github/gitlab and by which instance produced them.
+    const vcs = vcsAttrs(ctx.platform, ctx.gitlabUrl);
 
     // Emit a phase-duration observation for every phase that has a measured duration.
     if (typeof ctx.durationMs === 'number') {
       reviewPhaseDuration.record(ctx.durationMs / 1000, {
         ...REVIEW_SERVICE_ATTRS,
+        ...vcs,
         'vcs.repository.name': projectPath,
         'code_review.phase': ctx.phase,
         'code_review.status': status,
@@ -356,6 +362,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
       // Shared label set for every review-level metric data point.
       const runMetricBase = {
         ...REVIEW_SERVICE_ATTRS,
+        ...vcs,
         'vcs.repository.name': projectPath,
         'code_review.dry_run': ctx.dryRun,
       };
@@ -411,6 +418,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         const tokenAttrs = {
           ...REVIEW_SERVICE_ATTRS,
           ...runModelAttrs,
+          ...vcs,
           'vcs.repository.name': projectPath,
         };
         const tokenByType = [
@@ -501,7 +509,8 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
             ...(meta && {
               'vcs.repository.id': meta.project,
               'vcs.change.id': meta.mr,
-              'vcs.repository.url.full': meta.gitlabUrl,
+              ...(meta.platform ? { 'vcs.provider.name': meta.platform } : {}),
+              ...(meta.serverAddress ? { 'server.address': meta.serverAddress } : {}),
               ...meta.ciAttrs,
               ...meta.ciSpanAttrs,
             }),
@@ -529,6 +538,10 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
           // Carry dry-run through so per-turn gen_ai.* metrics can be filtered
           // to exclude dry-run cost/tokens, matching the review-level metrics.
           dryRun: runMeta.get(runId)?.dryRun,
+          // Platform + instance host so per-turn metrics filter by github/gitlab
+          // and by instance, matching the review-level metrics.
+          platform: runMeta.get(runId)?.platform,
+          serverAddress: runMeta.get(runId)?.serverAddress,
           captureContent,
         },
       );
@@ -551,6 +564,13 @@ interface AgentSubscriberOptions {
    * cost/tokens can be excluded from the gen_ai panels.
    */
   dryRun?: boolean;
+  /**
+   * Review platform (`gitlab` | `github`) and instance host, emitted as
+   * `vcs.provider.name` / `server.address` on every per-turn gen_ai.* metric so
+   * they can be filtered by platform/instance like the review-level metrics.
+   */
+  platform?: string;
+  serverAddress?: string;
   /**
    * When true, serializes LLM output text and tool call arguments/results onto
    * spans as `gen_ai.output.messages`, `gen_ai.tool.call.arguments`, and
@@ -715,7 +735,15 @@ function buildAgentSubscriber(
   reviewerSpanCtx: ReturnType<typeof trace.setSpan>,
   options: AgentSubscriberOptions = {},
 ): (agent: AgentLike) => () => void {
-  const { ciAttrs = {}, runId, configuredModel, dryRun, captureContent = false } = options;
+  const {
+    ciAttrs = {},
+    runId,
+    configuredModel,
+    dryRun,
+    platform,
+    serverAddress,
+    captureContent = false,
+  } = options;
   // configuredModel is fixed for the subscriber's lifetime, so derive its
   // provider once instead of re-splitting it on every turn (the common
   // Anthropic-SDK case where msg.model carries a bare ID without a provider).
@@ -727,6 +755,8 @@ function buildAgentSubscriber(
     ...REVIEW_SERVICE_ATTRS,
     ...ciAttrs,
     ...(dryRun !== undefined ? { 'code_review.dry_run': dryRun } : {}),
+    ...(platform ? { 'vcs.provider.name': platform } : {}),
+    ...(serverAddress ? { 'server.address': serverAddress } : {}),
   };
   return (agent: AgentLike): (() => void) => {
     let currentTurn: { span: Span; startMs: number; firstTokenMs?: number } | undefined;
@@ -959,6 +989,9 @@ interface RunMeta {
    * never be filtered out of the gen_ai panels.
    */
   dryRun?: boolean;
+  /** Review platform (`vcs.provider.name`) and instance host (`server.address`). */
+  platform?: string;
+  serverAddress?: string;
   usage?: DiagnosticUsage;
   /** Cached from the `scm.post_comments` phase for the drafts-published metric. */
   draftsPublished?: number;
@@ -982,7 +1015,7 @@ function emitReviewStartedLog(
       'event.name': 'code_review.started',
       'vcs.repository.id': ctx.project,
       'vcs.change.id': ctx.mr,
-      'vcs.repository.url.full': ctx.gitlabUrl,
+      ...vcsAttrs(ctx.platform, ctx.gitlabUrl),
       ...ciAttrs,
       ...ciSpanAttrs,
       'code_review.run_id': ctx.runId,
@@ -1021,7 +1054,7 @@ function emitReviewCompletedLog(
       'event.name': isError ? 'code_review.failed' : 'code_review.completed',
       'vcs.repository.id': ctx.project,
       'vcs.change.id': ctx.mr,
-      'vcs.repository.url.full': ctx.gitlabUrl,
+      ...vcsAttrs(ctx.platform, ctx.gitlabUrl),
       ...meta?.ciAttrs,
       ...meta?.ciSpanAttrs,
       ...(isError && {
@@ -1205,17 +1238,53 @@ function buildCiSpanAttrs(env: NodeJS.ProcessEnv): Record<string, string> {
   if (taskRunId) attrs['cicd.pipeline.task.run.id'] = taskRunId;
   const pipelineRunId = env.CI_PIPELINE_ID ?? env.GITHUB_RUN_ID;
   if (pipelineRunId) attrs['cicd.pipeline.run.id'] = pipelineRunId;
+  // Canonical full repository URL (per-repo, so span/log only — never a metric
+  // label). GitLab exposes it directly; GitHub composes it from server + slug.
+  const repositoryUrl =
+    env.CI_PROJECT_URL ??
+    (env.GITHUB_SERVER_URL && env.GITHUB_REPOSITORY
+      ? `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}`
+      : undefined);
+  if (repositoryUrl) attrs['vcs.repository.url.full'] = repositoryUrl;
   return attrs;
 }
 
+/** Host of a server URL, for the low-cardinality `server.address` instance label. */
+function hostOf(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).host;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Low-cardinality VCS discriminators added to every metric, span, and log:
+ * `vcs.provider.name` (gitlab | github) to filter by platform, and
+ * `server.address` (the instance host) to distinguish multiple GitLab/GitHub
+ * instances (e.g. gitlab.com vs a self-hosted gitlab.example.com).
+ */
+function vcsAttrs(platform: string | undefined, serverUrl: string | undefined): Attributes {
+  const host = hostOf(serverUrl);
+  return {
+    ...(platform ? { 'vcs.provider.name': platform } : {}),
+    ...(host ? { 'server.address': host } : {}),
+  };
+}
+
 function baseAttributes(ctx: DiagnosticContext): Record<string, string | number | boolean> {
+  const host = hostOf(ctx.gitlabUrl);
   return {
     'code_review.run_id': ctx.runId,
     'gen_ai.conversation.id': ctx.runId,
     'code_review.phase': ctx.phase,
     'vcs.repository.id': ctx.project,
     'vcs.change.id': ctx.mr,
-    'vcs.repository.url.full': ctx.gitlabUrl,
+    // The canonical full repository URL is set from CI vars via ciSpanAttrs; here
+    // we carry only the low-cardinality platform + instance-host discriminators.
+    ...(ctx.platform ? { 'vcs.provider.name': ctx.platform } : {}),
+    ...(host ? { 'server.address': host } : {}),
     'code_review.dry_run': ctx.dryRun,
     'code_review.no_post': ctx.noPost,
     'code_review.min_severity': ctx.minSeverity,
@@ -1316,6 +1385,7 @@ function recordGenAiMetrics(
     'gen_ai.operation.name': 'invoke_agent',
     ...REVIEW_SERVICE_ATTRS,
     ...ciAttrs,
+    ...vcsAttrs(ctx.platform, ctx.gitlabUrl),
     ...genAiModelAttrs(provider, modelId),
     'code_review.dry_run': ctx.dryRun,
   };

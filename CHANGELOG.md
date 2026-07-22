@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `code_review.dry_run` label on the per-turn `gen_ai.client.*` metrics ([#137]).
 - Telemetry `vcs.*`/`cicd.*` CI attributes are now sourced from GitHub Actions env vars too (not just GitLab CI), so they populate on GitHub PR reviews ([#137]).
+- `vcs.provider.name` (`gitlab`/`github`) and `server.address` (instance host) labels on every signal, so dashboards can filter by platform and by instance (e.g. multiple GitLab servers); plus the canonical `vcs.repository.url.full` on spans/logs ([#137]).
 
 ### Fixed
 

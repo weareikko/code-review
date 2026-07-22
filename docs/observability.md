@@ -6,7 +6,9 @@
 >
 > **Breaking change.** These replaced the earlier `gitlab_review_*` / `gitlab.*` identifiers. Dashboards, alerts, and recording rules built on the old names must be updated (mapping in the [CHANGELOG](../CHANGELOG.md)); historical series keep their old names, so a query spanning the rename boundary sees a gap.
 >
-> The `vcs.*` / `cicd.*` attributes are sourced from **either** GitLab CI **or** GitHub Actions environment variables (whichever the run provides): `vcs.repository.name` from `CI_PROJECT_PATH` / `GITHUB_REPOSITORY`, `vcs.owner.name` from `CI_PROJECT_NAMESPACE` / `GITHUB_REPOSITORY_OWNER`, `vcs.ref.base.name` from `CI_MERGE_REQUEST_TARGET_BRANCH_NAME` / `GITHUB_BASE_REF`, `cicd.pipeline.source` from `CI_PIPELINE_SOURCE` / `GITHUB_EVENT_NAME`, and (span/log only) `cicd.pipeline.run.id` from `CI_PIPELINE_ID` / `GITHUB_RUN_ID` and `cicd.pipeline.task.run.id` from `CI_JOB_ID` / `GITHUB_JOB`. Outside CI they are omitted.
+> Every metric, span, and log also carries two low-cardinality VCS discriminators so dashboards can filter by platform and instance: **`vcs.provider.name`** (`gitlab` | `github`, from the resolved `--platform`) and **`server.address`** (the instance host — e.g. `gitlab.com`, a self-hosted `gitlab.example.com`, or `github.com` — parsed from the server URL). These come from config, so they populate even outside CI.
+>
+> The remaining `vcs.*` / `cicd.*` attributes are sourced from **either** GitLab CI **or** GitHub Actions environment variables (whichever the run provides): `vcs.repository.name` from `CI_PROJECT_PATH` / `GITHUB_REPOSITORY`, `vcs.owner.name` from `CI_PROJECT_NAMESPACE` / `GITHUB_REPOSITORY_OWNER`, `vcs.ref.base.name` from `CI_MERGE_REQUEST_TARGET_BRANCH_NAME` / `GITHUB_BASE_REF`, `cicd.pipeline.source` from `CI_PIPELINE_SOURCE` / `GITHUB_EVENT_NAME`, and — span/log only (per-repo cardinality) — `vcs.repository.url.full` from `CI_PROJECT_URL` / (`GITHUB_SERVER_URL` + `GITHUB_REPOSITORY`), `cicd.pipeline.run.id` from `CI_PIPELINE_ID` / `GITHUB_RUN_ID`, and `cicd.pipeline.task.run.id` from `CI_JOB_ID` / `GITHUB_JOB`. Outside CI they are omitted.
 
 ## Diagnostics channels
 

@@ -100,6 +100,8 @@ export interface DiagnosticContext {
   project: string;
   mr: string;
   gitlabUrl: string;
+  /** Review platform (`gitlab` | `github`); emitted as the `vcs.provider.name` label. */
+  platform?: string;
   cwd: string;
   model: string;
   minSeverity: string;
@@ -196,6 +198,7 @@ export function createDiagnosticContext(
     project: config.project,
     mr: config.mr,
     gitlabUrl: config.gitlabUrl,
+    platform: config.platform,
     cwd: config.cwd,
     model: config.model,
     minSeverity: config.minSeverity,

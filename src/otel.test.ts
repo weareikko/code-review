@@ -1574,6 +1574,7 @@ describe('OpenTelemetry bridge', () => {
         CODE_REVIEW_OTEL: '1',
         GITHUB_REPOSITORY: 'weareikko/code-review',
         GITHUB_REPOSITORY_OWNER: 'weareikko',
+        GITHUB_SERVER_URL: 'https://github.com',
         GITHUB_BASE_REF: 'main',
         GITHUB_EVENT_NAME: 'pull_request',
         GITHUB_JOB: 'review',
@@ -1582,6 +1583,7 @@ describe('OpenTelemetry bridge', () => {
     });
 
     const config: Config = {
+      platform: 'github',
       project: 'weareikko/code-review',
       mr: '57',
       gitlabUrl: 'https://github.com',
@@ -1644,6 +1646,26 @@ describe('OpenTelemetry bridge', () => {
     for (const metric of fake.metricsRecorded) {
       expect(metric.attributes).not.toHaveProperty('cicd.pipeline.task.run.id');
       expect(metric.attributes).not.toHaveProperty('cicd.pipeline.run.id');
+    }
+
+    // Platform + instance host are low-cardinality, so they ride on every
+    // metric (review-level and gen_ai) as well as spans and logs.
+    for (const metric of fake.metricsRecorded) {
+      expect(metric.attributes['vcs.provider.name']).toBe('github');
+      expect(metric.attributes['server.address']).toBe('github.com');
+    }
+    for (const span of fake.spans) {
+      const attrs = Object.fromEntries(span.attributes.map((a) => [a.key, a.value]));
+      expect(attrs['vcs.provider.name']).toBe('github');
+      expect(attrs['server.address']).toBe('github.com');
+    }
+    // The canonical full repository URL rides on spans + logs (per-repo), never
+    // on metrics, and is composed from GITHUB_SERVER_URL + GITHUB_REPOSITORY.
+    expect(completedLog?.attributes['vcs.repository.url.full']).toBe(
+      'https://github.com/weareikko/code-review',
+    );
+    for (const metric of fake.metricsRecorded) {
+      expect(metric.attributes).not.toHaveProperty('vcs.repository.url.full');
     }
   });
 
