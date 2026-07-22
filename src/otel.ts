@@ -7,15 +7,15 @@
  * phase additionally carries OpenTelemetry GenAI semantic-convention
  * attributes (`gen_ai.*`) and emits the standardized GenAI client metrics
  * (`gen_ai.client.operation.duration`, `gen_ai.client.token.usage`,
- * `gen_ai.client.cost`, `gen_ai.client.time_to_first_token`) so
+ * `code_review_llm_cost_usd`, `gen_ai.client.operation.time_to_first_chunk`) so
  * metrics-driven AI observability surfaces auto-discover the service.
  *
  * Per-turn and per-tool-call telemetry is captured via `createAgentTelemetry`,
  * which subscribes to the agent's live event stream and emits:
  *   - `gen_ai.agent.turn` child spans under `invoke_agent code-review`
  *   - `execute_tool <name>` grandchild spans under each turn
- *   - Per-turn `gen_ai.client.token.usage` and `gen_ai.client.cost` metrics
- *   - `gen_ai.client.time_to_first_token` when streaming events fire
+ *   - Per-turn `gen_ai.client.token.usage` and `code_review_llm_cost_usd` metrics
+ *   - `gen_ai.client.operation.time_to_first_chunk` when streaming events fire
  *
  * Opt-in: set `CODE_REVIEW_OTEL=1`. Exporter selection and endpoint follow
  * the standard `OTEL_*` env vars (`OTEL_EXPORTER_OTLP_ENDPOINT`,
@@ -85,7 +85,7 @@ export interface OtelBridge {
   /**
    * Emits one structured OTel log record per generated comment to Loki/the
    * configured log backend. Each record carries `event.name`,
-   * `gitlab_review.comment.*` attributes, and the comment body as the log
+   * `code_review.comment.*` attributes, and the comment body as the log
    * line. Safe to call at any point after the run phase has opened.
    */
   logComments(comments: GeneratedComment[], runId: string): void;
@@ -128,7 +128,7 @@ const GEN_AI_PHASE: DiagnosticPhase = 'reviewer.run';
 const POST_COMMENTS_PHASE: DiagnosticPhase = 'scm.post_comments';
 const SERVICE_NAME = '@weareikko/code-review';
 
-// Added as a data-point attribute on every gitlab_review_* metric so that
+// Added as a data-point attribute on every code_review_* metric so that
 // Prometheus/Mimir surfaces it as a label (service_name="…"). The SDK-level
 // service.name resource attribute only populates target_info, not per-metric
 // labels, so we need to include it explicitly here.
@@ -224,13 +224,19 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     unit: '{token}',
     advice: { explicitBucketBoundaries: TOKEN_BUCKETS },
   });
-  const operationCost = meter.createHistogram('gen_ai.client.cost', {
-    description: 'GenAI operation cost in USD',
+  // Per-turn LLM cost in USD, broken down by token type. Cost is NOT part of the
+  // OTel GenAI conventions (no gen_ai.* cost metric or attribute exists), so this
+  // is a deliberate local extension kept out of the reserved `gen_ai.*` namespace
+  // to avoid colliding if the spec later standardizes cost.
+  const operationCost = meter.createHistogram('code_review_llm_cost_usd', {
+    description: 'LLM cost in USD per turn, by token type (non-standard extension)',
     unit: '{usd}',
     advice: { explicitBucketBoundaries: COST_BUCKETS_USD },
   });
-  const timeToFirstToken = meter.createHistogram('gen_ai.client.time_to_first_token', {
-    description: 'Time to first token from the LLM',
+  // GenAI-semconv client streaming metric. The client-side name is
+  // `operation.time_to_first_chunk`; `time_to_first_token` exists only server-side.
+  const timeToFirstToken = meter.createHistogram('gen_ai.client.operation.time_to_first_chunk', {
+    description: 'Time to first chunk from the LLM',
     unit: 's',
     advice: { explicitBucketBoundaries: TTFT_BUCKETS_S },
   });
@@ -293,6 +299,9 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         ciAttrs,
         ciSpanAttrs,
         model: ctx.model,
+        dryRun: ctx.dryRun,
+        platform: ctx.platform,
+        serverAddress: hostOf(ctx.gitlabUrl),
         rootSpanCtx,
       });
       // Emit a run-start log so log-only consumers can compute duration and
@@ -331,26 +340,34 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     entry.closed = true;
 
     const status = resolveRunStatus(ctx, isError);
-    const projectPath = ciAttrs['gitlab.project_path'] ?? '';
+    const projectPath = ciAttrs['vcs.repository.name'] ?? '';
+    // Low-cardinality platform + instance-host labels on every review metric so
+    // dashboards can filter by github/gitlab and by which instance produced them.
+    const vcs = vcsAttrs(ctx.platform, ctx.gitlabUrl);
 
     // Emit a phase-duration observation for every phase that has a measured duration.
     if (typeof ctx.durationMs === 'number') {
       reviewPhaseDuration.record(ctx.durationMs / 1000, {
         ...REVIEW_SERVICE_ATTRS,
-        'gitlab.project_path': projectPath,
-        'gitlab_review.phase': ctx.phase,
-        'gitlab_review.status': status,
+        ...vcs,
+        'vcs.repository.name': projectPath,
+        'code_review.phase': ctx.phase,
+        'code_review.status': status,
       });
     }
 
     if (ctx.phase === ROOT_PHASE) {
       const meta = runMeta.get(ctx.runId);
-      const pipelineSource = ciAttrs['gitlab.pipeline_source'] ?? '';
+      const pipelineSource = ciAttrs['cicd.pipeline.source'] ?? '';
       // Shared label set for every review-level metric data point.
       const runMetricBase = {
         ...REVIEW_SERVICE_ATTRS,
-        'gitlab.project_path': projectPath,
-        'gitlab_review.dry_run': ctx.dryRun,
+        ...vcs,
+        'vcs.repository.name': projectPath,
+        'code_review.dry_run': ctx.dryRun,
+        // Low-cardinality boolean: lets `runs_total{first_review="true"}` count
+        // distinct MRs/PRs and split spend between first reviews and re-reviews.
+        ...(ctx.firstReview !== undefined ? { 'code_review.first_review': ctx.firstReview } : {}),
       };
       const usage = meta?.usage ?? ctx.usage;
       // gen_ai.request.model lets cost/duration/token series be compared across
@@ -364,8 +381,8 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
       // label here — a per-run UUID would explode Prometheus/Mimir cardinality.
       reviewRunsTotal.add(1, {
         ...runMetricBase,
-        'gitlab.pipeline_source': pipelineSource,
-        'gitlab_review.status': status,
+        'cicd.pipeline.source': pipelineSource,
+        'code_review.status': status,
       });
 
       // Dedicated error counter so an error rate can be alerted on without
@@ -374,7 +391,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
       if (isError) {
         reviewErrorsTotal.add(1, {
           ...runMetricBase,
-          'gitlab_review.status': status,
+          'code_review.status': status,
           'error.type': errorTypeOf(ctx),
         });
       }
@@ -383,8 +400,8 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         reviewRunDuration.record(ctx.durationMs / 1000, {
           ...runMetricBase,
           ...runModelAttrs,
-          'gitlab.pipeline_source': pipelineSource,
-          'gitlab_review.status': status,
+          'cicd.pipeline.source': pipelineSource,
+          'code_review.status': status,
         });
       }
 
@@ -393,7 +410,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         reviewTotalCost.record(totalCostUsd, {
           ...runMetricBase,
           ...runModelAttrs,
-          'gitlab_review.status': status,
+          'code_review.status': status,
         });
       }
 
@@ -404,7 +421,8 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         const tokenAttrs = {
           ...REVIEW_SERVICE_ATTRS,
           ...runModelAttrs,
-          'gitlab.project_path': projectPath,
+          ...vcs,
+          'vcs.repository.name': projectPath,
         };
         const tokenByType = [
           ['input', 'input'],
@@ -418,7 +436,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
         }
       }
 
-      // Prefer a per-severity breakdown (matching the gitlab_review.comment.severity
+      // Prefer a per-severity breakdown (matching the code_review.comment.severity
       // log attribute) when the run provided one; fall back to a single
       // unlabelled increment for callers/contexts that only know the total.
       const bySeverity = ctx.postedBySeverity;
@@ -427,7 +445,7 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
           if (count && count > 0) {
             reviewCommentsTotal.add(count, {
               ...runMetricBase,
-              'gitlab_review.comment.severity': severity,
+              'code_review.comment.severity': severity,
             });
           }
         }
@@ -485,16 +503,17 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
           context: meta?.rootSpanCtx,
           attributes: {
             'service.name': SERVICE_NAME,
-            'event.name': 'gitlab_review.comment',
-            'gitlab_review.run_id': runId,
-            'gitlab_review.comment.file': comment.file,
-            'gitlab_review.comment.line': comment.line,
-            'gitlab_review.comment.severity': comment.severity,
-            'gitlab_review.comment.is_duplicate': duplicate,
+            'event.name': 'code_review.comment',
+            'code_review.run_id': runId,
+            'code_review.comment.file': comment.file,
+            'code_review.comment.line': comment.line,
+            'code_review.comment.severity': comment.severity,
+            'code_review.comment.is_duplicate': duplicate,
             ...(meta && {
-              'gitlab.project_id': meta.project,
-              'gitlab.mr_iid': meta.mr,
-              'gitlab.server_url': meta.gitlabUrl,
+              'vcs.repository.id': meta.project,
+              'vcs.change.id': meta.mr,
+              ...(meta.platform ? { 'vcs.provider.name': meta.platform } : {}),
+              ...(meta.serverAddress ? { 'server.address': meta.serverAddress } : {}),
               ...meta.ciAttrs,
               ...meta.ciSpanAttrs,
             }),
@@ -519,6 +538,13 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
           // Pass the configured model so the per-turn subscriber can derive
           // gen_ai.system when msg.model carries a bare ID without a provider prefix.
           configuredModel: runMeta.get(runId)?.model,
+          // Carry dry-run through so per-turn gen_ai.* metrics can be filtered
+          // to exclude dry-run cost/tokens, matching the review-level metrics.
+          dryRun: runMeta.get(runId)?.dryRun,
+          // Platform + instance host so per-turn metrics filter by github/gitlab
+          // and by instance, matching the review-level metrics.
+          platform: runMeta.get(runId)?.platform,
+          serverAddress: runMeta.get(runId)?.serverAddress,
           captureContent,
         },
       );
@@ -536,6 +562,19 @@ interface AgentSubscriberOptions {
    */
   configuredModel?: string;
   /**
+   * Whether the enclosing review run is a dry run. When defined, emitted as the
+   * `code_review.dry_run` label on every per-turn gen_ai.* metric so dry-run
+   * cost/tokens can be excluded from the gen_ai panels.
+   */
+  dryRun?: boolean;
+  /**
+   * Review platform (`gitlab` | `github`) and instance host, emitted as
+   * `vcs.provider.name` / `server.address` on every per-turn gen_ai.* metric so
+   * they can be filtered by platform/instance like the review-level metrics.
+   */
+  platform?: string;
+  serverAddress?: string;
+  /**
    * When true, serializes LLM output text and tool call arguments/results onto
    * spans as `gen_ai.output.messages`, `gen_ai.tool.call.arguments`, and
    * `gen_ai.tool.call.result`. Requires explicit opt-in via
@@ -545,14 +584,18 @@ interface AgentSubscriberOptions {
 }
 
 /**
- * Builds the dynamic `gen_ai.system` / `gen_ai.request.model` metric labels
- * shared by the per-turn and per-phase GenAI metric emitters. Owning these in
- * one place keeps the two emission sites from drifting into separate Prometheus
- * series (the double-count `recordGenAiMetrics` documents).
+ * Builds the dynamic `gen_ai.provider.name` / `gen_ai.request.model` metric
+ * labels shared by the per-turn and per-phase GenAI metric emitters. Owning
+ * these in one place keeps the two emission sites from drifting into separate
+ * Prometheus series (the double-count `recordGenAiMetrics` documents).
+ *
+ * `gen_ai.provider.name` is the current GenAI-semconv discriminator; the
+ * deprecated `gen_ai.system` is emitted alongside it during the transition so
+ * backends still keyed on the old attribute keep working.
  */
 function genAiModelAttrs(provider?: string, modelId?: string): Attributes {
   return {
-    ...(provider ? { 'gen_ai.system': provider } : {}),
+    ...(provider ? { 'gen_ai.provider.name': provider, 'gen_ai.system': provider } : {}),
     ...(modelId ? { 'gen_ai.request.model': modelId } : {}),
   };
 }
@@ -616,9 +659,9 @@ function recordTurnUsage(
         ...metricAttrs,
         'gen_ai.token.type': 'cache_creation',
       });
-    span.setAttribute('gen_ai.usage.cost.input_usd', u.cost.input);
-    span.setAttribute('gen_ai.usage.cost.output_usd', u.cost.output);
-    span.setAttribute('gen_ai.usage.cost.total_usd', u.cost.total);
+    span.setAttribute('code_review.cost.input_usd', u.cost.input);
+    span.setAttribute('code_review.cost.output_usd', u.cost.output);
+    span.setAttribute('code_review.cost.total_usd', u.cost.total);
   }
 }
 
@@ -695,7 +738,15 @@ function buildAgentSubscriber(
   reviewerSpanCtx: ReturnType<typeof trace.setSpan>,
   options: AgentSubscriberOptions = {},
 ): (agent: AgentLike) => () => void {
-  const { ciAttrs = {}, runId, configuredModel, captureContent = false } = options;
+  const {
+    ciAttrs = {},
+    runId,
+    configuredModel,
+    dryRun,
+    platform,
+    serverAddress,
+    captureContent = false,
+  } = options;
   // configuredModel is fixed for the subscriber's lifetime, so derive its
   // provider once instead of re-splitting it on every turn (the common
   // Anthropic-SDK case where msg.model carries a bare ID without a provider).
@@ -706,6 +757,9 @@ function buildAgentSubscriber(
     'gen_ai.operation.name': 'invoke_agent',
     ...REVIEW_SERVICE_ATTRS,
     ...ciAttrs,
+    ...(dryRun !== undefined ? { 'code_review.dry_run': dryRun } : {}),
+    ...(platform ? { 'vcs.provider.name': platform } : {}),
+    ...(serverAddress ? { 'server.address': serverAddress } : {}),
   };
   return (agent: AgentLike): (() => void) => {
     let currentTurn: { span: Span; startMs: number; firstTokenMs?: number } | undefined;
@@ -756,14 +810,17 @@ function buildAgentSubscriber(
         };
         // Spans carry gen_ai.response.model (the SDK's actual model); metrics
         // carry gen_ai.request.model (set above via genAiModelAttrs).
-        if (provider) span.setAttribute('gen_ai.system', provider);
+        if (provider) {
+          span.setAttribute('gen_ai.provider.name', provider);
+          span.setAttribute('gen_ai.system', provider);
+        }
         if (modelId) span.setAttribute('gen_ai.response.model', modelId);
         if (msg.stopReason) span.setAttribute('gen_ai.response.stop_reason', msg.stopReason);
 
         if (firstTokenMs !== undefined) {
           const ttftS = (firstTokenMs - startMs) / 1000;
           timeToFirstToken.record(ttftS, metricAttrs);
-          span.setAttribute('gen_ai.client.time_to_first_token_s', ttftS);
+          span.setAttribute('gen_ai.client.operation.time_to_first_chunk_s', ttftS);
         }
 
         if (msg.usage) {
@@ -927,6 +984,17 @@ interface RunMeta {
    * carries a bare model ID without a provider prefix.
    */
   model?: string;
+  /**
+   * Whether this run is a dry run. Cached from the ROOT_PHASE context so the
+   * per-turn gen_ai.* metrics (emitted from the live agent stream, which has no
+   * DiagnosticContext of its own) can carry the same `code_review.dry_run`
+   * label as the review-level metrics — otherwise dry-run LLM cost/tokens can
+   * never be filtered out of the gen_ai panels.
+   */
+  dryRun?: boolean;
+  /** Review platform (`vcs.provider.name`) and instance host (`server.address`). */
+  platform?: string;
+  serverAddress?: string;
   usage?: DiagnosticUsage;
   /** Cached from the `scm.post_comments` phase for the drafts-published metric. */
   draftsPublished?: number;
@@ -947,14 +1015,14 @@ function emitReviewStartedLog(
     context: rootSpanCtx,
     attributes: {
       'service.name': SERVICE_NAME,
-      'event.name': 'gitlab_review.started',
-      'gitlab.project_id': ctx.project,
-      'gitlab.mr_iid': ctx.mr,
-      'gitlab.server_url': ctx.gitlabUrl,
+      'event.name': 'code_review.started',
+      'vcs.repository.id': ctx.project,
+      'vcs.change.id': ctx.mr,
+      ...vcsAttrs(ctx.platform, ctx.gitlabUrl),
       ...ciAttrs,
       ...ciSpanAttrs,
-      'gitlab_review.run_id': ctx.runId,
-      'gitlab_review.dry_run': ctx.dryRun,
+      'code_review.run_id': ctx.runId,
+      'code_review.dry_run': ctx.dryRun,
       ...(modelId !== undefined && { 'gen_ai.request.model': modelId }),
     },
   });
@@ -971,7 +1039,7 @@ function emitReviewCompletedLog(
   const cost = usage?.cost.total;
   const costStr = cost !== undefined ? ` $${cost.toFixed(4)}` : '';
   const commentStr = ctx.generated !== undefined ? ` → ${ctx.generated} comments` : '';
-  // Failed runs get their own searchable event (gitlab_review.failed) with the
+  // Failed runs get their own searchable event (code_review.failed) with the
   // error type/message, so an ERROR-level query surfaces every failure.
   // errorInfo.message has the run's own secret values (GitLab token, API key)
   // scrubbed by toDiagnosticError before it ever reaches the context.
@@ -986,10 +1054,10 @@ function emitReviewCompletedLog(
     context: meta?.rootSpanCtx,
     attributes: {
       'service.name': SERVICE_NAME,
-      'event.name': isError ? 'gitlab_review.failed' : 'gitlab_review.completed',
-      'gitlab.project_id': ctx.project,
-      'gitlab.mr_iid': ctx.mr,
-      'gitlab.server_url': ctx.gitlabUrl,
+      'event.name': isError ? 'code_review.failed' : 'code_review.completed',
+      'vcs.repository.id': ctx.project,
+      'vcs.change.id': ctx.mr,
+      ...vcsAttrs(ctx.platform, ctx.gitlabUrl),
       ...meta?.ciAttrs,
       ...meta?.ciSpanAttrs,
       ...(isError && {
@@ -999,15 +1067,15 @@ function emitReviewCompletedLog(
           'http.response.status_code': ctx.errorInfo.status,
         }),
       }),
-      'gitlab_review.run_id': ctx.runId,
-      'gitlab_review.duration_ms': ctx.durationMs ?? 0,
-      'gitlab_review.dry_run': ctx.dryRun,
-      'gitlab_review.comments.generated': ctx.generated ?? 0,
-      'gitlab_review.comments.new': ctx.newComments ?? 0,
-      'gitlab_review.comments.duplicate': ctx.duplicateComments ?? 0,
-      'gitlab_review.comments.posted': ctx.posted ?? 0,
+      'code_review.run_id': ctx.runId,
+      'code_review.duration_ms': ctx.durationMs ?? 0,
+      'code_review.dry_run': ctx.dryRun,
+      'code_review.comments.generated': ctx.generated ?? 0,
+      'code_review.comments.new': ctx.newComments ?? 0,
+      'code_review.comments.duplicate': ctx.duplicateComments ?? 0,
+      'code_review.comments.posted': ctx.posted ?? 0,
       ...(modelId !== undefined && { 'gen_ai.request.model': modelId }),
-      ...(cost !== undefined && { 'gen_ai.usage.cost.total_usd': cost }),
+      ...(cost !== undefined && { 'code_review.cost.total_usd': cost }),
       ...(usage?.tokens.input !== undefined && {
         // Total (non-cached + cached) — Sentry AI monitoring model.
         'gen_ai.usage.input_tokens': usage.tokens.input + (usage.tokens.cacheRead ?? 0),
@@ -1049,47 +1117,47 @@ interface ReviewInstruments {
 /** Creates the review-level OTel metric instruments on the given meter. */
 function createReviewInstruments(meter: Meter): ReviewInstruments {
   return {
-    reviewRunsTotal: meter.createCounter('gitlab_review_runs_total', {
+    reviewRunsTotal: meter.createCounter('code_review_runs_total', {
       description: 'Total number of code-review runs, labelled by terminal status',
     }),
-    reviewErrorsTotal: meter.createCounter('gitlab_review_errors_total', {
+    reviewErrorsTotal: meter.createCounter('code_review_errors_total', {
       description: 'Total number of failed code-review runs, labelled by error type',
     }),
     reviewLlmTokens: {
-      input: meter.createCounter('gitlab_review_llm_input_tokens_total', {
+      input: meter.createCounter('code_review_llm_input_tokens_total', {
         description: 'Total non-cached LLM input tokens consumed across code-review runs',
         unit: '{token}',
       }),
-      output: meter.createCounter('gitlab_review_llm_output_tokens_total', {
+      output: meter.createCounter('code_review_llm_output_tokens_total', {
         description: 'Total LLM output tokens generated across code-review runs',
         unit: '{token}',
       }),
-      cache_read: meter.createCounter('gitlab_review_llm_cache_read_tokens_total', {
+      cache_read: meter.createCounter('code_review_llm_cache_read_tokens_total', {
         description: 'Total LLM cache-read input tokens across code-review runs',
         unit: '{token}',
       }),
-      cache_creation: meter.createCounter('gitlab_review_llm_cache_creation_tokens_total', {
+      cache_creation: meter.createCounter('code_review_llm_cache_creation_tokens_total', {
         description: 'Total LLM cache-creation input tokens across code-review runs',
         unit: '{token}',
       }),
     },
-    reviewRunDuration: meter.createHistogram('gitlab_review_run_duration_seconds', {
+    reviewRunDuration: meter.createHistogram('code_review_run_duration_seconds', {
       description: 'Duration of a complete code-review run',
       unit: 's',
       advice: { explicitBucketBoundaries: REVIEW_RUN_DURATION_BUCKETS_S },
     }),
-    reviewTotalCost: meter.createHistogram('gitlab_review_total_cost_usd', {
+    reviewTotalCost: meter.createHistogram('code_review_total_cost_usd', {
       description: 'Total LLM cost in USD for a complete code-review run',
       unit: '{usd}',
       advice: { explicitBucketBoundaries: REVIEW_TOTAL_COST_BUCKETS_USD },
     }),
-    reviewCommentsTotal: meter.createCounter('gitlab_review_comments_total', {
+    reviewCommentsTotal: meter.createCounter('code_review_comments_total', {
       description: 'Total number of MR comments posted by code-review',
     }),
-    reviewDraftsPublishedTotal: meter.createCounter('gitlab_review_drafts_published_total', {
+    reviewDraftsPublishedTotal: meter.createCounter('code_review_drafts_published_total', {
       description: 'Total number of draft notes published by code-review',
     }),
-    reviewPhaseDuration: meter.createHistogram('gitlab_review_phase_duration_seconds', {
+    reviewPhaseDuration: meter.createHistogram('code_review_phase_duration_seconds', {
       description: 'Duration of individual code-review workflow phases',
       unit: 's',
       advice: { explicitBucketBoundaries: REVIEW_PHASE_DURATION_BUCKETS_S },
@@ -1115,7 +1183,7 @@ function errorTypeOf(ctx: DiagnosticContext): string {
 }
 
 /**
- * Derives the `gitlab_review.status` label used by review-level OTel metrics.
+ * Derives the `code_review.status` label used by review-level OTel metrics.
  * Distinguishes timeouts (AbortError / ETIMEDOUT) from generic errors so
  * Grafana alerts can treat deadline-exceeded runs separately.
  */
@@ -1138,61 +1206,109 @@ function resolveRunStatus(
 }
 
 /**
- * Extracts GitLab CI environment variables that add project/pipeline context
- * to every metric, span, and log record. Only populated when running inside a
- * GitLab CI pipeline; callers spread the result so missing vars add nothing.
+ * Extracts low-cardinality CI project/pipeline context (repository, owner, base
+ * branch, pipeline trigger) as platform-neutral `vcs.*` / `cicd.*` attributes
+ * added to every metric, span, and log record. Sourced from GitLab CI or GitHub
+ * Actions variables — a run is one or the other, so `??` picks whichever is set;
+ * callers spread the result so missing vars add nothing.
  */
 function buildCiAttrs(env: NodeJS.ProcessEnv): Record<string, string> {
   const attrs: Record<string, string> = {};
-  if (env.CI_PROJECT_PATH) attrs['gitlab.project_path'] = env.CI_PROJECT_PATH;
-  if (env.CI_PROJECT_NAMESPACE) attrs['gitlab.project_namespace'] = env.CI_PROJECT_NAMESPACE;
-  if (env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME)
-    attrs['gitlab.mr_target_branch'] = env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME;
-  if (env.CI_PIPELINE_SOURCE) attrs['gitlab.pipeline_source'] = env.CI_PIPELINE_SOURCE;
+  // GITHUB_REPOSITORY / CI_PROJECT_PATH are both "owner/repo" ("group/project").
+  const repository = env.CI_PROJECT_PATH ?? env.GITHUB_REPOSITORY;
+  if (repository) attrs['vcs.repository.name'] = repository;
+  const owner = env.CI_PROJECT_NAMESPACE ?? env.GITHUB_REPOSITORY_OWNER;
+  if (owner) attrs['vcs.owner.name'] = owner;
+  // GITHUB_BASE_REF is set only on pull_request events (the PR's target branch).
+  const baseRef = env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME ?? env.GITHUB_BASE_REF;
+  if (baseRef) attrs['vcs.ref.base.name'] = baseRef;
+  // Pipeline trigger: GitLab CI_PIPELINE_SOURCE vs GitHub Actions event name.
+  const pipelineSource = env.CI_PIPELINE_SOURCE ?? env.GITHUB_EVENT_NAME;
+  if (pipelineSource) attrs['cicd.pipeline.source'] = pipelineSource;
   return attrs;
 }
 
 /**
- * Extracts high-cardinality GitLab CI identifiers that should appear on spans
- * and log records but NOT on metric data points (to avoid label explosion in
- * Prometheus/Mimir). Spread results via `ciSpanAttrs` stored in RunMeta.
+ * Extracts high-cardinality CI identifiers that should appear on spans and log
+ * records but NOT on metric data points (to avoid label explosion in
+ * Prometheus/Mimir). Sourced from GitLab CI or GitHub Actions. GitHub exposes no
+ * per-job run id in the environment, so the job's config-key (`GITHUB_JOB`) is
+ * used for the task identifier. Spread via `ciSpanAttrs` stored in RunMeta.
  */
 function buildCiSpanAttrs(env: NodeJS.ProcessEnv): Record<string, string> {
   const attrs: Record<string, string> = {};
-  if (env.CI_JOB_ID) attrs['gitlab.ci_job_id'] = env.CI_JOB_ID;
-  if (env.CI_PIPELINE_ID) attrs['gitlab.ci_pipeline_id'] = env.CI_PIPELINE_ID;
+  const taskRunId = env.CI_JOB_ID ?? env.GITHUB_JOB;
+  if (taskRunId) attrs['cicd.pipeline.task.run.id'] = taskRunId;
+  const pipelineRunId = env.CI_PIPELINE_ID ?? env.GITHUB_RUN_ID;
+  if (pipelineRunId) attrs['cicd.pipeline.run.id'] = pipelineRunId;
+  // Canonical full repository URL (per-repo, so span/log only — never a metric
+  // label). GitLab exposes it directly; GitHub composes it from server + slug.
+  const repositoryUrl =
+    env.CI_PROJECT_URL ??
+    (env.GITHUB_SERVER_URL && env.GITHUB_REPOSITORY
+      ? `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}`
+      : undefined);
+  if (repositoryUrl) attrs['vcs.repository.url.full'] = repositoryUrl;
   return attrs;
 }
 
-function baseAttributes(ctx: DiagnosticContext): Record<string, string | number | boolean> {
+/** Host of a server URL, for the low-cardinality `server.address` instance label. */
+function hostOf(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).host;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Low-cardinality VCS discriminators added to every metric, span, and log:
+ * `vcs.provider.name` (gitlab | github) to filter by platform, and
+ * `server.address` (the instance host) to distinguish multiple GitLab/GitHub
+ * instances (e.g. gitlab.com vs a self-hosted gitlab.example.com).
+ */
+function vcsAttrs(platform: string | undefined, serverUrl: string | undefined): Attributes {
+  const host = hostOf(serverUrl);
   return {
-    'gitlab_review.run_id': ctx.runId,
+    ...(platform ? { 'vcs.provider.name': platform } : {}),
+    ...(host ? { 'server.address': host } : {}),
+  };
+}
+
+function baseAttributes(ctx: DiagnosticContext): Record<string, string | number | boolean> {
+  const host = hostOf(ctx.gitlabUrl);
+  return {
+    'code_review.run_id': ctx.runId,
     'gen_ai.conversation.id': ctx.runId,
-    'gitlab_review.phase': ctx.phase,
-    'gitlab.project_id': ctx.project,
-    'gitlab.mr_iid': ctx.mr,
-    'gitlab.server_url': ctx.gitlabUrl,
-    'gitlab_review.dry_run': ctx.dryRun,
-    'gitlab_review.no_post': ctx.noPost,
-    'gitlab_review.min_severity': ctx.minSeverity,
+    'code_review.phase': ctx.phase,
+    'vcs.repository.id': ctx.project,
+    'vcs.change.id': ctx.mr,
+    // The canonical full repository URL is set from CI vars via ciSpanAttrs; here
+    // we carry only the low-cardinality platform + instance-host discriminators.
+    ...(ctx.platform ? { 'vcs.provider.name': ctx.platform } : {}),
+    ...(host ? { 'server.address': host } : {}),
+    'code_review.dry_run': ctx.dryRun,
+    'code_review.no_post': ctx.noPost,
+    'code_review.min_severity': ctx.minSeverity,
   };
 }
 
 // Numeric DiagnosticContext fields mapped to their result span attribute. Each
 // is set only when present as a number, so absent fields add no attribute.
 const NUMERIC_RESULT_ATTRIBUTES = [
-  ['durationMs', 'gitlab_review.duration_ms'],
-  ['generated', 'gitlab_review.comments.generated'],
-  ['newComments', 'gitlab_review.comments.new'],
-  ['duplicateComments', 'gitlab_review.comments.duplicate'],
-  ['posted', 'gitlab_review.comments.posted'],
-  ['draftsPublished', 'gitlab_review.drafts.published'],
-  ['draftsCreated', 'gitlab_review.drafts.created'],
-  ['summaryNoteId', 'gitlab_review.summary.note_id'],
-  ['warnings', 'gitlab_review.warnings'],
-  ['draftsAbandoned', 'gitlab_review.drafts.abandoned'],
-  ['draftsDeletedPrePublish', 'gitlab_review.drafts.deleted_pre_publish'],
-  ['draftsPublishFailed', 'gitlab_review.drafts.publish_failed'],
+  ['durationMs', 'code_review.duration_ms'],
+  ['generated', 'code_review.comments.generated'],
+  ['newComments', 'code_review.comments.new'],
+  ['duplicateComments', 'code_review.comments.duplicate'],
+  ['posted', 'code_review.comments.posted'],
+  ['draftsPublished', 'code_review.drafts.published'],
+  ['draftsCreated', 'code_review.drafts.created'],
+  ['summaryNoteId', 'code_review.summary.note_id'],
+  ['warnings', 'code_review.warnings'],
+  ['draftsAbandoned', 'code_review.drafts.abandoned'],
+  ['draftsDeletedPrePublish', 'code_review.drafts.deleted_pre_publish'],
+  ['draftsPublishFailed', 'code_review.drafts.publish_failed'],
   ['diffFilesChanged', 'diff.files_changed'],
   ['diffLinesAdded', 'diff.lines_added'],
   ['diffLinesRemoved', 'diff.lines_removed'],
@@ -1205,7 +1321,7 @@ const NUMERIC_RESULT_ATTRIBUTES = [
 // is set only when present as a string. HTTP keys follow the stable OTel HTTP
 // semantic conventions (http.request.method, url.full, server.address).
 const STRING_RESULT_ATTRIBUTES = [
-  ['summaryAction', 'gitlab_review.summary.action'],
+  ['summaryAction', 'code_review.summary.action'],
   ['httpRequestMethod', 'http.request.method'],
   ['httpUrl', 'url.full'],
   ['serverAddress', 'server.address'],
@@ -1227,7 +1343,10 @@ function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
   // via OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental.
   // Spec: https://opentelemetry.io/docs/specs/semconv/gen-ai/
   const { provider, modelId } = splitModel(ctx.model ?? '');
-  if (provider) span.setAttribute('gen_ai.system', provider);
+  if (provider) {
+    span.setAttribute('gen_ai.provider.name', provider);
+    span.setAttribute('gen_ai.system', provider);
+  }
   if (modelId) {
     span.setAttribute('gen_ai.request.model', modelId);
     span.setAttribute('gen_ai.response.model', modelId);
@@ -1240,17 +1359,17 @@ function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
   setTokenUsageSpanAttributes(span, usage.tokens);
   // Cost is not standardized by OTel GenAI semconv — emit under a clearly
   // namespaced custom attribute. Revisit when the spec stabilizes a cost field.
-  span.setAttribute('gen_ai.usage.cost.input_usd', usage.cost.input);
-  span.setAttribute('gen_ai.usage.cost.output_usd', usage.cost.output);
-  span.setAttribute('gen_ai.usage.cost.cache_read_usd', usage.cost.cacheRead);
-  span.setAttribute('gen_ai.usage.cost.cache_creation_usd', usage.cost.cacheWrite);
-  span.setAttribute('gen_ai.usage.cost.total_usd', usage.cost.total);
+  span.setAttribute('code_review.cost.input_usd', usage.cost.input);
+  span.setAttribute('code_review.cost.output_usd', usage.cost.output);
+  span.setAttribute('code_review.cost.cache_read_usd', usage.cost.cacheRead);
+  span.setAttribute('code_review.cost.cache_creation_usd', usage.cost.cacheWrite);
+  span.setAttribute('code_review.cost.total_usd', usage.cost.total);
 }
 
 /**
  * Records `gen_ai.client.operation.duration` for the `reviewer.run` phase.
  *
- * Token usage (`gen_ai.client.token.usage`) and cost (`gen_ai.client.cost`) are
+ * Token usage (`gen_ai.client.token.usage`) and cost (`code_review_llm_cost_usd`) are
  * intentionally NOT recorded here. They are emitted per-turn by
  * `buildAgentSubscriber` from the live agent event stream. Keeping a single
  * emission point for each metric prevents the double-count that previously
@@ -1269,7 +1388,9 @@ function recordGenAiMetrics(
     'gen_ai.operation.name': 'invoke_agent',
     ...REVIEW_SERVICE_ATTRS,
     ...ciAttrs,
+    ...vcsAttrs(ctx.platform, ctx.gitlabUrl),
     ...genAiModelAttrs(provider, modelId),
+    'code_review.dry_run': ctx.dryRun,
   };
   if (isError) {
     attrs['error.type'] = errorTypeOf(ctx);

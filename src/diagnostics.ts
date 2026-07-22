@@ -100,10 +100,20 @@ export interface DiagnosticContext {
   project: string;
   mr: string;
   gitlabUrl: string;
+  /** Review platform (`gitlab` | `github`); emitted as the `vcs.provider.name` label. */
+  platform?: string;
   cwd: string;
   model: string;
   minSeverity: string;
   dryRun: boolean;
+  /**
+   * True when no prior bot summary note exists on the MR/PR — i.e. this is the
+   * first review of it (vs a re-review after new pushes). Emitted as the
+   * `code_review.first_review` label so distinct MRs/PRs can be counted from
+   * `code_review_runs_total{code_review_first_review="true"}` without putting the
+   * high-cardinality change id on metrics. Set at runtime, not from config.
+   */
+  firstReview?: boolean;
   noPost: boolean;
   startedAt: string;
   completedAt?: string;
@@ -114,7 +124,7 @@ export interface DiagnosticContext {
   posted?: number;
   /**
    * Breakdown of posted comments by severity, populated on the `run` context so
-   * the OTel bridge can split `gitlab_review_comments_total` by severity. Counts
+   * the OTel bridge can split `code_review_comments_total` by severity. Counts
    * the non-duplicate (posted-intent) comments; absent on dry-run/skip paths.
    */
   postedBySeverity?: Partial<Record<Severity, number>>;
@@ -196,6 +206,7 @@ export function createDiagnosticContext(
     project: config.project,
     mr: config.mr,
     gitlabUrl: config.gitlabUrl,
+    platform: config.platform,
     cwd: config.cwd,
     model: config.model,
     minSeverity: config.minSeverity,
