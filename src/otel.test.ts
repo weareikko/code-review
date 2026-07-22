@@ -254,25 +254,27 @@ describe('OpenTelemetry bridge', () => {
     expect(isOtelEnabled({ CODE_REVIEW_OTEL: 'true' })).toBe(true);
   });
 
-  it('defaults OTLP exporters to otlp and metrics temporality to delta when unset', async () => {
+  it('defaults OTLP exporters to otlp and does NOT force metrics temporality', async () => {
     const { applyOtelExporterDefaults } = await import('./otel.js');
     const env: NodeJS.ProcessEnv = {};
     applyOtelExporterDefaults(env);
     expect(env.OTEL_METRICS_EXPORTER).toBe('otlp');
     expect(env.OTEL_LOGS_EXPORTER).toBe('otlp');
-    // Delta is correct for short-lived CI jobs (see applyOtelExporterDefaults).
-    expect(env.OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE).toBe('delta');
+    // Temporality is left to the SDK/backend default (cumulative). Forcing delta
+    // broke Grafana Cloud ingest in 0.9.1, so 0.9.2 no longer sets it.
+    expect(env.OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE).toBeUndefined();
   });
 
-  it('preserves explicit exporter/temporality choices (e.g. none, cumulative)', async () => {
+  it('preserves an intentional exporter choice (e.g. none) and never overrides temporality', async () => {
     const { applyOtelExporterDefaults } = await import('./otel.js');
     const env: NodeJS.ProcessEnv = {
       OTEL_METRICS_EXPORTER: 'none',
-      OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: 'cumulative',
+      OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: 'delta',
     };
     applyOtelExporterDefaults(env);
     expect(env.OTEL_METRICS_EXPORTER).toBe('none');
-    expect(env.OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE).toBe('cumulative');
+    // A caller that explicitly opts into delta (with a converter in front) keeps it.
+    expect(env.OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE).toBe('delta');
     expect(env.OTEL_LOGS_EXPORTER).toBe('otlp');
   });
 
