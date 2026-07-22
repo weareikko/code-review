@@ -905,6 +905,31 @@ function buildAgentSubscriber(
   };
 }
 
+/**
+ * Applies our OTLP exporter env defaults, only when the caller hasn't set them
+ * (explicit choices, including `none`, always win).
+ *
+ * Metrics temporality defaults to **delta** because code-review runs as a
+ * short-lived CI job. With the OTel SDK's default cumulative temporality, each
+ * ephemeral job's metric series starts mid-flight in the backend (its first
+ * export already carries accumulated counts, and per-run histograms are a single
+ * observation), so range aggregation of cost/token totals is unreliable —
+ * `sum_over_time` over-counts and `increase` under-counts or returns nothing.
+ * Delta makes each job's metrics self-contained deltas that sum correctly across
+ * runs. Override with `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=cumulative`
+ * for long-running hosts, and confirm your backend ingests delta (Grafana
+ * Cloud/Mimir converts to cumulative or stores it natively) before relying on it.
+ */
+export function applyOtelExporterDefaults(env: NodeJS.ProcessEnv = process.env): void {
+  // NodeSDK defaults both OTEL_METRICS_EXPORTER and OTEL_LOGS_EXPORTER to 'otlp'
+  // when unset; setting them explicitly preserves an intentional 'none' while
+  // still defaulting to otlp otherwise.
+  env.OTEL_METRICS_EXPORTER = env.OTEL_METRICS_EXPORTER ?? 'otlp';
+  env.OTEL_LOGS_EXPORTER = env.OTEL_LOGS_EXPORTER ?? 'otlp';
+  env.OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE =
+    env.OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE ?? 'delta';
+}
+
 async function loadDefaultRuntime(): Promise<OtelRuntime> {
   let modules: unknown[];
   try {
@@ -937,14 +962,9 @@ async function loadDefaultRuntime(): Promise<OtelRuntime> {
     [semconv.ATTR_SERVICE_NAME ?? 'service.name']: SERVICE_NAME,
     [semconv.ATTR_SERVICE_VERSION ?? 'service.version']: __PKG_VERSION__,
   });
-  // NodeSDK defaults both OTEL_METRICS_EXPORTER and OTEL_LOGS_EXPORTER to
-  // 'otlp' when the env vars are empty. However if the caller explicitly sets
-  // them to 'none' (common in CI setups that ship traces but not metrics/logs),
-  // we preserve that intent. Setting them here ensures the otlp default takes
-  // effect even when the shell exports them as an empty string, which would
-  // otherwise be parsed as an unknown exporter and silently ignored.
-  process.env.OTEL_METRICS_EXPORTER = process.env.OTEL_METRICS_EXPORTER ?? 'otlp';
-  process.env.OTEL_LOGS_EXPORTER = process.env.OTEL_LOGS_EXPORTER ?? 'otlp';
+  // Default the metrics/logs exporters to otlp and metrics temporality to delta
+  // (see applyOtelExporterDefaults) before NodeSDK reads the env.
+  applyOtelExporterDefaults(process.env);
 
   const sdk = new sdkNode.NodeSDK({
     resource: resources.defaultResource().merge(serviceResource),
