@@ -254,6 +254,28 @@ describe('OpenTelemetry bridge', () => {
     expect(isOtelEnabled({ CODE_REVIEW_OTEL: 'true' })).toBe(true);
   });
 
+  it('defaults OTLP exporters to otlp and metrics temporality to delta when unset', async () => {
+    const { applyOtelExporterDefaults } = await import('./otel.js');
+    const env: NodeJS.ProcessEnv = {};
+    applyOtelExporterDefaults(env);
+    expect(env.OTEL_METRICS_EXPORTER).toBe('otlp');
+    expect(env.OTEL_LOGS_EXPORTER).toBe('otlp');
+    // Delta is correct for short-lived CI jobs (see applyOtelExporterDefaults).
+    expect(env.OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE).toBe('delta');
+  });
+
+  it('preserves explicit exporter/temporality choices (e.g. none, cumulative)', async () => {
+    const { applyOtelExporterDefaults } = await import('./otel.js');
+    const env: NodeJS.ProcessEnv = {
+      OTEL_METRICS_EXPORTER: 'none',
+      OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: 'cumulative',
+    };
+    applyOtelExporterDefaults(env);
+    expect(env.OTEL_METRICS_EXPORTER).toBe('none');
+    expect(env.OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE).toBe('cumulative');
+    expect(env.OTEL_LOGS_EXPORTER).toBe('otlp');
+  });
+
   it('returns null when disabled without touching the runtime', async () => {
     const { startOtelBridge } = await import('./otel.js');
     const fake = createFakeRuntime();

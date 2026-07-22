@@ -118,6 +118,8 @@ Because a single MR/PR is re-reviewed on each push, `runs_total` counts _review 
 
 Grafana Application Observability auto-discovers the service from its `gen_ai.*` metrics without any dashboard import. The `code_review_*` metrics enable project-level Mimir queries such as `sum by (vcs_repository_name) (increase(code_review_total_cost_usd_sum[7d]))` to track spend per repository.
 
+**Metric temporality.** Because each review is a short-lived CI job, metrics are exported with **delta** temporality by default (see `applyOtelExporterDefaults`). Cumulative temporality is wrong here: each ephemeral job's series starts mid-flight in the backend, so `sum_over_time(..._sum[range])` over-counts and `increase(..._sum[range])` under-counts (and per-run histograms — a single observation — return nothing). With delta, aggregate a range total with `sum(increase(metric_sum[$__range]))` (histograms) / `sum(increase(metric_total[$__range]))` (counters). Override for long-running hosts with `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=cumulative`. Confirm your backend ingests delta (Grafana Cloud/Mimir converts to cumulative or stores natively) before relying on it.
+
 #### Structured log records
 
 Every record carries an `event.name` from a fixed taxonomy so logs can be filtered by event type:
