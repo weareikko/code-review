@@ -909,16 +909,16 @@ function buildAgentSubscriber(
  * Applies our OTLP exporter env defaults, only when the caller hasn't set them
  * (explicit choices, including `none`, always win).
  *
- * Metrics temporality defaults to **delta** because code-review runs as a
- * short-lived CI job. With the OTel SDK's default cumulative temporality, each
- * ephemeral job's metric series starts mid-flight in the backend (its first
- * export already carries accumulated counts, and per-run histograms are a single
- * observation), so range aggregation of cost/token totals is unreliable —
- * `sum_over_time` over-counts and `increase` under-counts or returns nothing.
- * Delta makes each job's metrics self-contained deltas that sum correctly across
- * runs. Override with `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=cumulative`
- * for long-running hosts, and confirm your backend ingests delta (Grafana
- * Cloud/Mimir converts to cumulative or stores it natively) before relying on it.
+ * Metrics stay on the SDK/backend default **cumulative** temporality. Delta
+ * would be the textbook choice for short-lived CI jobs (cumulative series from
+ * ephemeral jobs start mid-flight, so range aggregation of totals is operator-
+ * dependent), but 0.9.1 defaulted to delta and it was verified to BREAK ingest
+ * on Grafana Cloud — the OTLP endpoint silently dropped every delta-temporality
+ * metric (a review's metrics never landed), so 0.9.2 reverted it. Do not force
+ * delta here unless your backend is confirmed to ingest it (e.g. an OTel
+ * Collector / Alloy running `deltatocumulative` in front of the backend). To
+ * aggregate a range total from these cumulative ephemeral-job metrics, use
+ * per-series `max_over_time`.
  */
 export function applyOtelExporterDefaults(env: NodeJS.ProcessEnv = process.env): void {
   // NodeSDK defaults both OTEL_METRICS_EXPORTER and OTEL_LOGS_EXPORTER to 'otlp'
@@ -926,8 +926,6 @@ export function applyOtelExporterDefaults(env: NodeJS.ProcessEnv = process.env):
   // still defaulting to otlp otherwise.
   env.OTEL_METRICS_EXPORTER = env.OTEL_METRICS_EXPORTER ?? 'otlp';
   env.OTEL_LOGS_EXPORTER = env.OTEL_LOGS_EXPORTER ?? 'otlp';
-  env.OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE =
-    env.OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE ?? 'delta';
 }
 
 async function loadDefaultRuntime(): Promise<OtelRuntime> {
