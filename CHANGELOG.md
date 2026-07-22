@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-22
+
 ### Changed
 
 - **Breaking (telemetry):** renamed all OTel/diagnostics identifiers to platform-neutral names (`code_review_*`, `code_review.*`, `vcs.*`, `cicd.*`) and aligned the GenAI signals with current OTel semconv (`gen_ai.provider.name`, `gen_ai.client.operation.time_to_first_chunk`, cost off the `gen_ai.*` namespace). Dashboards and queries must be updated — mapping in [docs/observability.md](docs/observability.md) ([#137]).
@@ -88,7 +90,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING**: renamed the product identity from `gitlab-review` to `code-review` to reflect dual-platform support — the npm package (`@weareikko/code-review`), the CLI command (`code-review`, run via `bin/code-review.js`), the review footer name, the `diagnostics_channel`/OpenTelemetry name prefix (`@weareikko/code-review:*`), and the hidden dedup/summary/fingerprint marker prefixes (`code-review:`) all change; readers stay backward-compatible (summary notes and fingerprints posted under the old identity are still matched and deduplicated, so the first post-upgrade run upserts rather than duplicating); the GitHub repository moved `ikko-dev/gitlab-review → weareikko/code-review` (org `ikko-dev → weareikko` and repository name `gitlab-review → code-review`), and the reviewed-commit footer reader still matches footers written under the former org and repository/product name ([#121]).
 - **BREAKING**: renamed the product-scoped environment-variable prefix `GITLAB_REVIEW_* → CODE_REVIEW_*` (e.g. `GITLAB_REVIEW_MODEL → CODE_REVIEW_MODEL`, and the namespacing shim that de-prefixes provider/infra vars in shared CI) with no backward compatibility — the old names are no longer read, so existing CI configs must rename their variables. Unprefixed GitLab tokens (`GITLAB_TOKEN`, `CI_JOB_TOKEN`, …) are unchanged ([#121]).
 
-[Unreleased]: https://github.com/weareikko/code-review/compare/0.8.6...HEAD
+[Unreleased]: https://github.com/weareikko/code-review/compare/0.9.0...HEAD
+[0.9.0]: https://github.com/weareikko/code-review/compare/0.8.6...0.9.0
 [0.8.6]: https://github.com/weareikko/code-review/compare/0.8.5...0.8.6
 [0.8.5]: https://github.com/weareikko/code-review/compare/0.8.4...0.8.5
 [0.8.4]: https://github.com/weareikko/code-review/compare/0.8.3...0.8.4
