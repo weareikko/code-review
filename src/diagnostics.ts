@@ -99,6 +99,11 @@ export interface DiagnosticContext {
   phase: DiagnosticPhase;
   project: string;
   mr: string;
+  /**
+   * The SCM server URL — the GitLab instance URL or the GitHub server URL,
+   * whichever platform this run targets. Its host is emitted as `server.address`.
+   * (Named `gitlabUrl` for backwards compatibility with earlier channel payloads.)
+   */
   gitlabUrl: string;
   /** Review platform (`gitlab` | `github`); emitted as the `vcs.provider.name` label. */
   platform?: string;
@@ -205,7 +210,7 @@ export function createDiagnosticContext(
     phase,
     project: config.project,
     mr: config.mr,
-    gitlabUrl: config.gitlabUrl,
+    gitlabUrl: config.platform === 'github' ? config.githubServerUrl : config.gitlabUrl,
     platform: config.platform,
     cwd: config.cwd,
     model: config.model,

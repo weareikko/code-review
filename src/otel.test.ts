@@ -1610,7 +1610,9 @@ describe('OpenTelemetry bridge', () => {
       platform: 'github',
       project: 'weareikko/code-review',
       mr: '57',
-      gitlabUrl: 'https://github.com',
+      // github platform → the SCM server URL comes from githubServerUrl.
+      githubServerUrl: 'https://github.com',
+      gitlabUrl: '',
       gitlabToken: 't',
       gitlabAuthHeader: 'PRIVATE-TOKEN',
       model: 'anthropic/claude-sonnet-4-5',
