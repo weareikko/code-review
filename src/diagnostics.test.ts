@@ -35,6 +35,23 @@ const diagnosticConfig: Config = {
 };
 
 describe('diagnostics_channel instrumentation', () => {
+  it('sets gitlabUrl to the platform server URL (github → githubServerUrl)', () => {
+    const gh = createDiagnosticContext(
+      'run',
+      { ...diagnosticConfig, platform: 'github', githubServerUrl: 'https://github.com' },
+      'run-gh',
+    );
+    expect(gh.gitlabUrl).toBe('https://github.com');
+    expect(gh.platform).toBe('github');
+
+    const gl = createDiagnosticContext(
+      'run',
+      { ...diagnosticConfig, platform: 'gitlab', gitlabUrl: 'https://gitlab.example.com' },
+      'run-gl',
+    );
+    expect(gl.gitlabUrl).toBe('https://gitlab.example.com');
+  });
+
   it('publishes tracing channel lifecycle events with safe context', async () => {
     const events: Array<{ type: string; message: DiagnosticContext }> = [];
     const onStart = (message: DiagnosticContext) => events.push({ type: 'start', message });
