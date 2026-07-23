@@ -10,10 +10,15 @@ name: code-review
 #       uses: weareikko/code-review/.github/workflows/code-review.yml@0.8.2
 #       secrets: inherit
 #
-# Reads settings from org/repo VARIABLES (CODE_REVIEW_MODEL / CODE_REVIEW_DEPTH /
-# CODE_REVIEW_THINKING_LEVEL / CODE_REVIEW_VERIFY_MODEL) and provider credentials
-# from inherited SECRETS named with the CODE_REVIEW_ prefix (the CLI's env shim
-# de-prefixes them for the provider). Requires `secrets: inherit` in the caller.
+# Forwards the entire CODE_REVIEW_* namespace: every org/repo VARIABLE and
+# inherited SECRET whose name starts with CODE_REVIEW_ is exported to the CLI
+# (requires `secrets: inherit`), which then de-prefixes the non-reserved ones at
+# startup. So everything is configured under one namespace at the org level —
+# settings (CODE_REVIEW_MODEL / _DEPTH / _MIN_SEVERITY / …), provider credentials
+# (CODE_REVIEW_ANTHROPIC_API_KEY → ANTHROPIC_API_KEY), and OpenTelemetry
+# (CODE_REVIEW_OTEL + CODE_REVIEW_OTEL_EXPORTER_OTLP_ENDPOINT / _PROTOCOL /
+# _HEADERS → OTEL_* + CODE_REVIEW_OTEL_SEMCONV_STABILITY_OPT_IN). New options
+# work with no change here; OTel is a no-op unless CODE_REVIEW_OTEL is set.
 
 on:
   workflow_call:
@@ -56,21 +61,31 @@ jobs:
     # Same-repo PRs only: forks don't receive secrets on pull_request.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     env:
-      # Provider credentials (inherited secrets; CODE_REVIEW_ prefix de-prefixed by the CLI).
-      CODE_REVIEW_CLOUDFLARE_API_KEY: ${{ secrets.CODE_REVIEW_CLOUDFLARE_API_KEY }}
-      CODE_REVIEW_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CODE_REVIEW_CLOUDFLARE_ACCOUNT_ID }}
-      CODE_REVIEW_CLOUDFLARE_GATEWAY_ID: ${{ secrets.CODE_REVIEW_CLOUDFLARE_GATEWAY_ID }}
-      CODE_REVIEW_ANTHROPIC_API_KEY: ${{ secrets.CODE_REVIEW_ANTHROPIC_API_KEY }}
-      CODE_REVIEW_OPENAI_API_KEY: ${{ secrets.CODE_REVIEW_OPENAI_API_KEY }}
-      CODE_REVIEW_GEMINI_API_KEY: ${{ secrets.CODE_REVIEW_GEMINI_API_KEY }}
-      CODE_REVIEW_OPENROUTER_API_KEY: ${{ secrets.CODE_REVIEW_OPENROUTER_API_KEY }}
-      # Review settings (variables).
-      CODE_REVIEW_MODEL: ${{ inputs.model != '' && inputs.model || vars.CODE_REVIEW_MODEL }}
-      CODE_REVIEW_DEPTH: ${{ vars.CODE_REVIEW_DEPTH }}
-      CODE_REVIEW_THINKING_LEVEL: ${{ vars.CODE_REVIEW_THINKING_LEVEL }}
-      CODE_REVIEW_VERIFY_MODEL: ${{ vars.CODE_REVIEW_VERIFY_MODEL }}
       GITHUB_TOKEN: ${{ github.token }}
     steps:
+      - name: Forward CODE_REVIEW_* config to the CLI
+        # GitHub (unlike GitLab CI) does not auto-inject org/repo config as env, and
+        # the vars/secrets contexts aren't enumerable inside the composite action —
+        # so forward the tool's whole namespace here. Every CODE_REVIEW_* variable
+        # and (inherited) secret becomes an env var; the CLI's startup shim then
+        # de-prefixes the non-reserved ones (CODE_REVIEW_ANTHROPIC_API_KEY →
+        # ANTHROPIC_API_KEY, CODE_REVIEW_OTEL_EXPORTER_OTLP_ENDPOINT →
+        # OTEL_EXPORTER_OTLP_ENDPOINT, …). Filtering to CODE_REVIEW_ keeps the tool
+        # namespaced and avoids clobbering unrelated org OTEL_*/provider vars.
+        env:
+          CR_VARS: ${{ toJSON(vars) }}
+          CR_SECRETS: ${{ toJSON(secrets) }}
+          MODEL_OVERRIDE: ${{ inputs.model }}
+        run: |
+          emit() {
+            jq -r 'to_entries[]
+                   | select(.key | test("^CODE_REVIEW_"; "i"))
+                   | "\(.key)<<CR_EOF\n\(.value)\nCR_EOF"' <<<"$1" >> "$GITHUB_ENV"
+          }
+          emit "$CR_VARS"
+          emit "$CR_SECRETS"
+          # The optional `model` input overrides the CODE_REVIEW_MODEL variable.
+          [ -n "$MODEL_OVERRIDE" ] && echo "CODE_REVIEW_MODEL=$MODEL_OVERRIDE" >> "$GITHUB_ENV"
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The reusable workflow (`.github/workflows/code-review.yml`) now forwards the entire `CODE_REVIEW_*` namespace from org/repo variables and inherited secrets, so all configuration — settings, provider credentials, and OpenTelemetry (`CODE_REVIEW_OTEL` + `CODE_REVIEW_OTEL_EXPORTER_OTLP_*`, de-prefixed to `OTEL_*` by the CLI) — is set purely at the org level with no per-repo workflow changes (`secrets: inherit`). Replaces the previous hardcoded subset ([#140]).
+
 ## [0.9.2] - 2026-07-22
 
 ### Fixed
@@ -109,6 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.8.6]: https://github.com/weareikko/code-review/compare/0.8.5...0.8.6
 [0.8.5]: https://github.com/weareikko/code-review/compare/0.8.4...0.8.5
 [0.8.4]: https://github.com/weareikko/code-review/compare/0.8.3...0.8.4
+[#140]: https://github.com/weareikko/code-review/pull/140
 [#137]: https://github.com/weareikko/code-review/pull/137
 [#135]: https://github.com/weareikko/code-review/pull/135
 [#134]: https://github.com/weareikko/code-review/pull/134
