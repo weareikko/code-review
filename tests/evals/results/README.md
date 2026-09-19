@@ -11,6 +11,7 @@ version control so the numbers behind the analyses survive.
 | `swe-prbench-triage.json`           | `swe-prbench-lib.ts`           | Frozen per-PR gold-comment triage (`is_defect`), shared across all sweep cells.                                                                                                                                                                              |
 | `depth-thinking-sweep.json` / `.md` | `depth-thinking-sweep.eval.ts` | luna × depth × thinking sweep on the **synthetic** fixture suite (patch-only).                                                                                                                                                                               |
 | `jev-verify.json` / `.md`           | `jev-verify.eval.ts`           | Jev vs the agentic verifier over 41 real findings (16 PRs × 4 trials), scored by the claim-level correctness judge. Still inconclusive on the drop side (n=2) and the judge self-contradicts on `pre_existing` — see the header of `finding-correctness.ts`. |
+| `jev-dedup.json` / `.md`            | `jev-dedup.eval.ts`            | Jev vs the Jaccard subject heuristic on 36 hand-labelled duplicate pairs. Jev 36/36; Jaccard 2/32 recall. Only 4 negative pairs — the precision claim is thin.                                                                                               |
 
 Reproduce: see `tests/evals/fixtures/swe-prbench/README.md` (materialize + run) and
 the header comment in each `*.eval.ts`. Model under test: `openrouter/openai/gpt-5.6-luna`.
