@@ -10,45 +10,38 @@
  *   1. FIND     — one Find pass per PR (depth `single`), frozen. Both verifier
  *                 arms then score the SAME findings; re-running Find per arm
  *                 would make the comparison meaningless, since Find is noisy.
- *   2. LABEL    — `matchAndVerdict` labels each finding CONFIRMED / PLAUSIBLE /
- *                 FABRICATED against the PR's human gold comments. This is the
- *                 ground truth and is computed without either verifier's input.
+ *   2. TRUTH    — `judgeFindingCorrectness` asks, per finding, whether its
+ *                 specific claim is TRUE of the change, with read-only access to
+ *                 the checkout and N independent samples. Only unanimous samples
+ *                 become ground truth; splits and UNPROVABLE are excluded.
  *   3. JEV      — one decisions call per severe finding.
  *   4. AGENTIC  — the production verifier (same prompts, same read-only repo
  *                 tools) over those same findings, as the baseline.
  *
- * Scoring treats CONFIRMED as "should keep" and FABRICATED as "should drop".
- * PLAUSIBLE is genuinely ambiguous — both keeping and dropping are defensible —
- * so it is reported separately and excluded from accuracy, matching the
- * `expected: null` diagnostic convention in review-suite.ts.
+ * A finding should be KEPT when its claim is true AND this diff introduced the
+ * behaviour; it should be DROPPED when the claim is false, or true but about
+ * behaviour that predates the change — the Verify stage guards what the change
+ * introduces, so refuting a pre-existing-behaviour finding is correct.
  *
- * KNOWN LIMIT — read before trusting the accuracy table. `matchAndVerdict` labels
- * a finding by whether it lines up with a human gold comment, NOT by whether the
- * finding's specific claim is true. On the first 4-trial run that broke BOTH ways:
- * every "FABRICATED" finding was in fact technically correct (e.g. `/\[.*=/`
- * really cannot span newlines), and several "CONFIRMED" ones blamed the diff for
- * behaviour it did not change — which the agentic verifier correctly refuted and
- * was then scored wrong for. So this harness currently measures agreement and
- * cost/latency reliably, but its accuracy column cannot adjudicate a verifier.
- * Fixing that needs a per-finding correctness judge, not a gold-comment matcher.
+ * `matchAndVerdict` still runs, but its CONFIRMED/PLAUSIBLE/FABRICATED verdict is
+ * now a DIAGNOSTIC only, reported as a confusion table against the judge. It
+ * labels a finding by whether it lines up with a human gold comment, which is the
+ * right question for recall and the wrong one for scoring a verifier: the first
+ * run of this eval had all four "FABRICATED" findings turn out technically
+ * correct, and several "CONFIRMED" ones blaming the diff for behaviour it did not
+ * change — which the agentic verifier correctly refuted and was scored wrong for.
  *
  * Prereq: materialize first — `node tests/evals/fixtures/swe-prbench/materialize.mjs`.
  * Needs OPENROUTER_API_KEY (Jev + reviewer) and a judge key.
  * Writes test-results/jev-verify.{json,md}.
  *
- * Env: GITLAB_REVIEW_JEV_MODEL / _JEVV_MODEL / _JEVV_TRIALS / _JEVV_LIMIT /
- *      _JEVV_ONLY / _JEVV_CONCURRENCY / _JEVV_FRESH / _JEVV_SKIP_AGENTIC.
+ * Env: GITLAB_REVIEW_JEV_MODEL / _JEVV_MODEL / _JEVV_JUDGE_MODEL /
+ *      _JEVV_TRUTH_SAMPLES / _JEVV_TRIALS / _JEVV_LIMIT / _JEVV_ONLY /
+ *      _JEVV_CONCURRENCY / _JEVV_FRESH / _JEVV_SKIP_AGENTIC.
  */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Agent } from '@earendil-works/pi-agent-core';
-import type { AgentTool, AssistantMessage } from '@earendil-works/pi-agent-core';
-import type { Model } from '@earendil-works/pi-ai';
-import { getBuiltinModel } from '@earendil-works/pi-ai/providers/all';
-import { createReadOnlyTools } from '@earendil-works/pi-coding-agent';
 import { expect, test } from 'vitest';
-import { resolveProviderApiKey } from '../../src/config.js';
-import { createReviewStreamFn, extractLastAssistantText } from '../../src/gitlab-review.js';
 import type { Confidence, Severity, Side } from '../../src/types.js';
 import {
   buildVerifySystemPrompt,
@@ -56,6 +49,8 @@ import {
   parseVerdict,
   type VerifyDecision,
 } from '../../src/verify.js';
+import { runAgentForText } from './agent-runner.js';
+import { judgeFindingCorrectness, type CorrectnessLabel } from './finding-correctness.js';
 import {
   askJev,
   buildJevVerifyState,
@@ -86,6 +81,12 @@ const SKIP_AGENTIC = process.env.GITLAB_REVIEW_JEVV_SKIP_AGENTIC === '1';
  * verified set, including the fabrications the Verify stage exists to catch.
  */
 const TRIALS = Number(process.env.GITLAB_REVIEW_JEVV_TRIALS ?? 1);
+/** Model for the correctness judge. Kept separate from the Find model so the judge
+ *  is not scoring its own output with its own blind spots. */
+const JUDGE_MODEL =
+  process.env.GITLAB_REVIEW_JEVV_JUDGE_MODEL ?? 'openrouter/anthropic/claude-sonnet-5';
+/** Independent judge samples; a label survives only if they all agree. */
+const TRUTH_SAMPLES = Number(process.env.GITLAB_REVIEW_JEVV_TRUTH_SAMPLES ?? 2);
 const CACHE = join(RESULTS_DIR, 'jev-verify.json');
 
 type GoldVerdict = 'CONFIRMED' | 'PLAUSIBLE' | 'FABRICATED';
@@ -104,7 +105,16 @@ interface FindingRecord {
   confidence: Confidence;
   side: Side;
   body: string;
+  /** Gold-comment alignment from matchAndVerdict — kept as a DIAGNOSTIC only. */
   gold?: GoldVerdict;
+  /** Ground truth: is this finding's claim actually true of this change? */
+  truth?: {
+    label: CorrectnessLabel | null;
+    agreed: boolean;
+    preExisting: boolean;
+    cost: number;
+    reasons: string[];
+  };
   jev?: {
     decision: VerifyDecision;
     confidence: number;
@@ -160,91 +170,41 @@ async function loadCache(): Promise<Cache | null> {
 }
 
 /**
- * The production Verify agent, rebuilt over a frozen finding. Uses the exported
- * prompt builders and the same read-only repo tools, so the baseline differs
- * from production only in that the findings are replayed rather than fresh.
- *
- * `agent.prompt()` resolves to void — the final text and the usage only arrive
- * on the event stream, so both are collected from `subscribe` as production does.
+ * The production Verify agent, rebuilt over a frozen finding: the exported prompt
+ * builders and the same read-only repo tools, so the baseline differs from
+ * production only in that the findings are replayed rather than freshly found.
  */
 async function verifyAgentically(
   rec: FindingRecord,
   diff: string,
   repoDir: string,
 ): Promise<NonNullable<FindingRecord['agentic']>> {
-  const started = Date.now();
-  const failed = (message: string): NonNullable<FindingRecord['agentic']> => ({
-    decision: 'keep',
-    reason: 'verifier error; finding kept',
-    latencyMs: Date.now() - started,
-    cost: 0,
-    toolCalls: 0,
-    error: message,
+  const run = await runAgentForText({
+    systemPrompt: buildVerifySystemPrompt(diff),
+    userPrompt: buildVerifyUserPrompt({
+      file: rec.file,
+      line: rec.line,
+      side: rec.side,
+      severity: rec.severity as Severity,
+      confidence: rec.confidence,
+      body: rec.body,
+    }),
+    model: FIND_MODEL,
+    repoDir,
   });
-
+  const base = { latencyMs: run.latencyMs, cost: run.cost, toolCalls: run.toolCalls };
+  if (run.error) {
+    return { decision: 'keep', reason: 'verifier error; finding kept', ...base, error: run.error };
+  }
   try {
-    const [provider, ...rest] = FIND_MODEL.split('/');
-    const model = getBuiltinModel(provider as never, rest.join('/') as never) as
-      | Model<string>
-      | undefined;
-    if (!model) throw new Error(`could not resolve model ${FIND_MODEL}`);
-    const key = resolveProviderApiKey(FIND_MODEL);
-    const agent = new Agent({
-      initialState: {
-        systemPrompt: buildVerifySystemPrompt(diff),
-        model,
-        tools: createReadOnlyTools(repoDir) as AgentTool[],
-        thinkingLevel: 'low',
-      },
-      getApiKey: async () => key,
-      streamFn: createReviewStreamFn(),
-    });
-
-    const collected: AssistantMessage[] = [];
-    let cost = 0;
-    let toolCalls = 0;
-    let finalText = '';
-    let agentError: string | undefined;
-
-    const ended = new Promise<void>((resolvePromise) => {
-      agent.subscribe((event) => {
-        if (event.type === 'tool_execution_start') toolCalls += 1;
-        if (event.type === 'message_end' && event.message.role === 'assistant') {
-          const assistant = event.message as AssistantMessage;
-          collected.push(assistant);
-          cost += assistant.usage?.cost?.total ?? 0;
-        }
-        if (event.type !== 'agent_end') return;
-        const messages = event.messages.filter(
-          (m): m is AssistantMessage => m.role === 'assistant',
-        );
-        const last = messages[messages.length - 1];
-        if (last?.stopReason === 'error' || last?.errorMessage) {
-          agentError = last.errorMessage ?? 'unknown agent error';
-        } else {
-          finalText = extractLastAssistantText(collected.length > 0 ? collected : messages);
-        }
-        resolvePromise();
-      });
-    });
-
-    await agent.prompt(
-      buildVerifyUserPrompt({
-        file: rec.file,
-        line: rec.line,
-        side: rec.side,
-        severity: rec.severity as Severity,
-        confidence: rec.confidence,
-        body: rec.body,
-      }),
-    );
-    await ended;
-
-    if (agentError) return { ...failed(agentError), cost, toolCalls };
-    if (!finalText) return { ...failed('agent returned an empty response'), cost, toolCalls };
-    return { ...parseVerdict(finalText), latencyMs: Date.now() - started, cost, toolCalls };
+    return { ...parseVerdict(run.text), ...base };
   } catch (err) {
-    return failed((err as Error).message);
+    return {
+      decision: 'keep',
+      reason: 'verifier error; finding kept',
+      ...base,
+      error: (err as Error).message,
+    };
   }
 }
 
@@ -254,7 +214,20 @@ function pct(n: number, d: number): string {
   return d === 0 ? 'n/a' : `${((n / d) * 100).toFixed(0)}%`;
 }
 
-/** Accuracy of one arm against the gold label, ignoring PLAUSIBLE. */
+/**
+ * What a correct verifier should do with a finding, from the correctness judge.
+ * A claim that is true but describes behaviour the diff did not introduce should
+ * still be dropped: the Verify stage guards what this change introduces, and
+ * scoring it otherwise punishes the refutation that broke the first run.
+ * Returns null when the finding cannot serve as ground truth.
+ */
+function expectedOf(r: FindingRecord): 'keep' | 'drop' | null {
+  const t = r.truth;
+  if (!t || !t.agreed || t.label === null || t.label === 'UNPROVABLE') return null;
+  if (t.label === 'FALSE') return 'drop';
+  return t.preExisting ? 'drop' : 'keep';
+}
+
 function scoreArm(
   rows: FindingRecord[],
   pick: (r: FindingRecord) => VerifyDecision | undefined,
@@ -265,12 +238,13 @@ function scoreArm(
   let dropN = 0;
   for (const r of rows) {
     const d = pick(r);
-    if (!d) continue;
-    if (r.gold === 'CONFIRMED') {
+    const expected = expectedOf(r);
+    if (!d || !expected) continue;
+    if (expected === 'keep') {
       keepN += 1;
-      // A CONFIRMED finding survives if it is kept; a downgrade still publishes it.
+      // A downgrade still publishes the finding, so it counts as surviving.
       if (d !== 'drop') keepOk += 1;
-    } else if (r.gold === 'FABRICATED') {
+    } else {
       dropN += 1;
       if (d === 'drop') dropOk += 1;
     }
@@ -306,6 +280,17 @@ test(
     const records: FindingRecord[] = cached?.findings ?? [];
     let findCost = cached?.findCost ?? 0;
     const found = new Set(cached?.found ?? []);
+    const serialize = (): string =>
+      JSON.stringify(
+        {
+          config: { findModel: FIND_MODEL, jevModel: JEV_MODEL, judgeModel: JUDGE_MODEL },
+          found: [...found],
+          findings: records,
+          findCost,
+        },
+        null,
+        2,
+      );
 
     // --- Phase 1+2: Find, then label against gold. Frozen once per (PR, trial). ---
     const passes = runnable.flatMap((inst) =>
@@ -350,19 +335,7 @@ test(
           });
         });
       }
-      await writeFile(
-        CACHE,
-        JSON.stringify(
-          {
-            config: { findModel: FIND_MODEL, jevModel: JEV_MODEL },
-            found: [...found],
-            findings: records,
-            findCost,
-          },
-          null,
-          2,
-        ),
-      );
+      await writeFile(CACHE, serialize());
     }
 
     const severe = records.filter((r) => isSevere(r.severity));
@@ -371,6 +344,35 @@ test(
       return;
     }
     const diffOf = new Map(runnable.map((i) => [i.task_id, i.diff_patch]));
+
+    // --- Phase 2b: correctness judge — the ground truth the arms are scored on. ---
+    const needTruth = severe.filter((r) => !r.truth);
+    if (needTruth.length) {
+      console.log(`[jev-verify] judging correctness of ${needTruth.length} finding(s)…`);
+      await runBounded(
+        needTruth.map((rec) => async () => {
+          const result = await judgeFindingCorrectness({
+            diff: diffOf.get(rec.taskId) ?? '',
+            finding: rec,
+            repoDir: repoDirFor(rec.taskId),
+            model: JUDGE_MODEL,
+            samples: TRUTH_SAMPLES,
+          });
+          rec.truth = {
+            label: result.label,
+            agreed: result.agreed,
+            preExisting: result.preExisting,
+            cost: result.cost,
+            reasons: result.samples.map((x) => x.reason),
+          };
+          if (result.errors.length) {
+            console.warn(`[jev-verify] judge errors on ${rec.file}: ${result.errors.join('; ')}`);
+          }
+        }),
+        Math.min(CONCURRENCY, 3),
+      );
+      await writeFile(CACHE, serialize());
+    }
 
     // --- Phase 3: Jev. ---
     const needJev = severe.filter((r) => !r.jev);
@@ -424,22 +426,11 @@ test(
       );
     }
 
-    await writeFile(
-      CACHE,
-      JSON.stringify(
-        {
-          config: { findModel: FIND_MODEL, jevModel: JEV_MODEL },
-          found: [...found],
-          findings: records,
-          findCost,
-        },
-        null,
-        2,
-      ),
-    );
+    await writeFile(CACHE, serialize());
 
     // --- Report. ---
-    const labelled = severe.filter((r) => r.gold === 'CONFIRMED' || r.gold === 'FABRICATED');
+    // Scored set: findings the correctness judge could settle unanimously.
+    const labelled = severe.filter((r) => expectedOf(r) !== null);
     const jevScore = scoreArm(labelled, (r) => (r.jev?.error ? undefined : r.jev?.decision));
     const agScore = scoreArm(labelled, (r) => (r.agentic?.error ? undefined : r.agentic?.decision));
 
@@ -470,11 +461,23 @@ test(
       };
     });
 
-    const gold = {
-      CONFIRMED: severe.filter((r) => r.gold === 'CONFIRMED').length,
-      PLAUSIBLE: severe.filter((r) => r.gold === 'PLAUSIBLE').length,
-      FABRICATED: severe.filter((r) => r.gold === 'FABRICATED').length,
-    };
+    const truthCost = severe.reduce((a, r) => a + (r.truth?.cost ?? 0), 0);
+    const shouldKeep = labelled.filter((r) => expectedOf(r) === 'keep').length;
+    const shouldDrop = labelled.length - shouldKeep;
+    const unsettled = severe.length - labelled.length;
+    const split = severe.filter((r) => r.truth && !r.truth.agreed).length;
+    const preExisting = severe.filter((r) => r.truth?.preExisting).length;
+
+    // Quantifies why the gold-comment labels could not score a verifier: how often
+    // matchAndVerdict's verdict contradicts what the claim-level judge found.
+    const confusion = (['CONFIRMED', 'PLAUSIBLE', 'FABRICATED'] as GoldVerdict[]).map((g) => {
+      const rows = labelled.filter((r) => r.gold === g);
+      return {
+        gold: g,
+        keep: rows.filter((r) => expectedOf(r) === 'keep').length,
+        drop: rows.filter((r) => expectedOf(r) === 'drop').length,
+      };
+    });
 
     const md = [
       '# Jev vs agentic Verify — SWE-PRBench (real findings)',
@@ -482,11 +485,13 @@ test(
       `- Find model: \`${FIND_MODEL}\` (depth single, thinking medium), Find cost $${findCost.toFixed(4)}`,
       `- Jev model: \`${JEV_MODEL}\` via OpenRouter \`/api/alpha/decisions\``,
       `- PRs: ${runnable.length} × ${TRIALS} trial(s) · findings: ${records.length} · severe (verified): ${severe.length}`,
-      `- Gold labels on severe: CONFIRMED ${gold.CONFIRMED} · PLAUSIBLE ${gold.PLAUSIBLE} (excluded) · FABRICATED ${gold.FABRICATED}`,
+      `- Correctness judge: \`${JUDGE_MODEL}\` × ${TRUTH_SAMPLES} samples (unanimous only), cost $${truthCost.toFixed(4)}`,
+      `- Scored: ${labelled.length}/${severe.length} — should keep ${shouldKeep} · should drop ${shouldDrop}`,
+      `- Unsettled: ${unsettled} (${split} split votes, rest UNPROVABLE) · claims about pre-existing behaviour: ${preExisting}`,
       '',
-      '## Accuracy against gold',
+      '## Accuracy against the correctness judge',
       '',
-      '| arm | keeps CONFIRMED | drops FABRICATED | overall |',
+      '| arm | keeps true findings | drops false/pre-existing | overall |',
       '| --- | --- | --- | --- |',
       `| Jev | ${jevScore.keepOk}/${jevScore.keepN} (${pct(jevScore.keepOk, jevScore.keepN)}) | ${jevScore.dropOk}/${jevScore.dropN} (${pct(jevScore.dropOk, jevScore.dropN)}) | ${pct(jevScore.keepOk + jevScore.dropOk, jevScore.keepN + jevScore.dropN)} |`,
       `| agentic | ${agScore.keepOk}/${agScore.keepN} (${pct(agScore.keepOk, agScore.keepN)}) | ${agScore.dropOk}/${agScore.dropN} (${pct(agScore.dropOk, agScore.dropN)}) | ${pct(agScore.keepOk + agScore.dropOk, agScore.keepN + agScore.dropN)} |`,
@@ -496,6 +501,15 @@ test(
       `- Jev: $${jevCost.toFixed(6)} total, median ${median(jevLat)}ms`,
       `- agentic: median ${median(agLat)}ms${SKIP_AGENTIC ? ' (skipped)' : ''}`,
       `- agreement between arms: ${agree}/${bothRan.length} (${pct(agree, bothRan.length)})`,
+      '',
+      '## Gold-comment label vs claim-level truth',
+      '',
+      'Why `matchAndVerdict` cannot score a verifier: its verdict answers "does this',
+      'match a human comment", not "is this claim true".',
+      '',
+      '| matchAndVerdict said | judge: should keep | judge: should drop |',
+      '| --- | --- | --- |',
+      ...confusion.map((c) => `| ${c.gold} | ${c.keep} | ${c.drop} |`),
       '',
       '## Confidence threshold — how much Jev could decide alone',
       '',
@@ -508,13 +522,13 @@ test(
       '',
       '## Disagreements',
       '',
-      '| task | trial | file:line | sev | gold | jev | conf | demo | agentic |',
-      '| --- | --- | --- | --- | --- | --- | --- | --- |',
+      '| task | trial | file:line | sev | expected | gold | jev | conf | agentic |',
+      '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
       ...bothRan
         .filter((r) => r.jev!.decision !== r.agentic!.decision)
         .map(
           (r) =>
-            `| ${r.taskId} | ${r.trial} | ${r.file}:${r.line} | ${r.severity} | ${r.gold ?? '-'} | ${r.jev!.decision} | ${r.jev!.confidence.toFixed(2)} | ${r.jev!.demonstrable.toFixed(2)} | ${r.agentic!.decision} |`,
+            `| ${r.taskId} | ${r.trial} | ${r.file}:${r.line} | ${r.severity} | ${expectedOf(r) ?? '-'} | ${r.gold ?? '-'} | ${r.jev!.decision} | ${r.jev!.confidence.toFixed(2)} | ${r.agentic!.decision} |`,
         ),
       '',
     ].join('\n');
