@@ -1,0 +1,614 @@
+[
+  {
+    "taskId": "effect__5952",
+    "file": "packages/opentelemetry/package.json",
+    "duplicate": true,
+    "a": {
+      "line": 65,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve optional metadata for unrelated peer dependencies\n\nDeleting the entire `peerDependenciesMeta` block makes `@opentelemetry/api`, `@opentelemetry/resources`, `@opentelemetry/sdk-metrics`, `@opentelemetry/sdk-trace-base`, and `@opentelemetry/sdk-logs` required as well. Consumers that do not use those integrations can now receive missing-peer installation failures or warnings; retain `optional: true` for those five peers and remove only the metadata entries for the two trace SDKs."
+    },
+    "b": {
+      "line": 65,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: All optional OpenTelemetry peers become mandatory\n\nDeleting the entire `peerDependenciesMeta` object removes `optional: true` not only for `@opentelemetry/sdk-trace-node` and `@opentelemetry/sdk-trace-web`, but also for `@opentelemetry/api`, `@opentelemetry/resources`, `@opentelemetry/sdk-metrics`, `@opentelemetry/sdk-trace-base`, and `@opentelemetry/sdk-logs`. Consumers that do not use those integrations will now receive unmet required-peer failures or warnings; retain the metadata entries for the unrelated optional peers and remove only the two tracing SDK entries."
+    }
+  },
+  {
+    "taskId": "effect__5952",
+    "file": "packages/opentelemetry/package.json",
+    "duplicate": true,
+    "a": {
+      "line": 65,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve optional metadata for unrelated peer dependencies\n\nDeleting the entire `peerDependenciesMeta` block makes `@opentelemetry/api`, `@opentelemetry/resources`, `@opentelemetry/sdk-metrics`, `@opentelemetry/sdk-trace-base`, and `@opentelemetry/sdk-logs` required as well. Consumers that do not use those integrations can now receive missing-peer installation failures or warnings; retain `optional: true` for those five peers and remove only the metadata entries for the two trace SDKs."
+    },
+    "b": {
+      "line": 67,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve optional metadata for unrelated peers\n\nDeleting the entire `peerDependenciesMeta` block makes `@opentelemetry/api`, `@opentelemetry/resources`, `@opentelemetry/sdk-metrics`, `@opentelemetry/sdk-trace-base`, and `@opentelemetry/sdk-logs` required peers as well. This broadens the package installation contract beyond the stated fix and breaks consumers that do not use those integrations; retain their `optional: true` entries and remove only the metadata entries for the Node and Web trace SDKs."
+    }
+  },
+  {
+    "taskId": "effect__5952",
+    "file": "packages/opentelemetry/package.json",
+    "duplicate": true,
+    "a": {
+      "line": 65,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: All optional OpenTelemetry peers become mandatory\n\nDeleting the entire `peerDependenciesMeta` object removes `optional: true` not only for `@opentelemetry/sdk-trace-node` and `@opentelemetry/sdk-trace-web`, but also for `@opentelemetry/api`, `@opentelemetry/resources`, `@opentelemetry/sdk-metrics`, `@opentelemetry/sdk-trace-base`, and `@opentelemetry/sdk-logs`. Consumers that do not use those integrations will now receive unmet required-peer failures or warnings; retain the metadata entries for the unrelated optional peers and remove only the two tracing SDK entries."
+    },
+    "b": {
+      "line": 67,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve optional metadata for unrelated peers\n\nDeleting the entire `peerDependenciesMeta` block makes `@opentelemetry/api`, `@opentelemetry/resources`, `@opentelemetry/sdk-metrics`, `@opentelemetry/sdk-trace-base`, and `@opentelemetry/sdk-logs` required peers as well. This broadens the package installation contract beyond the stated fix and breaks consumers that do not use those integrations; retain their `optional: true` entries and remove only the metadata entries for the Node and Web trace SDKs."
+    }
+  },
+  {
+    "taskId": "effect__5952",
+    "file": "packages/opentelemetry/package.json",
+    "duplicate": true,
+    "a": {
+      "line": 67,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve optional metadata for unrelated peers\n\nDeleting the entire `peerDependenciesMeta` block makes `@opentelemetry/api`, `@opentelemetry/resources`, `@opentelemetry/sdk-metrics`, `@opentelemetry/sdk-trace-base`, and `@opentelemetry/sdk-logs` required peers as well. This broadens the package installation contract beyond the stated fix and breaks consumers that do not use those integrations; retain their `optional: true` entries and remove only the metadata entries for the Node and Web trace SDKs."
+    },
+    "b": {
+      "line": 68,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Removing metadata makes unrelated OpenTelemetry peers mandatory\n\nDeleting the entire `peerDependenciesMeta` block changes `@opentelemetry/api`, `@opentelemetry/resources`, `@opentelemetry/sdk-metrics`, `@opentelemetry/sdk-trace-base`, and `@opentelemetry/sdk-logs` from optional to required peers, even though the stated fix only targets the node and web trace SDKs. Restore the optional metadata for those five packages and remove only the entries for `@opentelemetry/sdk-trace-node` and `@opentelemetry/sdk-trace-web`."
+    }
+  },
+  {
+    "taskId": "node-postgres__3547",
+    "file": "packages/pg/lib/connection-parameters.js",
+    "duplicate": false,
+    "a": {
+      "line": 8,
+      "severity": "warn",
+      "confidence": "medium",
+      "body": "issue: Avoid environment access for omitted parameters\n\nThe new guard only avoids `process.env` for truthy configured keys; a normal configuration that omits fields such as `password`, `binary`, or `options` still reaches the environment reads below. In Deno without environment permission, constructing a client with otherwise explicit connection settings therefore still throws; environment access needs a safe fallback or must be skipped when unavailable."
+    },
+    "b": {
+      "line": 8,
+      "severity": "warn",
+      "confidence": "medium",
+      "body": "issue: Falsy config values do not take precedence\n\nThe guard only recognizes truthy configuration values, so an explicit value such as `{ binary: false }` or `{ client_encoding: '' }` still falls through to environment lookup and can be replaced by `PGBINARY` or `PGCLIENT_ENCODING`. Check for the property being defined rather than truthiness when applying config-first precedence."
+    }
+  },
+  {
+    "taskId": "node-postgres__3547",
+    "file": "packages/pg/lib/connection-parameters.js",
+    "duplicate": false,
+    "a": {
+      "line": 8,
+      "severity": "warn",
+      "confidence": "medium",
+      "body": "issue: Avoid environment access for omitted parameters\n\nThe new guard only avoids `process.env` for truthy configured keys; a normal configuration that omits fields such as `password`, `binary`, or `options` still reaches the environment reads below. In Deno without environment permission, constructing a client with otherwise explicit connection settings therefore still throws; environment access needs a safe fallback or must be skipped when unavailable."
+    },
+    "b": {
+      "line": 10,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: `config[key]` does not preserve falsy configured values\n\nThe truthiness check skips valid configured values such as `false`, `0`, and `''`, so an environment variable or default can override them. For example, `{ binary: false }` with `PGBINARY=true` resolves to `true`; check for property presence or `undefined` instead of truthiness."
+    }
+  },
+  {
+    "taskId": "node-postgres__3547",
+    "file": "packages/pg/lib/connection-parameters.js",
+    "duplicate": true,
+    "a": {
+      "line": 9,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve explicitly configured falsy values\n\n`if (config[key])` treats configured values such as `''`, `0`, and `false` as absent, so an environment variable or default can override an explicit configuration value. Use an undefined check so configuration precedence applies to every supplied value.\n\n```suggestion\n  if (config[key] !== undefined) {\n```"
+    },
+    "b": {
+      "line": 8,
+      "severity": "warn",
+      "confidence": "medium",
+      "body": "issue: Falsy config values do not take precedence\n\nThe guard only recognizes truthy configuration values, so an explicit value such as `{ binary: false }` or `{ client_encoding: '' }` still falls through to environment lookup and can be replaced by `PGBINARY` or `PGCLIENT_ENCODING`. Check for the property being defined rather than truthiness when applying config-first precedence."
+    }
+  },
+  {
+    "taskId": "node-postgres__3547",
+    "file": "packages/pg/lib/connection-parameters.js",
+    "duplicate": false,
+    "a": {
+      "line": 9,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve explicitly configured falsy values\n\n`if (config[key])` treats configured values such as `''`, `0`, and `false` as absent, so an environment variable or default can override an explicit configuration value. Use an undefined check so configuration precedence applies to every supplied value.\n\n```suggestion\n  if (config[key] !== undefined) {\n```"
+    },
+    "b": {
+      "line": 8,
+      "severity": "warn",
+      "confidence": "medium",
+      "body": "issue: Avoid environment access for omitted parameters\n\nThe new guard only avoids `process.env` for truthy configured keys; a normal configuration that omits fields such as `password`, `binary`, or `options` still reaches the environment reads below. In Deno without environment permission, constructing a client with otherwise explicit connection settings therefore still throws; environment access needs a safe fallback or must be skipped when unavailable."
+    }
+  },
+  {
+    "taskId": "node-postgres__3547",
+    "file": "packages/pg/lib/connection-parameters.js",
+    "duplicate": true,
+    "a": {
+      "line": 9,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve explicitly configured falsy values\n\n`if (config[key])` treats configured values such as `''`, `0`, and `false` as absent, so an environment variable or default can override an explicit configuration value. Use an undefined check so configuration precedence applies to every supplied value.\n\n```suggestion\n  if (config[key] !== undefined) {\n```"
+    },
+    "b": {
+      "line": 10,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: `config[key]` does not preserve falsy configured values\n\nThe truthiness check skips valid configured values such as `false`, `0`, and `''`, so an environment variable or default can override them. For example, `{ binary: false }` with `PGBINARY=true` resolves to `true`; check for property presence or `undefined` instead of truthiness."
+    }
+  },
+  {
+    "taskId": "node-postgres__3547",
+    "file": "packages/pg/lib/connection-parameters.js",
+    "duplicate": true,
+    "a": {
+      "line": 10,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: `config[key]` does not preserve falsy configured values\n\nThe truthiness check skips valid configured values such as `false`, `0`, and `''`, so an environment variable or default can override them. For example, `{ binary: false }` with `PGBINARY=true` resolves to `true`; check for property presence or `undefined` instead of truthiness."
+    },
+    "b": {
+      "line": 8,
+      "severity": "warn",
+      "confidence": "medium",
+      "body": "issue: Falsy config values do not take precedence\n\nThe guard only recognizes truthy configuration values, so an explicit value such as `{ binary: false }` or `{ client_encoding: '' }` still falls through to environment lookup and can be replaced by `PGBINARY` or `PGCLIENT_ENCODING`. Check for the property being defined rather than truthiness when applying config-first precedence."
+    }
+  },
+  {
+    "taskId": "stylelint__9044",
+    "file": "lib/rules/import-notation/index.mjs",
+    "duplicate": true,
+    "a": {
+      "line": 52,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Quoted import strings containing `url(` are skipped\n\nFor `primary === 'url'`, this guard returns for any parameter containing the text `url(`, including a valid string import such as `@import \"foo url(bar).css\"`. The previous parser would report that string for conversion to `url(...)`, but the new guard skips it. Restrict the fast path to an actual parsed `url` function, or otherwise avoid matching text inside quoted strings."
+    },
+    "b": {
+      "line": 52,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Skip filter mistakes quoted strings for URL functions\n\nFor `@import \"url(foo.css)\"` with the `url` option, this regex matches the text inside the quoted string and returns before parsing it, so the rule fails to report that the import uses string notation. Restrict the early check to parsed URL-function nodes, or only use a token-aware predicate."
+    }
+  },
+  {
+    "taskId": "stylelint__9044",
+    "file": "lib/rules/import-notation/index.mjs",
+    "duplicate": true,
+    "a": {
+      "line": 52,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Quoted import strings containing `url(` are skipped\n\nFor `primary === 'url'`, this guard returns for any parameter containing the text `url(`, including a valid string import such as `@import \"foo url(bar).css\"`. The previous parser would report that string for conversion to `url(...)`, but the new guard skips it. Restrict the fast path to an actual parsed `url` function, or otherwise avoid matching text inside quoted strings."
+    },
+    "b": {
+      "line": 52,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Do not classify imports by raw parameter text\n\nFor the `url` primary option, a valid string import such as `@import \"foo url(.css\";` matches `/url\\(/` inside the quoted filename and returns before parsing, so the rule fails to report that the import is using string notation. Detect the first parsed import value instead of searching the entire raw parameter text."
+    }
+  },
+  {
+    "taskId": "stylelint__9044",
+    "file": "lib/rules/import-notation/index.mjs",
+    "duplicate": true,
+    "a": {
+      "line": 52,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Quoted import strings containing `url(` are skipped\n\nFor `primary === 'url'`, this guard returns for any parameter containing the text `url(`, including a valid string import such as `@import \"foo url(bar).css\"`. The previous parser would report that string for conversion to `url(...)`, but the new guard skips it. Restrict the fast path to an actual parsed `url` function, or otherwise avoid matching text inside quoted strings."
+    },
+    "b": {
+      "line": 52,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Do not classify imports from raw parameter text\n\nFor `primary === 'url'`, this returns early for valid string imports such as `@import \"url(foo.css)\";`, because the quoted path contains the substring `url(`. The rule therefore emits no warning even though the import uses string notation; inspect the parsed source node (or otherwise exclude quoted strings) before applying this fast-path check."
+    }
+  },
+  {
+    "taskId": "stylelint__9044",
+    "file": "lib/rules/import-notation/index.mjs",
+    "duplicate": true,
+    "a": {
+      "line": 52,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Skip filter mistakes quoted strings for URL functions\n\nFor `@import \"url(foo.css)\"` with the `url` option, this regex matches the text inside the quoted string and returns before parsing it, so the rule fails to report that the import uses string notation. Restrict the early check to parsed URL-function nodes, or only use a token-aware predicate."
+    },
+    "b": {
+      "line": 52,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Do not classify imports by raw parameter text\n\nFor the `url` primary option, a valid string import such as `@import \"foo url(.css\";` matches `/url\\(/` inside the quoted filename and returns before parsing, so the rule fails to report that the import is using string notation. Detect the first parsed import value instead of searching the entire raw parameter text."
+    }
+  },
+  {
+    "taskId": "stylelint__9044",
+    "file": "lib/rules/import-notation/index.mjs",
+    "duplicate": true,
+    "a": {
+      "line": 52,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Skip filter mistakes quoted strings for URL functions\n\nFor `@import \"url(foo.css)\"` with the `url` option, this regex matches the text inside the quoted string and returns before parsing it, so the rule fails to report that the import uses string notation. Restrict the early check to parsed URL-function nodes, or only use a token-aware predicate."
+    },
+    "b": {
+      "line": 52,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Do not classify imports from raw parameter text\n\nFor `primary === 'url'`, this returns early for valid string imports such as `@import \"url(foo.css)\";`, because the quoted path contains the substring `url(`. The rule therefore emits no warning even though the import uses string notation; inspect the parsed source node (or otherwise exclude quoted strings) before applying this fast-path check."
+    }
+  },
+  {
+    "taskId": "stylelint__9044",
+    "file": "lib/rules/import-notation/index.mjs",
+    "duplicate": true,
+    "a": {
+      "line": 52,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Do not classify imports by raw parameter text\n\nFor the `url` primary option, a valid string import such as `@import \"foo url(.css\";` matches `/url\\(/` inside the quoted filename and returns before parsing, so the rule fails to report that the import is using string notation. Detect the first parsed import value instead of searching the entire raw parameter text."
+    },
+    "b": {
+      "line": 52,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Do not classify imports from raw parameter text\n\nFor `primary === 'url'`, this returns early for valid string imports such as `@import \"url(foo.css)\";`, because the quoted path contains the substring `url(`. The rule therefore emits no warning even though the import uses string notation; inspect the parsed source node (or otherwise exclude quoted strings) before applying this fast-path check."
+    }
+  },
+  {
+    "taskId": "stylelint__9044",
+    "file": "lib/rules/keyframe-selector-notation/index.mjs",
+    "duplicate": true,
+    "a": {
+      "line": 35,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Filter misses percentages preceded by comments\n\nA valid keyframe selector such as `/* comment */ 0%` can be reported or fixed by the previous unconditional walk, but `HAS_PERCENTAGE` requires `0%` or `100%` to start after whitespace or a comma and therefore skips this rule entirely when a comment immediately precedes the percentage. Make the prefilter comment-aware, or retain a selector parse before filtering."
+    },
+    "b": {
+      "line": 37,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve percentage selectors preceded by comments\n\n`HAS_PERCENTAGE` only matches a percentage immediately preceded by the start of the selector, whitespace, or a comma. A valid keyframe selector such as `/* comment */ 0%` is parsed successfully because comments are ignored by `parseKeyframeSelector`, but this walk filter skips it and the required notation warning is lost. Make the filter account for comments or avoid filtering this case."
+    }
+  },
+  {
+    "taskId": "stylelint__9074",
+    "file": "lib/utils/regexes.mjs",
+    "duplicate": true,
+    "a": {
+      "line": 36,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Match multiline attribute operators\n\n`attributeSelectorWithOperator` uses `.*`, which does not match newline characters. A valid selector such as `a[foo\\n=bar]` was previously passed to the three attribute-operator rules because the old checks searched independently for `[` and `=`, but it is now filtered out and never validated. Use a newline-safe pattern that preserves the cheap filter, such as `/\\[[^]]*=/`."
+    },
+    "b": {
+      "line": 38,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Match operators across multiline attribute selectors\n\n`/\\[.*=/` cannot match an `=` separated from `[` by a newline, so valid selectors such as `[data-value\\n=\\\"x\\\"]` are excluded from `walkRules` and skipped by the attribute operator and attribute quotes rules. The previous `includes('[') && includes('=')` checks accepted these selectors; use a character class that spans newlines, such as `/\\[[^\\]]*=/`, or filter only on `[` and retain the parser-based check."
+    }
+  },
+  {
+    "taskId": "vega__4219",
+    "file": "packages/vega-util/src/transform.ts",
+    "duplicate": true,
+    "a": {
+      "line": 46,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve readonly domains in public signatures\n\nThe exported transform functions now accept `number[]`, while the existing public declarations accept `readonly number[]` and none of these helpers mutates the input. TypeScript callers passing a readonly tuple or array will therefore fail to compile after the migration, despite being valid under the previous API. Change the domain parameters and internal guard to accept `readonly number[]`."
+    },
+    "b": {
+      "line": 46,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve readonly domain compatibility\n\nThe exported transform functions now accept `number[]`, so the generated declarations reject callers passing `readonly number[]`, even though the existing public declarations and implementation contract accept readonly domains and these functions never mutate them. Change the domain parameters to `readonly number[]` and update the non-empty type guard to accept readonly arrays."
+    }
+  },
+  {
+    "taskId": "vega__4219",
+    "file": "packages/vega-util/src/transform.ts",
+    "duplicate": true,
+    "a": {
+      "line": 46,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve readonly domains in public signatures\n\nThe exported transform functions now accept `number[]`, while the existing public declarations accept `readonly number[]` and none of these helpers mutates the input. TypeScript callers passing a readonly tuple or array will therefore fail to compile after the migration, despite being valid under the previous API. Change the domain parameters and internal guard to accept `readonly number[]`."
+    },
+    "b": {
+      "line": 46,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Reject readonly domains in generated declarations\n\nThe public transform signatures now use `number[]`, so the generated declarations no longer accept `readonly number[]` values that the existing `index.d.ts` contract accepts. Callers passing a readonly tuple or array will fail TypeScript compilation even though these functions never mutate the domain; use readonly array types for the public and internal domain parameters."
+    }
+  },
+  {
+    "taskId": "vega__4219",
+    "file": "packages/vega-util/src/transform.ts",
+    "duplicate": true,
+    "a": {
+      "line": 46,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve readonly domains in public signatures\n\nThe exported transform functions now accept `number[]`, while the existing public declarations accept `readonly number[]` and none of these helpers mutates the input. TypeScript callers passing a readonly tuple or array will therefore fail to compile after the migration, despite being valid under the previous API. Change the domain parameters and internal guard to accept `readonly number[]`."
+    },
+    "b": {
+      "line": 46,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve readonly domains in exported transform signatures\n\nThe migrated functions accept `number[]`, so the generated package declarations reject `readonly number[]` arguments that were accepted by the existing public `index.d.ts` contract. Calls such as `panLinear(scale.domain(), delta)` fail when `scale.domain()` is readonly, causing a TypeScript API regression across all pan and zoom helpers. Change the internal and exported domain types to accept readonly arrays, for example `readonly number[]`, while retaining the non-empty narrowing needed after validation."
+    }
+  },
+  {
+    "taskId": "vega__4219",
+    "file": "packages/vega-util/src/transform.ts",
+    "duplicate": true,
+    "a": {
+      "line": 46,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve readonly domain compatibility\n\nThe exported transform functions now accept `number[]`, so the generated declarations reject callers passing `readonly number[]`, even though the existing public declarations and implementation contract accept readonly domains and these functions never mutate them. Change the domain parameters to `readonly number[]` and update the non-empty type guard to accept readonly arrays."
+    },
+    "b": {
+      "line": 46,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Reject readonly domains in generated declarations\n\nThe public transform signatures now use `number[]`, so the generated declarations no longer accept `readonly number[]` values that the existing `index.d.ts` contract accepts. Callers passing a readonly tuple or array will fail TypeScript compilation even though these functions never mutate the domain; use readonly array types for the public and internal domain parameters."
+    }
+  },
+  {
+    "taskId": "vega__4219",
+    "file": "packages/vega-util/src/transform.ts",
+    "duplicate": true,
+    "a": {
+      "line": 46,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve readonly domain compatibility\n\nThe exported transform functions now accept `number[]`, so the generated declarations reject callers passing `readonly number[]`, even though the existing public declarations and implementation contract accept readonly domains and these functions never mutate them. Change the domain parameters to `readonly number[]` and update the non-empty type guard to accept readonly arrays."
+    },
+    "b": {
+      "line": 46,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve readonly domains in exported transform signatures\n\nThe migrated functions accept `number[]`, so the generated package declarations reject `readonly number[]` arguments that were accepted by the existing public `index.d.ts` contract. Calls such as `panLinear(scale.domain(), delta)` fail when `scale.domain()` is readonly, causing a TypeScript API regression across all pan and zoom helpers. Change the internal and exported domain types to accept readonly arrays, for example `readonly number[]`, while retaining the non-empty narrowing needed after validation."
+    }
+  },
+  {
+    "taskId": "vega__4219",
+    "file": "packages/vega-util/src/transform.ts",
+    "duplicate": true,
+    "a": {
+      "line": 46,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Reject readonly domains in generated declarations\n\nThe public transform signatures now use `number[]`, so the generated declarations no longer accept `readonly number[]` values that the existing `index.d.ts` contract accepts. Callers passing a readonly tuple or array will fail TypeScript compilation even though these functions never mutate the domain; use readonly array types for the public and internal domain parameters."
+    },
+    "b": {
+      "line": 46,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve readonly domains in exported transform signatures\n\nThe migrated functions accept `number[]`, so the generated package declarations reject `readonly number[]` arguments that were accepted by the existing public `index.d.ts` contract. Calls such as `panLinear(scale.domain(), delta)` fail when `scale.domain()` is readonly, causing a TypeScript API regression across all pan and zoom helpers. Change the internal and exported domain types to accept readonly arrays, for example `readonly number[]`, while retaining the non-empty narrowing needed after validation."
+    }
+  },
+  {
+    "taskId": "vitest__9521",
+    "file": "packages/vitest/src/node/coverage.ts",
+    "duplicate": false,
+    "a": {
+      "line": 338,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Respect explicit `coverage.changed: false`\n\nWhen `test.changed` is enabled and `coverage.changed` is explicitly set to `false`, this branch still assigns `ctx.config.related` to `changedFiles`, so coverage is filtered despite the documented override and the resolved configuration value. Only inherit `related` when coverage filtering was not explicitly disabled, or base this fallback on the resolved coverage option."
+    },
+    "b": {
+      "line": 336,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Fail when changed coverage cannot resolve Git state\n\n`findChangedFiles` returns `null` when the project is not inside a Git repository, and converting that to `undefined` disables the filter so the run reports coverage for all files even though `coverage.changed` was requested. Propagate the Git-repository error or otherwise fail the run instead of silently producing unfiltered coverage."
+    }
+  },
+  {
+    "taskId": "vitest__9521",
+    "file": "packages/vitest/src/node/coverage.ts",
+    "duplicate": true,
+    "a": {
+      "line": 338,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Respect explicit `coverage.changed: false`\n\nWhen `test.changed` is enabled and `coverage.changed` is explicitly set to `false`, this branch still assigns `ctx.config.related` to `changedFiles`, so coverage is filtered despite the documented override and the resolved configuration value. Only inherit `related` when coverage filtering was not explicitly disabled, or base this fallback on the resolved coverage option."
+    },
+    "b": {
+      "line": 340,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Explicit false still inherits test.changed filtering\n\nWhen `coverage.changed` is explicitly `false` and `test.changed` is enabled, `this.options.changed` is false but `this.ctx.config.changed` is true, so this branch assigns `config.related` and filters coverage anyway. This violates the documented override behavior and can produce incomplete reports; only fall back to `ctx.config.changed` when the coverage option was actually unspecified, and clear `changedFiles` when filtering is disabled."
+    }
+  },
+  {
+    "taskId": "vitest__9521",
+    "file": "packages/vitest/src/node/coverage.ts",
+    "duplicate": true,
+    "a": {
+      "line": 340,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Explicit false still inherits test.changed filtering\n\nWhen `coverage.changed` is explicitly `false` and `test.changed` is enabled, `this.options.changed` is false but `this.ctx.config.changed` is true, so this branch assigns `config.related` and filters coverage anyway. This violates the documented override behavior and can produce incomplete reports; only fall back to `ctx.config.changed` when the coverage option was actually unspecified, and clear `changedFiles` when filtering is disabled."
+    },
+    "b": {
+      "line": 341,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Explicit false does not disable inherited coverage filtering\n\nWhen `test.changed` is set and `coverage.changed` is explicitly `false`, the first branch is skipped and this fallback assigns `ctx.config.related` to `changedFiles`. Coverage is therefore still limited to changed files, contradicting the documented and tested override behavior. Only fall back to `ctx.config.related` when `coverage.changed` is unset; an explicit `false` must clear or bypass the filter."
+    }
+  },
+  {
+    "taskId": "zod__5578",
+    "file": "packages/zod/src/v4/core/to-json-schema.ts",
+    "duplicate": true,
+    "a": {
+      "line": 431,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Propagated references violate older draft rules\n\nFor `draft-07`, `draft-04`, and `openapi-3.0`, this unconditionally adds the extracted parent `$ref` to the child schema even when the child retains properties such as `description`. The surrounding code explicitly handles these targets by using `allOf` because they cannot combine `$ref` with sibling properties, so a schema such as `z.string().readonly().meta({ id: \"x\" }).describe(\"foo\")` emits a `$ref` alongside `description` and loses the intended metadata semantics. Apply the same target-specific `allOf` handling here, or avoid propagating the parent `$ref` directly for these targets."
+    },
+    "b": {
+      "line": 431,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve older-target `$ref` compatibility during parent propagation\n\nFor `draft-04`, `draft-07`, and `openapi-3.0`, this assigns a `$ref` directly while leaving wrapper properties such as `description` on the same schema object. Those targets do not support meaningful sibling keywords alongside `$ref`, so metadata on cases such as `z.string().readonly().meta({ id: \"job\" }).describe(\"...\")` is ignored or produces an invalid schema. Apply the same `allOf` handling used above when the target cannot combine `$ref` with sibling properties."
+    }
+  },
+  {
+    "taskId": "zod__5578",
+    "file": "packages/zod/src/v4/core/to-json-schema.ts",
+    "duplicate": true,
+    "a": {
+      "line": 431,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Propagated references violate older draft rules\n\nFor `draft-07`, `draft-04`, and `openapi-3.0`, this unconditionally adds the extracted parent `$ref` to the child schema even when the child retains properties such as `description`. The surrounding code explicitly handles these targets by using `allOf` because they cannot combine `$ref` with sibling properties, so a schema such as `z.string().readonly().meta({ id: \"x\" }).describe(\"foo\")` emits a `$ref` alongside `description` and loses the intended metadata semantics. Apply the same target-specific `allOf` handling here, or avoid propagating the parent `$ref` directly for these targets."
+    },
+    "b": {
+      "line": 431,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve old-draft `$ref` handling during parent propagation\n\nFor draft-04, draft-07, and OpenAPI 3.0, the preceding branch deliberately stores an extracted parent reference in `allOf` because `$ref` cannot be combined with sibling properties. This unconditional assignment adds the same `$ref` back alongside `allOf` and child constraints; in these targets the `$ref` sibling semantics cause properties such as `minLength` to be ignored. Apply the same target-specific `allOf` handling here instead of assigning `$ref` directly."
+    }
+  },
+  {
+    "taskId": "zod__5578",
+    "file": "packages/zod/src/v4/core/to-json-schema.ts",
+    "duplicate": true,
+    "a": {
+      "line": 431,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve older-target `$ref` compatibility during parent propagation\n\nFor `draft-04`, `draft-07`, and `openapi-3.0`, this assigns a `$ref` directly while leaving wrapper properties such as `description` on the same schema object. Those targets do not support meaningful sibling keywords alongside `$ref`, so metadata on cases such as `z.string().readonly().meta({ id: \"job\" }).describe(\"...\")` is ignored or produces an invalid schema. Apply the same `allOf` handling used above when the target cannot combine `$ref` with sibling properties."
+    },
+    "b": {
+      "line": 431,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Preserve old-draft `$ref` handling during parent propagation\n\nFor draft-04, draft-07, and OpenAPI 3.0, the preceding branch deliberately stores an extracted parent reference in `allOf` because `$ref` cannot be combined with sibling properties. This unconditional assignment adds the same `$ref` back alongside `allOf` and child constraints; in these targets the `$ref` sibling semantics cause properties such as `minLength` to be ignored. Apply the same target-specific `allOf` handling here instead of assigning `$ref` directly."
+    }
+  },
+  {
+    "taskId": "zod__5672",
+    "file": "packages/zod/src/v4/core/schemas.ts",
+    "duplicate": true,
+    "a": {
+      "line": 483,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Strict validation is bypassed when normalization is enabled\n\nThe `!def.normalize` guard means `z.httpUrl({ normalize: true })` still passes inputs such as `http:example.com` to `new URL()`, which accepts and normalizes them to a valid HTTP URL. Apply the required `://` check for HTTP URLs regardless of the normalization mode."
+    },
+    "b": {
+      "line": 483,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Enforce strict HTTP syntax for normalized URLs\n\nThe `!def.normalize` condition lets `httpUrl({ normalize: true })` pass malformed inputs such as `http:example.com` and `http:/example.com` to `new URL()`, which normalizes them into accepted HTTP URLs. Apply the `://` check for HTTP protocol-constrained schemas regardless of the normalization setting."
+    }
+  },
+  {
+    "taskId": "zod__5672",
+    "file": "packages/zod/src/v4/core/schemas.ts",
+    "duplicate": true,
+    "a": {
+      "line": 483,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Strict validation is bypassed when normalization is enabled\n\nThe `!def.normalize` guard means `z.httpUrl({ normalize: true })` still passes inputs such as `http:example.com` to `new URL()`, which accepts and normalizes them to a valid HTTP URL. Apply the required `://` check for HTTP URLs regardless of the normalization mode."
+    },
+    "b": {
+      "line": 483,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Enforce the separator for normalized HTTP URLs\n\nThe `!def.normalize` guard bypasses the new validation for `httpUrl({ normalize: true })`, so inputs such as `http:example.com` and `http:/example.com` reach `new URL()` and are normalized and accepted. This leaves a public `httpUrl()` configuration accepting the malformed forms that the strict-validation change is intended to reject; remove the `!def.normalize` condition or otherwise apply the `://` check to all HTTP URL schemas."
+    }
+  },
+  {
+    "taskId": "zod__5672",
+    "file": "packages/zod/src/v4/core/schemas.ts",
+    "duplicate": true,
+    "a": {
+      "line": 483,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Strict validation is bypassed when normalization is enabled\n\nThe `!def.normalize` guard means `z.httpUrl({ normalize: true })` still passes inputs such as `http:example.com` to `new URL()`, which accepts and normalizes them to a valid HTTP URL. Apply the required `://` check for HTTP URLs regardless of the normalization mode."
+    },
+    "b": {
+      "line": 483,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Enforce strict protocol separators for normalized URLs\n\nThe `!def.normalize` guard lets `httpUrl({ normalize: true })` pass malformed inputs such as `http:example.com` or `https:/www.google.com` to `new URL()`, which normalizes them into accepted HTTP URLs. This leaves the public `httpUrl()` contract permissive for exactly the malformed forms this change is intended to reject; apply the `://` check whenever the HTTP protocol constraint is active, regardless of normalization."
+    }
+  },
+  {
+    "taskId": "zod__5672",
+    "file": "packages/zod/src/v4/core/schemas.ts",
+    "duplicate": true,
+    "a": {
+      "line": 483,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Enforce strict HTTP syntax for normalized URLs\n\nThe `!def.normalize` condition lets `httpUrl({ normalize: true })` pass malformed inputs such as `http:example.com` and `http:/example.com` to `new URL()`, which normalizes them into accepted HTTP URLs. Apply the `://` check for HTTP protocol-constrained schemas regardless of the normalization setting."
+    },
+    "b": {
+      "line": 483,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Enforce the separator for normalized HTTP URLs\n\nThe `!def.normalize` guard bypasses the new validation for `httpUrl({ normalize: true })`, so inputs such as `http:example.com` and `http:/example.com` reach `new URL()` and are normalized and accepted. This leaves a public `httpUrl()` configuration accepting the malformed forms that the strict-validation change is intended to reject; remove the `!def.normalize` condition or otherwise apply the `://` check to all HTTP URL schemas."
+    }
+  },
+  {
+    "taskId": "zod__5672",
+    "file": "packages/zod/src/v4/core/schemas.ts",
+    "duplicate": true,
+    "a": {
+      "line": 483,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Enforce strict HTTP syntax for normalized URLs\n\nThe `!def.normalize` condition lets `httpUrl({ normalize: true })` pass malformed inputs such as `http:example.com` and `http:/example.com` to `new URL()`, which normalizes them into accepted HTTP URLs. Apply the `://` check for HTTP protocol-constrained schemas regardless of the normalization setting."
+    },
+    "b": {
+      "line": 483,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Enforce strict protocol separators for normalized URLs\n\nThe `!def.normalize` guard lets `httpUrl({ normalize: true })` pass malformed inputs such as `http:example.com` or `https:/www.google.com` to `new URL()`, which normalizes them into accepted HTTP URLs. This leaves the public `httpUrl()` contract permissive for exactly the malformed forms this change is intended to reject; apply the `://` check whenever the HTTP protocol constraint is active, regardless of normalization."
+    }
+  },
+  {
+    "taskId": "zod__5672",
+    "file": "packages/zod/src/v4/core/schemas.ts",
+    "duplicate": true,
+    "a": {
+      "line": 483,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Enforce the separator for normalized HTTP URLs\n\nThe `!def.normalize` guard bypasses the new validation for `httpUrl({ normalize: true })`, so inputs such as `http:example.com` and `http:/example.com` reach `new URL()` and are normalized and accepted. This leaves a public `httpUrl()` configuration accepting the malformed forms that the strict-validation change is intended to reject; remove the `!def.normalize` condition or otherwise apply the `://` check to all HTTP URL schemas."
+    },
+    "b": {
+      "line": 483,
+      "severity": "warn",
+      "confidence": "high",
+      "body": "issue: Enforce strict protocol separators for normalized URLs\n\nThe `!def.normalize` guard lets `httpUrl({ normalize: true })` pass malformed inputs such as `http:example.com` or `https:/www.google.com` to `new URL()`, which normalizes them into accepted HTTP URLs. This leaves the public `httpUrl()` contract permissive for exactly the malformed forms this change is intended to reject; apply the `://` check whenever the HTTP protocol constraint is active, regardless of normalization."
+    }
+  }
+]

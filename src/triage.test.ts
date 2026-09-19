@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type AuthoredFinding, REVIEW_ANGLES, triageFindings } from './triage.js';
+import { areSameFinding, type AuthoredFinding, REVIEW_ANGLES, triageFindings } from './triage.js';
 import type { ReviewComment } from './types.js';
 
 function c(overrides: Partial<ReviewComment> = {}): ReviewComment {
@@ -257,5 +257,45 @@ describe('triageFindings', () => {
       expect(out1[0].comment.severity).toBe('critical');
       expect(out1[0].authorModel).toBe('google/gemini');
     });
+  });
+});
+
+describe('areSameFinding', () => {
+  const comment = (over: Partial<ReviewComment> = {}): ReviewComment => ({
+    file: 'src/a.ts',
+    line: 10,
+    side: 'RIGHT',
+    severity: 'warn',
+    confidence: 'high',
+    body: 'issue: Null deref on empty input\n\nDetails.',
+    ...over,
+  });
+
+  it('merges an identical normalised subject', () => {
+    expect(
+      areSameFinding(comment(), comment({ body: 'issue: NULL DEREF on empty input!\n\nOther.' })),
+    ).toBe(true);
+  });
+
+  it('separates findings in different files', () => {
+    expect(areSameFinding(comment(), comment({ file: 'src/b.ts' }))).toBe(false);
+  });
+
+  it('separates findings more than MAX_LINE_DELTA apart', () => {
+    expect(areSameFinding(comment(), comment({ line: 12 }))).toBe(true);
+    expect(areSameFinding(comment(), comment({ line: 13 }))).toBe(false);
+  });
+
+  it('separates the same defect phrased differently — the measured weakness', () => {
+    // Both describe one defect; token overlap falls under the Jaccard threshold.
+    // Recorded so a future semantic matcher has a concrete case to beat.
+    expect(
+      areSameFinding(
+        comment({ body: 'issue: Enforce the separator for normalized HTTP URLs\n\nx' }),
+        comment({
+          body: 'issue: Strict validation is bypassed when normalization is enabled\n\nx',
+        }),
+      ),
+    ).toBe(false);
   });
 });

@@ -113,6 +113,19 @@ function isSameFinding(anchor: NormalizedFinding, candidate: NormalizedFinding):
   return jaccard(anchor.tokens, candidate.tokens) >= SUBJECT_SIMILARITY_THRESHOLD;
 }
 
+/**
+ * The duplicate-detection predicate over two plain comments — the same rule
+ * {@link triageFindings} clusters with, without the survivorship machinery.
+ * Exported so the heuristic can be measured directly against alternatives.
+ */
+export function areSameFinding(a: ReviewComment, b: ReviewComment): boolean {
+  const normalize = (comment: ReviewComment): NormalizedFinding => {
+    const subject = normalizeSubject(comment.body);
+    return { comment, authorModel: '', subject, tokens: subjectTokens(subject) };
+  };
+  return isSameFinding(normalize(a), normalize(b));
+}
+
 /** A finding plus its precomputed normalised subject and subject token set. */
 interface NormalizedFinding extends AuthoredFinding {
   subject: string;
