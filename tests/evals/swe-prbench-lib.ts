@@ -18,7 +18,7 @@ import type { Config } from '../../src/config.js';
 import { resolveProviderApiKey } from '../../src/config.js';
 import { runReview } from '../../src/gitlab-review.js';
 import { parseReviewMarkdownWithWarnings } from '../../src/parser.js';
-import type { ReviewDepth, ThinkingLevel } from '../../src/types.js';
+import type { Confidence, ReviewDepth, Side, ThinkingLevel } from '../../src/types.js';
 import { judgeRaw } from './review-suite.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -49,7 +49,15 @@ export type Instance = {
   gold_comments_code: GoldComment[];
 };
 
-export type OurFinding = { file: string; line: number; severity: string; body: string };
+export type OurFinding = {
+  file: string;
+  line: number;
+  severity: string;
+  body: string;
+  /** Carried so a re-verification can rebuild the exact prompt the Verify stage sees. */
+  side?: Side;
+  confidence?: Confidence;
+};
 
 export type ReviewKnobs = { model: string; depth: ReviewDepth; thinking: ThinkingLevel };
 
@@ -157,6 +165,8 @@ export async function runReviewer(
         line: c.line,
         severity: c.severity,
         body: c.body,
+        side: c.side,
+        confidence: c.confidence,
       })),
     };
   } catch (err) {
