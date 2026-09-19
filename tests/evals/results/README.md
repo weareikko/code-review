@@ -4,12 +4,13 @@ Committed backups of measurement-harness output. Distinct from the gitignored
 `test-results/` directory (live run output) — these are curated snapshots kept in
 version control so the numbers behind the analyses survive.
 
-| File                                | Harness                        | What it is                                                                                                                       |
-| ----------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| `swe-prbench-sweep.json`            | `swe-prbench-sweep.eval.ts`    | Per-review records for the luna × depth × thinking sweep on real TS/JS PRs, **file access on** (143/144; `verify/high` = 15/16). |
-| `swe-prbench-sweep.md`              | (regenerated)                  | Summary matrices + notes for the above.                                                                                          |
-| `swe-prbench-triage.json`           | `swe-prbench-lib.ts`           | Frozen per-PR gold-comment triage (`is_defect`), shared across all sweep cells.                                                  |
-| `depth-thinking-sweep.json` / `.md` | `depth-thinking-sweep.eval.ts` | luna × depth × thinking sweep on the **synthetic** fixture suite (patch-only).                                                   |
+| File                                | Harness                        | What it is                                                                                                                                                            |
+| ----------------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `swe-prbench-sweep.json`            | `swe-prbench-sweep.eval.ts`    | Per-review records for the luna × depth × thinking sweep on real TS/JS PRs, **file access on** (143/144; `verify/high` = 15/16).                                      |
+| `swe-prbench-sweep.md`              | (regenerated)                  | Summary matrices + notes for the above.                                                                                                                               |
+| `swe-prbench-triage.json`           | `swe-prbench-lib.ts`           | Frozen per-PR gold-comment triage (`is_defect`), shared across all sweep cells.                                                                                       |
+| `depth-thinking-sweep.json` / `.md` | `depth-thinking-sweep.eval.ts` | luna × depth × thinking sweep on the **synthetic** fixture suite (patch-only).                                                                                        |
+| `jev-verify.json` / `.md`           | `jev-verify.eval.ts`           | Jev vs the agentic verifier over 41 real findings (16 PRs × 4 trials). Inconclusive: the judge's per-finding verdicts mislabel both directions — see the eval header. |
 
 Reproduce: see `tests/evals/fixtures/swe-prbench/README.md` (materialize + run) and
 the header comment in each `*.eval.ts`. Model under test: `openrouter/openai/gpt-5.6-luna`.
