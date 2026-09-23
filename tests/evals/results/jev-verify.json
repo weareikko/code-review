@@ -1,0 +1,1874 @@
+{
+  "config": {
+    "findModel": "openrouter/openai/gpt-5.6-luna",
+    "jevModel": "typesafe/jev-1.13",
+    "judgeModel": "openrouter/anthropic/claude-sonnet-5"
+  },
+  "found": [
+    "backstage__32466|0",
+    "backstage__32466|1",
+    "backstage__32466|2",
+    "backstage__32466|3",
+    "stylelint__8985|0",
+    "stylelint__8985|1",
+    "stylelint__8985|2",
+    "stylelint__8985|3",
+    "effect__5952|0",
+    "effect__5952|1",
+    "effect__5952|2",
+    "effect__5952|3",
+    "stylelint__9044|0",
+    "stylelint__9044|1",
+    "stylelint__9044|2",
+    "stylelint__9044|3",
+    "node-postgres__3547|0",
+    "node-postgres__3547|1",
+    "node-postgres__3547|2",
+    "node-postgres__3547|3",
+    "stylelint__9062|0",
+    "stylelint__9062|1",
+    "stylelint__9062|2",
+    "stylelint__9062|3",
+    "stylelint__8953|0",
+    "stylelint__8953|1",
+    "stylelint__8953|2",
+    "stylelint__8953|3",
+    "vitest__9152|0",
+    "vitest__9152|1",
+    "vitest__9152|2",
+    "vitest__9152|3",
+    "stylelint__9060|0",
+    "stylelint__9060|1",
+    "stylelint__9060|2",
+    "stylelint__9060|3",
+    "vitest__9512|0",
+    "vitest__9512|1",
+    "vitest__9512|2",
+    "vitest__9512|3",
+    "stylelint__9074|0",
+    "stylelint__9074|1",
+    "stylelint__9074|2",
+    "stylelint__9074|3",
+    "zod__5578|0",
+    "zod__5578|1",
+    "zod__5578|2",
+    "zod__5578|3",
+    "transformers.js__1436|0",
+    "transformers.js__1436|1",
+    "transformers.js__1436|2",
+    "transformers.js__1436|3",
+    "vega__4219|0",
+    "vega__4219|1",
+    "vega__4219|2",
+    "vega__4219|3",
+    "vitest__9521|0",
+    "vitest__9521|1",
+    "vitest__9521|2",
+    "vitest__9521|3",
+    "zod__5672|0",
+    "zod__5672|1",
+    "zod__5672|2",
+    "zod__5672|3"
+  ],
+  "findings": [
+    {
+      "taskId": "effect__5952",
+      "difficulty": "Type1_Direct",
+      "trial": 0,
+      "index": 0,
+      "file": "packages/opentelemetry/package.json",
+      "line": 65,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "LEFT",
+      "body": "issue: Preserve optional metadata for unrelated peer dependencies\n\nDeleting the entire `peerDependenciesMeta` block makes `@opentelemetry/api`, `@opentelemetry/resources`, `@opentelemetry/sdk-metrics`, `@opentelemetry/sdk-trace-base`, and `@opentelemetry/sdk-logs` required as well. Consumers that do not use those integrations can now receive missing-peer installation failures or warnings; retain `optional: true` for those five peers and remove only the metadata entries for the two trace SDKs.",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.3,
+        "probabilities": {
+          "downgrade": 0.27,
+          "keep": 0.53,
+          "drop": 0.2
+        },
+        "demonstrable": 0.63,
+        "latencyMs": 321,
+        "clamped": false,
+        "cost": 0.000051954,
+        "inputTokens": 1237
+      },
+      "agentic": {
+        "decision": "drop",
+        "reason": "The package's peerDependencies already declare all listed integrations, and the changeset explicitly intends to make the trace SDK peers required; the diff alone does not establish that the remaining peers are unused or that their required status causes an actual installation failure.",
+        "latencyMs": 3152,
+        "cost": 0.000944325,
+        "toolCalls": 1
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.018633,
+        "reasons": [
+          "The diff removes the whole peerDependenciesMeta block, making all listed peers required rather than only the two trace SDKs mentioned in the changeset, which matches the finding's claim.",
+          "The diff removes the entire peerDependenciesMeta block, making all seven peers required instead of just the two sdk-trace-node/sdk-trace-web ones described in the changeset, matching the finding's claim."
+        ]
+      }
+    },
+    {
+      "taskId": "effect__5952",
+      "difficulty": "Type1_Direct",
+      "trial": 1,
+      "index": 0,
+      "file": "packages/opentelemetry/package.json",
+      "line": 65,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "LEFT",
+      "body": "issue: All optional OpenTelemetry peers become mandatory\n\nDeleting the entire `peerDependenciesMeta` object removes `optional: true` not only for `@opentelemetry/sdk-trace-node` and `@opentelemetry/sdk-trace-web`, but also for `@opentelemetry/api`, `@opentelemetry/resources`, `@opentelemetry/sdk-metrics`, `@opentelemetry/sdk-trace-base`, and `@opentelemetry/sdk-logs`. Consumers that do not use those integrations will now receive unmet required-peer failures or warnings; retain the metadata entries for the unrelated optional peers and remove only the two tracing SDK entries.",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.21,
+        "probabilities": {
+          "downgrade": 0.29,
+          "keep": 0.47,
+          "drop": 0.24
+        },
+        "demonstrable": 0.69,
+        "latencyMs": 315,
+        "clamped": false,
+        "cost": 0.000053256,
+        "inputTokens": 1268
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "Removing the entire peerDependenciesMeta object makes every listed peer required, demonstrably imposing installation requirements on consumers that only use unrelated OpenTelemetry functionality.",
+        "latencyMs": 2912,
+        "cost": 0.000858725,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.018338,
+        "reasons": [
+          "The diff removes the whole peerDependenciesMeta block, making all listed peers required rather than just the two tracing SDKs mentioned in the changeset.",
+          "The diff deletes the entire peerDependenciesMeta object, which as claimed removes optionality from unrelated peers beyond the two tracing SDKs mentioned in the changeset."
+        ]
+      }
+    },
+    {
+      "taskId": "effect__5952",
+      "difficulty": "Type1_Direct",
+      "trial": 2,
+      "index": 0,
+      "file": "packages/opentelemetry/package.json",
+      "line": 67,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Preserve optional metadata for unrelated peers\n\nDeleting the entire `peerDependenciesMeta` block makes `@opentelemetry/api`, `@opentelemetry/resources`, `@opentelemetry/sdk-metrics`, `@opentelemetry/sdk-trace-base`, and `@opentelemetry/sdk-logs` required peers as well. This broadens the package installation contract beyond the stated fix and breaks consumers that do not use those integrations; retain their `optional: true` entries and remove only the metadata entries for the Node and Web trace SDKs.",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.47,
+        "probabilities": {
+          "downgrade": 0.18,
+          "keep": 0.65,
+          "drop": 0.17
+        },
+        "demonstrable": 0.75,
+        "latencyMs": 298,
+        "clamped": false,
+        "cost": 0.000052164,
+        "inputTokens": 1242
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "Removing the entire metadata block makes all previously optional integration peers required, contrary to the stated change that only Node and Web trace SDK peers should become required and potentially breaking consumers that omit unrelated integrations.",
+        "latencyMs": 2223,
+        "cost": 0.0005096,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.018813000000000003,
+        "reasons": [
+          "The diff removes the whole peerDependenciesMeta block rather than only the entries for sdk-trace-node and sdk-trace-web, making all listed peers required rather than just the two mentioned in the changeset.",
+          "The diff removes the entire peerDependenciesMeta block, not just the entries for sdk-trace-node and sdk-trace-web, so unrelated peers like @opentelemetry/api, resources, sdk-metrics, sdk-trace-base, and sdk-logs also lose their optional:true designation."
+        ]
+      }
+    },
+    {
+      "taskId": "effect__5952",
+      "difficulty": "Type1_Direct",
+      "trial": 3,
+      "index": 0,
+      "file": "packages/opentelemetry/package.json",
+      "line": 68,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "LEFT",
+      "body": "issue: Removing metadata makes unrelated OpenTelemetry peers mandatory\n\nDeleting the entire `peerDependenciesMeta` block changes `@opentelemetry/api`, `@opentelemetry/resources`, `@opentelemetry/sdk-metrics`, `@opentelemetry/sdk-trace-base`, and `@opentelemetry/sdk-logs` from optional to required peers, even though the stated fix only targets the node and web trace SDKs. Restore the optional metadata for those five packages and remove only the entries for `@opentelemetry/sdk-trace-node` and `@opentelemetry/sdk-trace-web`.",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.53,
+        "probabilities": {
+          "keep": 0.68,
+          "downgrade": 0.19,
+          "drop": 0.13
+        },
+        "demonstrable": 0.78,
+        "latencyMs": 329,
+        "clamped": false,
+        "cost": 0.00005271,
+        "inputTokens": 1255
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "Removing the metadata makes all listed peer dependencies, including the five unrelated packages, mandatory rather than optional, exceeding the stated node/web SDK change and potentially breaking consumers that do not install them.",
+        "latencyMs": 2808,
+        "cost": 0.000432475,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.006098000000000001,
+        "reasons": [
+          "The diff deletes the entire peerDependenciesMeta object rather than just the two entries for sdk-trace-node/web, making all listed peers mandatory.",
+          "The diff deletes the entire peerDependenciesMeta block, which also removes optional flags for five packages unrelated to the stated node/web trace SDK fix."
+        ]
+      }
+    },
+    {
+      "taskId": "stylelint__9044",
+      "difficulty": "Type2_Contextual",
+      "trial": 0,
+      "index": 0,
+      "file": "lib/rules/import-notation/index.mjs",
+      "line": 52,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Quoted import strings containing `url(` are skipped\n\nFor `primary === 'url'`, this guard returns for any parameter containing the text `url(`, including a valid string import such as `@import \"foo url(bar).css\"`. The previous parser would report that string for conversion to `url(...)`, but the new guard skips it. Restrict the fast path to an actual parsed `url` function, or otherwise avoid matching text inside quoted strings.",
+      "gold": "FABRICATED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.69,
+        "probabilities": {
+          "drop": 0.11,
+          "downgrade": 0.1,
+          "keep": 0.79
+        },
+        "demonstrable": 0.73,
+        "latencyMs": 282,
+        "clamped": false,
+        "cost": 0.000120162,
+        "inputTokens": 2861
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "For `primary === 'url'`, the text-based guard skips parameters such as `@import \"foo url(bar).css\"`, even though the parser can identify the quoted import as a string eligible for conversion, causing a real missed report.",
+        "latencyMs": 2392,
+        "cost": 0.0006085999999999999,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.04216740000000001,
+        "reasons": [
+          "The regex /url\\(/i.test(params) matches text inside quoted strings too, not just actual url() functions, so it incorrectly skips valid conversion candidates that this diff's guard was meant to fast-path around.",
+          "The regex /url\\(/i.test(params) matches text inside quoted strings, causing the new fast-path guard to skip valid string imports that merely contain the substring 'url(' without an actual url() function, which the diff newly introduces."
+        ]
+      }
+    },
+    {
+      "taskId": "stylelint__9044",
+      "difficulty": "Type2_Contextual",
+      "trial": 1,
+      "index": 0,
+      "file": "lib/rules/import-notation/index.mjs",
+      "line": 52,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Skip filter mistakes quoted strings for URL functions\n\nFor `@import \"url(foo.css)\"` with the `url` option, this regex matches the text inside the quoted string and returns before parsing it, so the rule fails to report that the import uses string notation. Restrict the early check to parsed URL-function nodes, or only use a token-aware predicate.",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.51,
+        "probabilities": {
+          "downgrade": 0.1,
+          "drop": 0.22,
+          "keep": 0.68
+        },
+        "demonstrable": 0.7,
+        "latencyMs": 307,
+        "clamped": false,
+        "cost": 0.00011928,
+        "inputTokens": 2840
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "The `/url\\(/i` precheck matches `url(` inside a quoted `@import \"url(foo.css)\"` string, causing the `url` option to skip parsing and miss a required notation violation.",
+        "latencyMs": 2252,
+        "cost": 0.000610475,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.6172915,
+        "reasons": [
+          "The new early-return guards use naive substring matching on raw at-rule params rather than parsed tokens, so a quoted string that merely contains the text 'url(' incorrectly triggers the skip condition for the 'url' option, causing a legitimate violation to be missed.",
+          "The regex check on raw params text matches occurrences of literal 'url(' inside quoted strings, incorrectly skipping cases the rule should still flag."
+        ]
+      }
+    },
+    {
+      "taskId": "stylelint__9044",
+      "difficulty": "Type2_Contextual",
+      "trial": 1,
+      "index": 1,
+      "file": "lib/rules/keyframe-selector-notation/index.mjs",
+      "line": 35,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Filter misses percentages preceded by comments\n\nA valid keyframe selector such as `/* comment */ 0%` can be reported or fixed by the previous unconditional walk, but `HAS_PERCENTAGE` requires `0%` or `100%` to start after whitespace or a comma and therefore skips this rule entirely when a comment immediately precedes the percentage. Make the prefilter comment-aware, or retain a selector parse before filtering.",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.29,
+        "probabilities": {
+          "drop": 0.33,
+          "keep": 0.52,
+          "downgrade": 0.15
+        },
+        "demonstrable": 0.66,
+        "latencyMs": 282,
+        "clamped": false,
+        "cost": 0.000120162,
+        "inputTokens": 2861
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "The prefilter fails to match valid selectors such as `/* comment */0%`, because CSS comments act as whitespace but the regex requires the percentage to follow an actual whitespace or comma.",
+        "latencyMs": 2625,
+        "cost": 0.0006588499999999999,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.6565738,
+        "reasons": [
+          "The new selectorRegex prefilters rules via walkRules based on immediate-preceding-char patterns, and a comment with no surrounding whitespace before a percentage/keyword token defeats the regex even though it's valid CSS and previously handled correctly by parseKeyframeSelector's comment-aware filtering.",
+          "The diff added HAS_PERCENTAGE/HAS_KEYWORD regex prefilters requiring whitespace/comma/start-of-string before the percentage or keyword token, so a comment butting directly against '0%'/'100%' (valid in CSS since comments act as token separators) will not satisfy the regex and the rule will be skipped by walkRules' filter, which is a new behavior not present before this diff (previously all rules were walked unconditionally)."
+        ]
+      }
+    },
+    {
+      "taskId": "stylelint__9044",
+      "difficulty": "Type2_Contextual",
+      "trial": 2,
+      "index": 0,
+      "file": "lib/rules/import-notation/index.mjs",
+      "line": 52,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Do not classify imports by raw parameter text\n\nFor the `url` primary option, a valid string import such as `@import \"foo url(.css\";` matches `/url\\(/` inside the quoted filename and returns before parsing, so the rule fails to report that the import is using string notation. Detect the first parsed import value instead of searching the entire raw parameter text.",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.3,
+        "probabilities": {
+          "downgrade": 0.16,
+          "drop": 0.3,
+          "keep": 0.54
+        },
+        "demonstrable": 0.63,
+        "latencyMs": 282,
+        "clamped": false,
+        "cost": 0.000119448,
+        "inputTokens": 2844
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "The raw `/url\\(/i` check matches text inside a quoted string such as `@import \"foo url(.css\"`, causing the `url` option to skip parsing and miss a real string-notation violation.",
+        "latencyMs": 2197,
+        "cost": 0.000564975,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.028961800000000003,
+        "reasons": [
+          "The added regex test operates on raw at-rule params text, which can accidentally match 'url(' inside a quoted string value, causing false early return introduced by this diff.",
+          "The added regex test operates on raw atRule.params text before parsing, so a quoted string containing the literal substring 'url(' can cause the url-primary guard to incorrectly skip a valid string-notation import that should be flagged."
+        ]
+      }
+    },
+    {
+      "taskId": "stylelint__9044",
+      "difficulty": "Type2_Contextual",
+      "trial": 2,
+      "index": 1,
+      "file": "lib/rules/keyframe-selector-notation/index.mjs",
+      "line": 37,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Preserve percentage selectors preceded by comments\n\n`HAS_PERCENTAGE` only matches a percentage immediately preceded by the start of the selector, whitespace, or a comma. A valid keyframe selector such as `/* comment */ 0%` is parsed successfully because comments are ignored by `parseKeyframeSelector`, but this walk filter skips it and the required notation warning is lost. Make the filter account for comments or avoid filtering this case.",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "drop",
+        "confidence": 0.24,
+        "probabilities": {
+          "downgrade": 0.14,
+          "keep": 0.36,
+          "drop": 0.5
+        },
+        "demonstrable": 0.37,
+        "latencyMs": 265,
+        "clamped": false,
+        "cost": 0.00012012,
+        "inputTokens": 2860
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "A valid selector such as `/* comment */0%` has the percentage immediately preceded by `/`, so `HAS_PERCENTAGE` skips the rule even though comments are treated as whitespace by the parser and the notation violation is therefore missed.",
+        "latencyMs": 3902,
+        "cost": 0.00118385,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": null,
+        "agreed": false,
+        "preExisting": false,
+        "cost": 0.6339369,
+        "reasons": [
+          "HAS_PERCENTAGE only checks the character immediately preceding the percentage for ^, comma, or whitespace, so a comment directly abutting the percentage (no space) prevents a match, causing walkRules to skip a rule that parseKeyframeSelector would otherwise flag, thereby losing the warning; this filtering behavior is newly introduced by the diff.",
+          "The regex `(?:^|[,\\s])(?:0%|100%)` matches whenever a percentage is preceded by whitespace or a comma, and a comment followed by a space still leaves whitespace immediately before the percentage, so the case described is not actually skipped."
+        ]
+      }
+    },
+    {
+      "taskId": "stylelint__9044",
+      "difficulty": "Type2_Contextual",
+      "trial": 3,
+      "index": 0,
+      "file": "lib/rules/import-notation/index.mjs",
+      "line": 52,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Do not classify imports from raw parameter text\n\nFor `primary === 'url'`, this returns early for valid string imports such as `@import \"url(foo.css)\";`, because the quoted path contains the substring `url(`. The rule therefore emits no warning even though the import uses string notation; inspect the parsed source node (or otherwise exclude quoted strings) before applying this fast-path check.",
+      "gold": "FABRICATED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.21,
+        "probabilities": {
+          "keep": 0.47,
+          "downgrade": 0.14,
+          "drop": 0.39
+        },
+        "demonstrable": 0.58,
+        "latencyMs": 1164,
+        "clamped": false,
+        "cost": 0.000119574,
+        "inputTokens": 2847
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "The raw `/url\\(/i` fast path matches text inside quoted import strings, so `@import \"url(foo.css)\"` is skipped under `url` and the required string-to-URL warning is suppressed.",
+        "latencyMs": 2321,
+        "cost": 0.00060285,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.037896400000000004,
+        "reasons": [
+          "The regex /url\\(/i.test(params) matches on raw param text including quoted strings, so a string-notation import containing 'url(' in its path causes the early return, skipping the check for primary==='url'.",
+          "The regex /url\\(/i.test(params) only checks for the substring 'url(' anywhere in the raw params, including inside quoted strings, so a quoted import path containing that substring incorrectly triggers the early return added in this diff."
+        ]
+      }
+    },
+    {
+      "taskId": "node-postgres__3547",
+      "difficulty": "Type1_Direct",
+      "trial": 0,
+      "index": 0,
+      "file": "packages/pg/lib/connection-parameters.js",
+      "line": 9,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Preserve explicitly configured falsy values\n\n`if (config[key])` treats configured values such as `''`, `0`, and `false` as absent, so an environment variable or default can override an explicit configuration value. Use an undefined check so configuration precedence applies to every supplied value.\n\n```suggestion\n  if (config[key] !== undefined) {\n```",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.71,
+        "probabilities": {
+          "downgrade": 0.14,
+          "keep": 0.8,
+          "drop": 0.06
+        },
+        "demonstrable": 0.8,
+        "latencyMs": 347,
+        "clamped": false,
+        "cost": 0.00007245,
+        "inputTokens": 1725
+      },
+      "agentic": {
+        "decision": "drop",
+        "reason": "The change preserves the existing `config[key] || envVar || defaults[key]` behavior for falsy values, so it does not introduce or demonstrate a new defect involving explicit `''`, `0`, or `false` configurations.",
+        "latencyMs": 3071,
+        "cost": 0.00050365,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.014939200000000001,
+        "reasons": [
+          "The new `if (config[key])` check treats falsy but explicitly-set values like 0, '', or false as absent, causing them to be overridden by env vars or defaults, which is a behavior change introduced in this diff.",
+          "The truthy check `if (config[key])` fails for legitimate falsy config values like 0 or false, causing env/defaults to override explicit config, which this diff introduced."
+        ]
+      }
+    },
+    {
+      "taskId": "node-postgres__3547",
+      "difficulty": "Type1_Direct",
+      "trial": 0,
+      "index": 1,
+      "file": "packages/pg/lib/connection-parameters.js",
+      "line": 8,
+      "severity": "warn",
+      "confidence": "medium",
+      "side": "RIGHT",
+      "body": "issue: Avoid environment access for omitted parameters\n\nThe new guard only avoids `process.env` for truthy configured keys; a normal configuration that omits fields such as `password`, `binary`, or `options` still reaches the environment reads below. In Deno without environment permission, constructing a client with otherwise explicit connection settings therefore still throws; environment access needs a safe fallback or must be skipped when unavailable.",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.39,
+        "probabilities": {
+          "downgrade": 0.23,
+          "keep": 0.6,
+          "drop": 0.17
+        },
+        "demonstrable": 0.4,
+        "latencyMs": 345,
+        "clamped": false,
+        "cost": 0.000072618,
+        "inputTokens": 1729
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "When an omitted parameter such as password reaches val(), it directly reads process.env without a try/catch, so constructing a client under Deno without environment permission can throw despite the other guarded environment accesses.",
+        "latencyMs": 2688,
+        "cost": 0.0009214000000000001,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.0115186,
+        "reasons": [
+          "The added guard only short-circuits when config[key] is truthy; omitted keys still fall through to unguarded process.env access, which is unchanged and unsafe in restricted environments like Deno.",
+          "The added guard only short-circuits when config[key] is truthy, so omitted config fields still hit process.env reads with no try/catch, unlike defaults.js and index.js which were wrapped in this same diff."
+        ]
+      }
+    },
+    {
+      "taskId": "node-postgres__3547",
+      "difficulty": "Type1_Direct",
+      "trial": 1,
+      "index": 0,
+      "file": "packages/pg/lib/connection-parameters.js",
+      "line": 10,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: `config[key]` does not preserve falsy configured values\n\nThe truthiness check skips valid configured values such as `false`, `0`, and `''`, so an environment variable or default can override them. For example, `{ binary: false }` with `PGBINARY=true` resolves to `true`; check for property presence or `undefined` instead of truthiness.",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.71,
+        "probabilities": {
+          "drop": 0.08,
+          "keep": 0.81,
+          "downgrade": 0.11
+        },
+        "demonstrable": 0.73,
+        "latencyMs": 838,
+        "clamped": false,
+        "cost": 0.000072618,
+        "inputTokens": 1729
+      },
+      "agentic": {
+        "decision": "drop",
+        "reason": "The truthiness behavior for falsy configuration values is unchanged from the prior `config[key] || envVar || defaults[key]` implementation, so this diff does not introduce the alleged defect.",
+        "latencyMs": 2736,
+        "cost": 0.000628525,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": true,
+        "cost": 0.006374600000000001,
+        "reasons": [
+          "The truthiness check `if (config[key])` skips falsy but valid values like false/0/'', letting env vars or defaults override them; this same falsy-check behavior existed in the original `config[key] || envVar || defaults[key]` expression before the diff.",
+          "Both before and after the diff, config[key] is checked with truthiness (`if (config[key])` / `config[key] ||`), so falsy configured values like false, 0, or '' are overridden by env vars or defaults; this behavior predates the diff."
+        ]
+      }
+    },
+    {
+      "taskId": "node-postgres__3547",
+      "difficulty": "Type1_Direct",
+      "trial": 1,
+      "index": 1,
+      "file": "packages/pg/lib/connection-parameters.js",
+      "line": 14,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Configured Deno connections still access environment variables unsafely\n\nWhen a config key is absent, this direct `process.env` access still throws in Deno without `--allow-env`; for example, `new Client({ user: 'alice' })` proceeds to resolve `database` and reads `PGDATABASE`. Guard the environment lookup and return the configured value or default without requiring permission.",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.41,
+        "probabilities": {
+          "drop": 0.23,
+          "keep": 0.6,
+          "downgrade": 0.17
+        },
+        "demonstrable": 0.52,
+        "latencyMs": 341,
+        "clamped": false,
+        "cost": 0.000072702,
+        "inputTokens": 1731
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "When a connection config omits a key such as database, val() directly reads process.env and can throw a Deno permission error, so configured connections still fail without environment access.",
+        "latencyMs": 2565,
+        "cost": 0.0005397749999999999,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": true,
+        "cost": 0.0158497,
+        "reasons": [
+          "The diff added try/catch guards for env access in defaults.js and index.js but left the process.env reads in val() in connection-parameters.js unguarded, so any config lacking a given key still throws in restricted Deno environments.",
+          "The diff only special-cased user lookup in defaults.js/index.js but left val()'s process.env accesses in connection-parameters.js unguarded, so any config missing a key (e.g. database) still throws in Deno without env permission; this issue predates the diff and remains unfixed."
+        ]
+      }
+    },
+    {
+      "taskId": "node-postgres__3547",
+      "difficulty": "Type1_Direct",
+      "trial": 2,
+      "index": 0,
+      "file": "packages/pg/lib/defaults.js",
+      "line": 4,
+      "severity": "critical",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue (blocking): Set the Deno-safe default user to postgres\n\nWhen `process.env` access throws, this `catch` leaves `user` undefined. A default `Client` then calls `val('user', {})`, which proceeds to the unguarded `process.env` lookup in `connection-parameters.js` and throws again in Deno without `--allow-env`. Replace the environment-derived value with a literal `user: 'postgres'` fallback, while retaining the Node environment behavior only where safe.",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.15,
+        "probabilities": {
+          "downgrade": 0.3,
+          "keep": 0.43,
+          "drop": 0.27
+        },
+        "demonstrable": 0.44,
+        "latencyMs": 347,
+        "clamped": false,
+        "cost": 0.000073542,
+        "inputTokens": 1751
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "In Deno without environment permission, the caught access leaves defaults.user undefined and val('user', {}) subsequently performs an uncaught process.env lookup, making ordinary client initialization fail at the stated critical path.",
+        "latencyMs": 2474,
+        "cost": 0.000904525,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.0173569,
+        "reasons": [
+          "The diff's try/catch in defaults.js only prevents the first process.env access from throwing, but val() in connection-parameters.js still performs an unguarded process.env['PGUSER'] lookup when config.user is falsy, so the same Deno permission error would recur.",
+          "The defaults.js try/catch only protects the default user field, but connection-parameters.js's val() function still performs unguarded process.env lookups whenever config[key] is falsy, so the same Deno permission error can still occur."
+        ]
+      }
+    },
+    {
+      "taskId": "node-postgres__3547",
+      "difficulty": "Type1_Direct",
+      "trial": 3,
+      "index": 0,
+      "file": "packages/pg/lib/index.js",
+      "line": 41,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Empty force-native values no longer force native\n\nThe previous presence check enabled the native client whenever `NODE_PG_FORCE_NATIVE` was defined, including when it was set to an empty string. Coercing the value with `!!` changes that behavior and silently selects the JavaScript client for `NODE_PG_FORCE_NATIVE=''`; preserve the presence-based check or explicitly document the changed contract.",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.58,
+        "probabilities": {
+          "drop": 0.1,
+          "downgrade": 0.18,
+          "keep": 0.72
+        },
+        "demonstrable": 0.85,
+        "latencyMs": 244,
+        "clamped": false,
+        "cost": 0.000072408,
+        "inputTokens": 1724
+      },
+      "agentic": {
+        "decision": "drop",
+        "reason": "An empty environment variable is conventionally false for a force flag, and the diff provides no contract requiring NODE_PG_FORCE_NATIVE='' to select the native client, so the behavior change is not a demonstrable defect.",
+        "latencyMs": 1149,
+        "cost": 0.000327275,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.0054246,
+        "reasons": [
+          "The diff replaced a presence check (typeof !== 'undefined') with a truthiness check (!!value), which changes behavior for empty-string env values.",
+          "The diff changed the check from a presence test (typeof !== 'undefined') to boolean coercion (!!), which changes behavior for empty-string env values."
+        ]
+      }
+    },
+    {
+      "taskId": "node-postgres__3547",
+      "difficulty": "Type1_Direct",
+      "trial": 3,
+      "index": 1,
+      "file": "packages/pg/lib/connection-parameters.js",
+      "line": 8,
+      "severity": "warn",
+      "confidence": "medium",
+      "side": "RIGHT",
+      "body": "issue: Falsy config values do not take precedence\n\nThe guard only recognizes truthy configuration values, so an explicit value such as `{ binary: false }` or `{ client_encoding: '' }` still falls through to environment lookup and can be replaced by `PGBINARY` or `PGCLIENT_ENCODING`. Check for the property being defined rather than truthiness when applying config-first precedence.",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.88,
+        "probabilities": {
+          "downgrade": 0.04,
+          "drop": 0.04,
+          "keep": 0.92
+        },
+        "demonstrable": 0.62,
+        "latencyMs": 245,
+        "clamped": false,
+        "cost": 0.000072576,
+        "inputTokens": 1728
+      },
+      "agentic": {
+        "decision": "drop",
+        "reason": "Falsy configuration values already fell through to environment variables before this change, so the diff introduces no new defect or demonstrated contract regression.",
+        "latencyMs": 2988,
+        "cost": 0.0005019,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.005619600000000001,
+        "reasons": [
+          "The new guard `if (config[key])` uses truthiness, so explicit falsy config values like false or '' are ignored and env vars/defaults take precedence, which this diff introduced.",
+          "The added guard `if (config[key])` uses truthiness, so falsy but explicitly set config values (false, '', 0) are not returned and instead fall through to env/defaults lookup, matching the finding's claim."
+        ]
+      }
+    },
+    {
+      "taskId": "stylelint__9062",
+      "difficulty": "Type2_Contextual",
+      "trial": 2,
+      "index": 0,
+      "file": "lib/rules/declaration-property-value-no-unknown/index.mjs",
+      "line": 147,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Preserve configured syntax in utility rule execution\n\n`checkAgainstRule` defaults its context to `{ lexer }`, the unconfigured css-tree lexer, while the previous implementation always merged `result.stylelint.config.languageOptions.syntax` before matching. Therefore, calling this rule through `checkAgainstRule` with custom `languageOptions.syntax` silently ignores those definitions when there are no secondary options or in-file `@property` definitions; custom properties are treated as unknown and invalid values can be missed. Pass the configured lexer through that utility context or retain a configuration-aware fallback here.",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "drop",
+        "confidence": 0.06,
+        "probabilities": {
+          "keep": 0.35,
+          "downgrade": 0.28,
+          "drop": 0.37
+        },
+        "demonstrable": 0.28,
+        "latencyMs": 285,
+        "clamped": false,
+        "cost": 0.000107352,
+        "inputTokens": 2556
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "With checkAgainstRule's default context, a configured languageOptions.syntax is not included when no in-file or secondary syntax exists, so declarations relying on those configured property/type definitions are validated against the unconfigured lexer and can be misclassified.",
+        "latencyMs": 12560,
+        "cost": 0.006136900000000001,
+        "toolCalls": 7
+      },
+      "truth": {
+        "label": null,
+        "agreed": false,
+        "preExisting": false,
+        "cost": 0.039530600000000006,
+        "reasons": []
+      }
+    },
+    {
+      "taskId": "vitest__9152",
+      "difficulty": "Type2_Contextual",
+      "trial": 1,
+      "index": 0,
+      "file": "packages/vitest/src/node/test-run.ts",
+      "line": 321,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Invalid source maps crash error stack processing\n\n`convertSourceMap.fromSource(code)` and `fromMapFileSource(...).toObject()` parse source-map JSON without a guard, so an external module containing a malformed inline map or malformed map file throws from `syncUpdateStacks` instead of preserving the original stack trace. Catch parsing failures and return `undefined` (or otherwise fall back to the unmapped stack).",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.37,
+        "probabilities": {
+          "drop": 0.11,
+          "keep": 0.58,
+          "downgrade": 0.31
+        },
+        "demonstrable": 0.32,
+        "latencyMs": 303,
+        "clamped": false,
+        "cost": 0.000160566,
+        "inputTokens": 3823
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "A reachable external file with a malformed inline or referenced source-map JSON causes the unguarded convert-source-map parsing call to throw during stack processing instead of returning an unmapped stack.",
+        "latencyMs": 3300,
+        "cost": 0.0028625,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.37288780000000005,
+        "reasons": [
+          "convert-source-map's Converter constructor performs an unguarded JSON.parse when decoding inline or map-file source map comments, and the new extractSourcemapFromFile/getSourceMap code added in this diff calls it with no try/catch, so a malformed source map for an external module will throw and crash stack trace processing instead of falling back gracefully.",
+          "The new getSourceMap callback in test-run.ts calls convert-source-map without any error handling, and syncUpdateStacks/updated has no catch around this synchronous call, so a malformed source map in an external file would throw uncaught, matching the finding's claim; this code path did not exist before the diff."
+        ]
+      }
+    },
+    {
+      "taskId": "vitest__9152",
+      "difficulty": "Type2_Contextual",
+      "trial": 3,
+      "index": 0,
+      "file": "packages/vitest/src/node/test-run.ts",
+      "line": 327,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: External maps ignore the map file's directory\n\n`extractSourcemapFromFile` returns only the parsed map, so `DecodedMap` resolves `sources` relative to the generated JavaScript file even when `sourceMappingURL` points to a map in another directory. For example, a map at `maps/nested/bundle.js.map` with `../../src/index.ts` will resolve incorrectly from `dist/bundle.js`; retain the resolved map-file path and use it as the source-map base URL.",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.32,
+        "probabilities": {
+          "keep": 0.55,
+          "drop": 0.26,
+          "downgrade": 0.19
+        },
+        "demonstrable": 0.52,
+        "latencyMs": 328,
+        "clamped": false,
+        "cost": 0.000161532,
+        "inputTokens": 3846
+      },
+      "agentic": {
+        "decision": "drop",
+        "reason": "The finding is not demonstrable because the external-map loader intentionally resolves map references relative to the original file and no visible contract requires preserving the map-file directory, while the reported example depends on unspecified source-map path semantics.",
+        "latencyMs": 3028,
+        "cost": 0.0006467250000000001,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.08614890000000003,
+        "reasons": [
+          "DecodedMap resolves sources using `from` (the stack's file, i.e. the JS file), and extractSourcemapFromFile only returns the parsed map object without preserving the resolved map-file path, so when map and JS files are in different directories the relative source resolution is incorrect.",
+          "extractSourcemapFromFile only returns the parsed map object (map.toObject()) without preserving the actual resolved path of the external .map file, and DecodedMap resolves `sources` relative to `from` which is set to the original generated file path (stack.file), not the external map file's own directory, so sources referenced from a differently-located map file resolve incorrectly."
+        ]
+      }
+    },
+    {
+      "taskId": "vitest__9152",
+      "difficulty": "Type2_Contextual",
+      "trial": 3,
+      "index": 1,
+      "file": "packages/utils/src/source-map.ts",
+      "line": 366,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Source roots are omitted when resolving mapped sources\n\nA valid map with `sourceRoot: \"../src\"` and `sources: [\"index.ts\"]` is resolved as if the source were directly relative to the generated file, because only `sources` is passed to `resolve`. This produces the wrong file in the rendered stack trace; combine `sourceRoot` with each source before resolving.",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "drop",
+        "confidence": 0.18,
+        "probabilities": {
+          "drop": 0.46,
+          "keep": 0.35,
+          "downgrade": 0.19
+        },
+        "demonstrable": 0.36,
+        "latencyMs": 279,
+        "clamped": false,
+        "cost": 0.00016002,
+        "inputTokens": 3810
+      },
+      "agentic": {
+        "decision": "drop",
+        "reason": "The finding is contradicted by the diff because the new resolution explicitly uses the generated file's parent directory, while no evidence shows that sourceRoot is expected to be applied here or that this code owns sourceRoot handling.",
+        "latencyMs": 2302,
+        "cost": 0.000563225,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.018220800000000002,
+        "reasons": [
+          "The code only uses sources array with resolve(from,'..',s), never referencing map.sourceRoot, so any sourceRoot is ignored both before and after this diff.",
+          "The constructor destructures map but never reads map.sourceRoot, so any sourceRoot value is dropped when computing resolvedSources, exactly as the finding describes."
+        ]
+      }
+    },
+    {
+      "taskId": "stylelint__9074",
+      "difficulty": "Type1_Direct",
+      "trial": 0,
+      "index": 0,
+      "file": "lib/utils/regexes.mjs",
+      "line": 36,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Match multiline attribute operators\n\n`attributeSelectorWithOperator` uses `.*`, which does not match newline characters. A valid selector such as `a[foo\\n=bar]` was previously passed to the three attribute-operator rules because the old checks searched independently for `[` and `=`, but it is now filtered out and never validated. Use a newline-safe pattern that preserves the cheap filter, such as `/\\[[^]]*=/`.",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.14,
+        "probabilities": {
+          "keep": 0.42,
+          "downgrade": 0.33,
+          "drop": 0.25
+        },
+        "demonstrable": 0.41,
+        "latencyMs": 295,
+        "clamped": true,
+        "cost": 0.000367164,
+        "inputTokens": 8742
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "A valid selector such as `a[foo\\n=bar]` contains `[` and `=` but fails `attributeSelectorWithOperator` because `.*` excludes newlines, so the affected rules skip validation that the prior independent checks performed.",
+        "latencyMs": 2731,
+        "cost": 0.0010465,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.08664179999999999,
+        "reasons": [
+          "The new mayIncludeRegexes.attributeSelectorWithOperator = /\\[.*=/ lacks the 's' flag so '.' cannot match newlines, causing multiline attribute selectors to bypass the three rules that previously used simple substring checks.",
+          "The regex /\\[.*=/ lacks the 's' flag so '.' does not match newlines, causing valid multiline attribute selectors to be skipped by walkRules, whereas the prior independent string includes checks did not have this limitation."
+        ]
+      }
+    },
+    {
+      "taskId": "stylelint__9074",
+      "difficulty": "Type1_Direct",
+      "trial": 2,
+      "index": 0,
+      "file": "lib/utils/regexes.mjs",
+      "line": 38,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Match operators across multiline attribute selectors\n\n`/\\[.*=/` cannot match an `=` separated from `[` by a newline, so valid selectors such as `[data-value\\n=\\\"x\\\"]` are excluded from `walkRules` and skipped by the attribute operator and attribute quotes rules. The previous `includes('[') && includes('=')` checks accepted these selectors; use a character class that spans newlines, such as `/\\[[^\\]]*=/`, or filter only on `[` and retain the parser-based check.",
+      "gold": "FABRICATED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.18,
+        "probabilities": {
+          "downgrade": 0.26,
+          "keep": 0.45,
+          "drop": 0.29
+        },
+        "demonstrable": 0.53,
+        "latencyMs": 357,
+        "clamped": true,
+        "cost": 0.000367584,
+        "inputTokens": 8752
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "The regex’s dot does not match newlines, so a valid multiline attribute selector with `[` before and `=` after a newline is excluded before parser-based validation, causing the affected rules to miss it.",
+        "latencyMs": 3679,
+        "cost": 0.001036125,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.0280643,
+        "reasons": [
+          "The regex /\\[.*=/ uses '.' which does not match newline characters, so multiline attribute selectors are excluded from the walkRules callback, unlike the previous string-based checks.",
+          "JS regex `.` does not match newline characters by default, so `/\\[.*=/` fails on multiline attribute selectors that the previous string-based checks would have caught, and this filter regex was introduced in this diff for selector-attribute-quotes/operator-allowed/disallowed-list rules."
+        ]
+      }
+    },
+    {
+      "taskId": "stylelint__9074",
+      "difficulty": "Type1_Direct",
+      "trial": 3,
+      "index": 0,
+      "file": "lib/utils/regexes.mjs",
+      "line": 31,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Match attribute operators across line breaks\n\n`/\\[.*=/` does not match a newline, so valid multiline selectors such as `a[\\n  attr=value\\n]` are filtered out before `selector-attribute-operator-allowed-list`, `selector-attribute-operator-disallowed-list`, and `selector-attribute-quotes` can parse them. The previous checks used separate `includes` calls and did not have this false negative; use a newline-inclusive pattern such as `/\\[[\\s\\S]*=/`.",
+      "gold": "FABRICATED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.18,
+        "probabilities": {
+          "downgrade": 0.23,
+          "drop": 0.31,
+          "keep": 0.46
+        },
+        "demonstrable": 0.5,
+        "latencyMs": 330,
+        "clamped": true,
+        "cost": 0.000367752,
+        "inputTokens": 8756
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "The new prefilter `/\\[.*=/` cannot span newlines, so valid multiline attribute selectors containing an operator are skipped whereas the previous independent `includes` checks would process them.",
+        "latencyMs": 2312,
+        "cost": 0.00094725,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.06416010000000001,
+        "reasons": [
+          "The regex mayIncludeRegexes.attributeSelectorWithOperator is exactly `/\\[.*=/` as claimed, and `.` doesn't match newlines by default, so this is a genuine false-negative introduced by replacing includes-based checks with this regex filter.",
+          "The regex /\\[.*=/ uses `.` without the `s` flag, which does not match newlines, so multiline attribute selectors are excluded by this new filter introduced in the diff, whereas the previous includes()-based checks worked on the full string regardless of newlines."
+        ]
+      }
+    },
+    {
+      "taskId": "zod__5578",
+      "difficulty": "Type2_Contextual",
+      "trial": 0,
+      "index": 0,
+      "file": "packages/zod/src/v4/core/to-json-schema.ts",
+      "line": 415,
+      "severity": "critical",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue (blocking): Guard custom references without extracted definitions\n\nA wrapper such as `z.optional(schema)` where `schema._zod.toJSONSchema()` returns `{ $ref: \"...\" }` enters this branch with `refSeen.schema.$ref` set but `refSeen.def` undefined, because custom override schemas are not extracted by `extractDefs`. The `key in refSeen.def!` expression then throws a `TypeError` during JSON Schema generation. Check that `refSeen.def` exists before iterating, or use the referenced schema without assuming it was extracted.",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.23,
+        "probabilities": {
+          "drop": 0.16,
+          "keep": 0.48,
+          "downgrade": 0.36
+        },
+        "demonstrable": 0.43,
+        "latencyMs": 289,
+        "clamped": false,
+        "cost": 0.000173376,
+        "inputTokens": 4128
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "The branch explicitly enters when refSeen.schema.$ref exists, but refSeen.def can be absent for an already-referenced custom schema, so the non-null assertion does not prevent `key in refSeen.def` from throwing during JSON Schema generation.",
+        "latencyMs": 12948,
+        "cost": 0.004857500000000001,
+        "toolCalls": 5
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 1.7511625000000004,
+        "reasons": [
+          "The new de-duplication block added by this diff assumes any ref with `$ref` set was extracted via `extractToDef` (which always also sets `seen.def`), but a custom `toJSONSchema()` override can set `$ref` directly without going through extraction, leaving `def` undefined and causing the `in` operator to throw — this is a new code path introduced by the diff, not present before.",
+          "The newly added block in flattenRef assumes any schema whose json has `$ref` was extracted via extractToDef (which sets `seen.def`), but schemas that already carry a manual `$ref` from a custom `_zod.toJSONSchema` override skip extraction and never get `def` set, so accessing `refSeen.def!` with the `in` operator throws when there are additional keys to check."
+        ]
+      }
+    },
+    {
+      "taskId": "zod__5578",
+      "difficulty": "Type2_Contextual",
+      "trial": 1,
+      "index": 0,
+      "file": "packages/zod/src/v4/core/to-json-schema.ts",
+      "line": 431,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Propagated references violate older draft rules\n\nFor `draft-07`, `draft-04`, and `openapi-3.0`, this unconditionally adds the extracted parent `$ref` to the child schema even when the child retains properties such as `description`. The surrounding code explicitly handles these targets by using `allOf` because they cannot combine `$ref` with sibling properties, so a schema such as `z.string().readonly().meta({ id: \"x\" }).describe(\"foo\")` emits a `$ref` alongside `description` and loses the intended metadata semantics. Apply the same target-specific `allOf` handling here, or avoid propagating the parent `$ref` directly for these targets.",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.24,
+        "probabilities": {
+          "downgrade": 0.21,
+          "drop": 0.3,
+          "keep": 0.49
+        },
+        "demonstrable": 0.57,
+        "latencyMs": 368,
+        "clamped": false,
+        "cost": 0.000174594,
+        "inputTokens": 4157
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "For draft-07, draft-04, and OpenAPI 3.0, the parent-reference propagation unconditionally adds a $ref beside child-only properties such as description, violating the older-draft no-sibling rule despite the existing allOf handling elsewhere.",
+        "latencyMs": 2538,
+        "cost": 0.00072125,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.0448775,
+        "reasons": [
+          "The new parent-$ref propagation block at lines 426-441 sets schema.$ref directly without the target-specific allOf branching used elsewhere in the same function, so description/other child properties survive alongside $ref for draft-07/draft-04/openapi-3.0 targets.",
+          "The new parent-$ref propagation block sets schema.$ref unconditionally without the target-specific allOf handling used in the sibling ref-flattening block just above it."
+        ]
+      }
+    },
+    {
+      "taskId": "zod__5578",
+      "difficulty": "Type2_Contextual",
+      "trial": 2,
+      "index": 0,
+      "file": "packages/zod/src/v4/core/to-json-schema.ts",
+      "line": 431,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Preserve older-target `$ref` compatibility during parent propagation\n\nFor `draft-04`, `draft-07`, and `openapi-3.0`, this assigns a `$ref` directly while leaving wrapper properties such as `description` on the same schema object. Those targets do not support meaningful sibling keywords alongside `$ref`, so metadata on cases such as `z.string().readonly().meta({ id: \"job\" }).describe(\"...\")` is ignored or produces an invalid schema. Apply the same `allOf` handling used above when the target cannot combine `$ref` with sibling properties.",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.49,
+        "probabilities": {
+          "drop": 0.1,
+          "keep": 0.67,
+          "downgrade": 0.23
+        },
+        "demonstrable": 0.57,
+        "latencyMs": 281,
+        "clamped": false,
+        "cost": 0.000173418,
+        "inputTokens": 4129
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "For older targets, parent propagation directly adds a $ref while retaining wrapper metadata such as description, without converting the reference to allOf, producing unsupported sibling keywords alongside $ref.",
+        "latencyMs": 3362,
+        "cost": 0.0008712500000000001,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.030523,
+        "reasons": [
+          "The new parent-propagation block sets schema.$ref directly and only dedupes matching properties, without the allOf fallback used in the ref-merge block above for draft-04/07/openapi-3.0, so sibling keywords like description remain alongside $ref for those targets.",
+          "The parent-propagation branch added in this diff assigns schema.$ref directly without the allOf fallback used elsewhere for older drafts, so sibling keywords like description remain alongside $ref for those targets."
+        ]
+      }
+    },
+    {
+      "taskId": "zod__5578",
+      "difficulty": "Type2_Contextual",
+      "trial": 3,
+      "index": 0,
+      "file": "packages/zod/src/v4/core/to-json-schema.ts",
+      "line": 431,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Preserve old-draft `$ref` handling during parent propagation\n\nFor draft-04, draft-07, and OpenAPI 3.0, the preceding branch deliberately stores an extracted parent reference in `allOf` because `$ref` cannot be combined with sibling properties. This unconditional assignment adds the same `$ref` back alongside `allOf` and child constraints; in these targets the `$ref` sibling semantics cause properties such as `minLength` to be ignored. Apply the same target-specific `allOf` handling here instead of assigning `$ref` directly.",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.35,
+        "probabilities": {
+          "downgrade": 0.2,
+          "drop": 0.23,
+          "keep": 0.57
+        },
+        "demonstrable": 0.53,
+        "latencyMs": 412,
+        "clamped": false,
+        "cost": 0.000173208,
+        "inputTokens": 4124
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "For draft-04, draft-07, and OpenAPI 3.0, parent propagation unconditionally adds a sibling `$ref` even when the preceding merge placed the extracted reference in `allOf`, causing the draft-specific `allOf` constraints to be ignored under sibling-incompatible `$ref` semantics.",
+        "latencyMs": 4987,
+        "cost": 0.001253875,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.06643970000000002,
+        "reasons": [
+          "The newly added parent-propagation block at line ~431 assigns schema.$ref directly without the target-specific allOf handling used at line 390 for draft-07/draft-04/openapi-3.0, so sibling properties can be ignored by those older-draft consumers.",
+          "The new parent-propagation branch introduced in this diff (schema.$ref = parentSeen.schema.$ref) unconditionally sets $ref alongside remaining child properties without the target-specific allOf handling used elsewhere in the same function for draft-04/draft-07/openapi-3.0."
+        ]
+      }
+    },
+    {
+      "taskId": "vega__4219",
+      "difficulty": "Type1_Direct",
+      "trial": 0,
+      "index": 0,
+      "file": "packages/vega-util/src/transform.ts",
+      "line": 46,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Preserve readonly domains in public signatures\n\nThe exported transform functions now accept `number[]`, while the existing public declarations accept `readonly number[]` and none of these helpers mutates the input. TypeScript callers passing a readonly tuple or array will therefore fail to compile after the migration, despite being valid under the previous API. Change the domain parameters and internal guard to accept `readonly number[]`.",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.41,
+        "probabilities": {
+          "keep": 0.6,
+          "drop": 0.22,
+          "downgrade": 0.18
+        },
+        "demonstrable": 0.63,
+        "latencyMs": 342,
+        "clamped": false,
+        "cost": 0.000121338,
+        "inputTokens": 2889
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "The new exported signatures require mutable number[] despite not mutating domains, so readonly arrays or tuples that were accepted by the prior readonly-compatible API now fail TypeScript compilation.",
+        "latencyMs": 3076,
+        "cost": 0.0007802,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.051549300000000006,
+        "reasons": [
+          "index.d.ts still declares panLinear/zoomLinear etc. with readonly number[] parameters, but the new transform.ts implementation types them as number[], so the change introduces a type inconsistency that breaks readonly-array callers.",
+          "The migrated transform.ts functions declare domain as number[] instead of readonly number[], narrowing the accepted input type compared to the previous (and still documented in index.d.ts) readonly number[] signature, breaking callers passing readonly arrays."
+        ]
+      }
+    },
+    {
+      "taskId": "vega__4219",
+      "difficulty": "Type1_Direct",
+      "trial": 1,
+      "index": 0,
+      "file": "packages/vega-util/src/transform.ts",
+      "line": 46,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Preserve readonly domain compatibility\n\nThe exported transform functions now accept `number[]`, so the generated declarations reject callers passing `readonly number[]`, even though the existing public declarations and implementation contract accept readonly domains and these functions never mutate them. Change the domain parameters to `readonly number[]` and update the non-empty type guard to accept readonly arrays.",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.31,
+        "probabilities": {
+          "downgrade": 0.26,
+          "drop": 0.2,
+          "keep": 0.54
+        },
+        "demonstrable": 0.67,
+        "latencyMs": 296,
+        "clamped": false,
+        "cost": 0.000120834,
+        "inputTokens": 2877
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "The existing public declarations accept readonly number[] while the new exported TypeScript signatures require number[], causing a demonstrable compile-time incompatibility for readonly domains that the implementation does not mutate.",
+        "latencyMs": 3932,
+        "cost": 0.00131565,
+        "toolCalls": 2
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.11331180000000002,
+        "reasons": [
+          "The diff changed the parameter types from implicit any (JS) to explicit mutable number[], which is a narrower/incompatible type compared to the existing readonly number[] declarations in index.d.ts, breaking readonly-domain callers.",
+          "The new transform.ts uses `domain: number[]` (and isNonEmpty<T>(arr: T[])) instead of `readonly number[]`, a stricter, incompatible signature versus the package's existing readonly-array convention, introduced by this diff since transform.ts previously was plain untyped JS."
+        ]
+      }
+    },
+    {
+      "taskId": "vega__4219",
+      "difficulty": "Type1_Direct",
+      "trial": 2,
+      "index": 0,
+      "file": "packages/vega-util/src/transform.ts",
+      "line": 46,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Reject readonly domains in generated declarations\n\nThe public transform signatures now use `number[]`, so the generated declarations no longer accept `readonly number[]` values that the existing `index.d.ts` contract accepts. Callers passing a readonly tuple or array will fail TypeScript compilation even though these functions never mutate the domain; use readonly array types for the public and internal domain parameters.",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.19,
+        "probabilities": {
+          "keep": 0.46,
+          "downgrade": 0.22,
+          "drop": 0.32
+        },
+        "demonstrable": 0.44,
+        "latencyMs": 421,
+        "clamped": false,
+        "cost": 0.000121212,
+        "inputTokens": 2886
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "The new public signatures require mutable number[], while the existing index.d.ts contract accepts readonly number[], so readonly callers demonstrably lose TypeScript compatibility despite no mutation.",
+        "latencyMs": 2955,
+        "cost": 0.0020656249999999998,
+        "toolCalls": 2
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.11874030000000002,
+        "reasons": [
+          "The diff changes the parameter type from readonly number[] (implied by index.d.ts contract) to number[] in transform.ts, which will narrow the generated declaration and break callers passing readonly arrays.",
+          "transform.ts declares domain: number[] instead of readonly number[], which is what actually gets emitted to build/index.d.ts (the package's published types entry point), narrowing the parameter type compared to the previous informal contract and rejecting readonly arrays that would otherwise be valid."
+        ]
+      }
+    },
+    {
+      "taskId": "vega__4219",
+      "difficulty": "Type1_Direct",
+      "trial": 3,
+      "index": 0,
+      "file": "packages/vega-util/src/transform.ts",
+      "line": 46,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Preserve readonly domains in exported transform signatures\n\nThe migrated functions accept `number[]`, so the generated package declarations reject `readonly number[]` arguments that were accepted by the existing public `index.d.ts` contract. Calls such as `panLinear(scale.domain(), delta)` fail when `scale.domain()` is readonly, causing a TypeScript API regression across all pan and zoom helpers. Change the internal and exported domain types to accept readonly arrays, for example `readonly number[]`, while retaining the non-empty narrowing needed after validation.",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.24,
+        "probabilities": {
+          "downgrade": 0.2,
+          "keep": 0.49,
+          "drop": 0.31
+        },
+        "demonstrable": 0.48,
+        "latencyMs": 300,
+        "clamped": false,
+        "cost": 0.000122472,
+        "inputTokens": 2916
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "The exported functions now require mutable number[] despite the existing public declarations accepting readonly number[], so readonly domains become a demonstrable TypeScript compatibility regression.",
+        "latencyMs": 4007,
+        "cost": 0.001395075,
+        "toolCalls": 2
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.05552780000000001,
+        "reasons": [
+          "The new transform.ts declares domain parameters as `number[]` while the pre-existing published declaration (index.d.ts) and idiomatic scale APIs use `readonly number[]`, so this diff narrows the type and can break TypeScript callers passing readonly arrays.",
+          "The new transform.ts uses mutable number[] parameters while the public index.d.ts contract declares readonly number[], causing a type incompatibility for callers passing readonly arrays."
+        ]
+      }
+    },
+    {
+      "taskId": "vitest__9521",
+      "difficulty": "Type1_Direct",
+      "trial": 0,
+      "index": 0,
+      "file": "packages/vitest/src/node/cli/cli-config.ts",
+      "line": 312,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Allow the documented bare boolean coverage option\n\n`argument: '<commit/branch>'` makes the CLI require a following value, so `--coverage.changed` cannot express the documented `true` form and will be parsed as a missing-argument error. Use an optional argument or the same boolean-compatible declaration as `test.changed`, while retaining the transform for explicit refs and boolean values.",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.33,
+        "probabilities": {
+          "drop": 0.26,
+          "keep": 0.56,
+          "downgrade": 0.18
+        },
+        "demonstrable": 0.55,
+        "latencyMs": 305,
+        "clamped": false,
+        "cost": 0.000230958,
+        "inputTokens": 5499
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "The CLI declares coverage.changed with a required <commit/branch> argument, so the documented bare --coverage.changed boolean form is rejected before its transform can handle true.",
+        "latencyMs": 2380,
+        "cost": 0.005982350000000001,
+        "toolCalls": 2
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.5383100000000001,
+        "reasons": [
+          "The new `changed` CLI option uses angle-bracket (`<commit/branch>`) syntax, which cac treats as a required argument, so invoking `--coverage.changed` without a value errors out rather than yielding the documented boolean `true`.",
+          "The diff declares coverage.changed with a required `<commit/branch>` argument instead of an optional one like test.changed's `[since]`, so bare `--coverage.changed` (intended to mean boolean true per docs) will fail to parse correctly."
+        ]
+      }
+    },
+    {
+      "taskId": "vitest__9521",
+      "difficulty": "Type1_Direct",
+      "trial": 1,
+      "index": 0,
+      "file": "packages/vitest/src/node/coverage.ts",
+      "line": 338,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Respect explicit `coverage.changed: false`\n\nWhen `test.changed` is enabled and `coverage.changed` is explicitly set to `false`, this branch still assigns `ctx.config.related` to `changedFiles`, so coverage is filtered despite the documented override and the resolved configuration value. Only inherit `related` when coverage filtering was not explicitly disabled, or base this fallback on the resolved coverage option.",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.24,
+        "probabilities": {
+          "keep": 0.5,
+          "drop": 0.4,
+          "downgrade": 0.1
+        },
+        "demonstrable": 0.6,
+        "latencyMs": 309,
+        "clamped": false,
+        "cost": 0.000230958,
+        "inputTokens": 5499
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "When `test.changed` is enabled and `coverage.changed` is explicitly false, `options.changed` is falsy but `ctx.config.changed` remains true, causing `changedFiles` to use `ctx.config.related` and incorrectly filter coverage.",
+        "latencyMs": 2321,
+        "cost": 0.000733675,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.3190322,
+        "reasons": [
+          "The onTestRunStart else-if branch checks ctx.config.changed unconditionally without checking whether coverage.changed was explicitly disabled, so an explicit `coverage.changed: false` does not prevent falling back to test.changed's related files.",
+          "The else-if branch checks ctx.config.changed instead of the resolved this.options.changed, so an explicit coverage.changed:false is ignored when test.changed is enabled."
+        ]
+      }
+    },
+    {
+      "taskId": "vitest__9521",
+      "difficulty": "Type1_Direct",
+      "trial": 1,
+      "index": 1,
+      "file": "packages/vitest/src/node/coverage.ts",
+      "line": 336,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Fail when changed coverage cannot resolve Git state\n\n`findChangedFiles` returns `null` when the project is not inside a Git repository, and converting that to `undefined` disables the filter so the run reports coverage for all files even though `coverage.changed` was requested. Propagate the Git-repository error or otherwise fail the run instead of silently producing unfiltered coverage.",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "downgrade",
+        "confidence": 0.17,
+        "probabilities": {
+          "downgrade": 0.45,
+          "keep": 0.39,
+          "drop": 0.16
+        },
+        "demonstrable": 0.45,
+        "latencyMs": 300,
+        "clamped": false,
+        "cost": 0.000230916,
+        "inputTokens": 5498
+      },
+      "agentic": {
+        "decision": "drop",
+        "reason": "The finding assumes that a missing Git repository must be an error, but the diff provides no contract requiring failure and explicitly treats a null result as no changed-file filter, so an unfiltered run is not a demonstrable defect.",
+        "latencyMs": 1723,
+        "cost": 0.0005548,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.0572003,
+        "reasons": [
+          "onTestRunStart directly assigns `changedFiles ?? undefined` from findChangedFiles which returns null when not in a git repo, disabling the filter without any error, matching the finding's claim.",
+          "findChangedFiles returns null when git root cannot be resolved, and the new onTestRunStart code converts null to undefined via `changedFiles ?? undefined`, silently disabling the changed-file filter instead of failing like the analogous test.changed path in specifications.ts which throws GitNotFoundError."
+        ]
+      }
+    },
+    {
+      "taskId": "vitest__9521",
+      "difficulty": "Type1_Direct",
+      "trial": 2,
+      "index": 0,
+      "file": "packages/vitest/src/node/coverage.ts",
+      "line": 340,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Explicit false still inherits test.changed filtering\n\nWhen `coverage.changed` is explicitly `false` and `test.changed` is enabled, `this.options.changed` is false but `this.ctx.config.changed` is true, so this branch assigns `config.related` and filters coverage anyway. This violates the documented override behavior and can produce incomplete reports; only fall back to `ctx.config.changed` when the coverage option was actually unspecified, and clear `changedFiles` when filtering is disabled.",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.59,
+        "probabilities": {
+          "keep": 0.73,
+          "downgrade": 0.07,
+          "drop": 0.2
+        },
+        "demonstrable": 0.69,
+        "latencyMs": 298,
+        "clamped": false,
+        "cost": 0.000231672,
+        "inputTokens": 5516
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "When coverage.changed is explicitly false while test.changed is true, resolveConfig preserves false but onTestRunStart still assigns ctx.config.related, causing coverage to be filtered contrary to the documented override behavior.",
+        "latencyMs": 2464,
+        "cost": 0.000738925,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.30320890000000006,
+        "reasons": [
+          "onTestRunStart's else-if checks ctx.config.changed directly without verifying coverage.changed was left unset, so an explicit false override is ignored and filtering still applies.",
+          "The code in coverage.ts's onTestRunStart only checks truthiness of this.options.changed, so an explicit false is indistinguishable from unset, and the else branch still applies config.changed filtering as the finding describes."
+        ]
+      }
+    },
+    {
+      "taskId": "vitest__9521",
+      "difficulty": "Type1_Direct",
+      "trial": 3,
+      "index": 0,
+      "file": "packages/vitest/src/node/coverage.ts",
+      "line": 341,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Explicit false does not disable inherited coverage filtering\n\nWhen `test.changed` is set and `coverage.changed` is explicitly `false`, the first branch is skipped and this fallback assigns `ctx.config.related` to `changedFiles`. Coverage is therefore still limited to changed files, contradicting the documented and tested override behavior. Only fall back to `ctx.config.related` when `coverage.changed` is unset; an explicit `false` must clear or bypass the filter.",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.37,
+        "probabilities": {
+          "downgrade": 0.05,
+          "keep": 0.58,
+          "drop": 0.37
+        },
+        "demonstrable": 0.69,
+        "latencyMs": 300,
+        "clamped": false,
+        "cost": 0.000231588,
+        "inputTokens": 5514
+      },
+      "agentic": {
+        "decision": "keep",
+        "reason": "When `test.changed` is set and `coverage.changed` is explicitly `false`, the fallback still assigns `ctx.config.related` to `changedFiles`, so coverage remains filtered despite the documented override.",
+        "latencyMs": 2256,
+        "cost": 0.000688425,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.2002005,
+        "reasons": [
+          "The code only checks truthiness of options.changed, so an explicit false is treated as unset and coverage.changed=false does not disable the changed-files filter when test.changed is set.",
+          "Code reading confirms this.options.changed=false skips the git lookup but the else-if fallback still applies this.ctx.config.related when test.changed is set, contradicting the intended override semantics documented and tested in public.test.ts."
+        ]
+      }
+    },
+    {
+      "taskId": "zod__5672",
+      "difficulty": "Type1_Direct",
+      "trial": 0,
+      "index": 0,
+      "file": "packages/zod/src/v4/core/schemas.ts",
+      "line": 483,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Strict validation is bypassed when normalization is enabled\n\nThe `!def.normalize` guard means `z.httpUrl({ normalize: true })` still passes inputs such as `http:example.com` to `new URL()`, which accepts and normalizes them to a valid HTTP URL. Apply the required `://` check for HTTP URLs regardless of the normalization mode.",
+      "gold": "PLAUSIBLE",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.4,
+        "probabilities": {
+          "keep": 0.6,
+          "downgrade": 0.16,
+          "drop": 0.24
+        },
+        "demonstrable": 0.68,
+        "latencyMs": 250,
+        "clamped": false,
+        "cost": 0.000082446,
+        "inputTokens": 1963
+      },
+      "agentic": {
+        "decision": "drop",
+        "reason": "The guard is explicitly intentional for normalized URLs, and the finding provides no contract or test showing that normalize:true must reject inputs that the URL parser can normalize.",
+        "latencyMs": 1979,
+        "cost": 0.0015816250000000001,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.0856538,
+        "reasons": [
+          "The guard `!def.normalize` skips the strict :// check whenever normalize is true, allowing malformed inputs like 'http:example.com' through since new URL() silently normalizes them."
+        ]
+      }
+    },
+    {
+      "taskId": "zod__5672",
+      "difficulty": "Type1_Direct",
+      "trial": 1,
+      "index": 0,
+      "file": "packages/zod/src/v4/core/schemas.ts",
+      "line": 483,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Enforce strict HTTP syntax for normalized URLs\n\nThe `!def.normalize` condition lets `httpUrl({ normalize: true })` pass malformed inputs such as `http:example.com` and `http:/example.com` to `new URL()`, which normalizes them into accepted HTTP URLs. Apply the `://` check for HTTP protocol-constrained schemas regardless of the normalization setting.",
+      "jev": {
+        "decision": "drop",
+        "confidence": 0.1,
+        "probabilities": {
+          "keep": 0.31,
+          "downgrade": 0.28,
+          "drop": 0.41000000000000003
+        },
+        "demonstrable": 0.58,
+        "latencyMs": 409,
+        "clamped": false,
+        "cost": 0.000082572,
+        "inputTokens": 1966
+      },
+      "agentic": {
+        "decision": "drop",
+        "reason": "The conditional is explicitly documented to enforce strict syntax only when normalization is off, so allowing URL-constructor normalization with normalize:true is intentional and not a demonstrable defect.",
+        "latencyMs": 2550,
+        "cost": 0.00053155,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.38732969999999994,
+        "reasons": [
+          "The diff's guard is explicitly conditioned on `!def.normalize`, so setting `normalize: true` on an http/https-protocol-constrained URL schema bypasses the new `://` syntax check, allowing malformed inputs like `http:example.com` to be silently normalized and accepted by the underlying `new URL()` call, exactly as the finding describes.",
+          "The guard only runs when !def.normalize, so with normalize:true malformed inputs like 'http:example.com' skip the check and get silently normalized/accepted by new URL()."
+        ]
+      }
+    },
+    {
+      "taskId": "zod__5672",
+      "difficulty": "Type1_Direct",
+      "trial": 2,
+      "index": 0,
+      "file": "packages/zod/src/v4/core/schemas.ts",
+      "line": 483,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Enforce the separator for normalized HTTP URLs\n\nThe `!def.normalize` guard bypasses the new validation for `httpUrl({ normalize: true })`, so inputs such as `http:example.com` and `http:/example.com` reach `new URL()` and are normalized and accepted. This leaves a public `httpUrl()` configuration accepting the malformed forms that the strict-validation change is intended to reject; remove the `!def.normalize` condition or otherwise apply the `://` check to all HTTP URL schemas.",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.26,
+        "probabilities": {
+          "downgrade": 0.14,
+          "drop": 0.35,
+          "keep": 0.51
+        },
+        "demonstrable": 0.62,
+        "latencyMs": 334,
+        "clamped": false,
+        "cost": 0.000083664,
+        "inputTokens": 1992
+      },
+      "agentic": {
+        "decision": "drop",
+        "reason": "The guard is intentional and documented to require `://` only when normalization is off, so accepting forms that `new URL()` normalizes under `httpUrl({ normalize: true })` is not a demonstrable defect.",
+        "latencyMs": 1923,
+        "cost": 0.000488425,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.0481901,
+        "reasons": [
+          "The guard `!def.normalize` explicitly skips the new strict separator check when normalize is true, letting malformed inputs like 'http:example.com' reach new URL() and be accepted, exactly as the finding claims."
+        ]
+      }
+    },
+    {
+      "taskId": "zod__5672",
+      "difficulty": "Type1_Direct",
+      "trial": 3,
+      "index": 0,
+      "file": "packages/zod/src/v4/core/schemas.ts",
+      "line": 483,
+      "severity": "warn",
+      "confidence": "high",
+      "side": "RIGHT",
+      "body": "issue: Enforce strict protocol separators for normalized URLs\n\nThe `!def.normalize` guard lets `httpUrl({ normalize: true })` pass malformed inputs such as `http:example.com` or `https:/www.google.com` to `new URL()`, which normalizes them into accepted HTTP URLs. This leaves the public `httpUrl()` contract permissive for exactly the malformed forms this change is intended to reject; apply the `://` check whenever the HTTP protocol constraint is active, regardless of normalization.",
+      "gold": "CONFIRMED",
+      "jev": {
+        "decision": "keep",
+        "confidence": 0.04,
+        "probabilities": {
+          "drop": 0.34,
+          "keep": 0.36,
+          "downgrade": 0.3
+        },
+        "demonstrable": 0.6,
+        "latencyMs": 269,
+        "clamped": false,
+        "cost": 0.00008358,
+        "inputTokens": 1990
+      },
+      "agentic": {
+        "decision": "drop",
+        "reason": "The guard intentionally applies the strict `://` requirement only when normalization is disabled, so accepting browser-style URL forms under `normalize: true` is consistent with the visible normalization contract rather than a demonstrated defect.",
+        "latencyMs": 1944,
+        "cost": 0.00046855000000000003,
+        "toolCalls": 0
+      },
+      "truth": {
+        "label": "TRUE",
+        "agreed": true,
+        "preExisting": false,
+        "cost": 0.09848660000000001,
+        "reasons": [
+          "The guard only runs when def.normalize is falsy, so enabling normalize lets malformed protocol-separator inputs be silently accepted after URL normalization, exactly as the finding states.",
+          "The new strict `://` check is gated by `!def.normalize`, so when `normalize: true` is passed to httpUrl (a valid public option since Omit only removes protocol/hostname), malformed inputs like 'http:example.com' bypass the check and are silently accepted after being normalized by the URL constructor."
+        ]
+      }
+    }
+  ],
+  "findCost": 1.179476925
+}
