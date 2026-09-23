@@ -43,7 +43,11 @@ jobs:
           }
           emit "$CR_VARS"
           emit "$CR_SECRETS"
+      # Load the packaged code-review skill so self-reviews exercise the same
+      # skill path consumers use — and so the summary footer's skill links are
+      # dogfooded on every PR.
       - name: Run review
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          CODE_REVIEW_SKILLS: code-review
         run: node bin/code-review.js
