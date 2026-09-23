@@ -348,7 +348,7 @@ describe('legacy summary history markers', () => {
 
   it('strips a legacy summary-history block from the body', () => {
     const body = [
-      `${SUMMARY_MARKER}`,
+      SUMMARY_MARKER,
       '',
       'latest summary',
       '',

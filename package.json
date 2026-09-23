@@ -83,9 +83,9 @@
     "husky": "9.1.7",
     "lint-staged": "17.0.4",
     "memfs": "^4.57.6",
-    "oxfmt": "0.36.0",
-    "oxlint": "1.51.0",
-    "oxlint-tsgolint": "^0.23.0",
+    "oxfmt": "0.68.0",
+    "oxlint": "1.83.0",
+    "oxlint-tsgolint": "^7.0.2002",
     "vite": "^8.0.16",
     "vitest": "^4.1.8",
     "vitest-evals": "^0.11.0"

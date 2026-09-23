@@ -6,8 +6,7 @@
  */
 
 import nodeFs from 'node:fs';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, writeFile, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import * as git from 'isomorphic-git';
