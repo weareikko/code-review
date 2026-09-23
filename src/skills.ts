@@ -2,11 +2,31 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 import { ConfigError } from './errors.js';
 import { git } from './git.js';
+
+/**
+ * Where a loaded skill came from, carried in enough detail to build a link to
+ * its `SKILL.md` for the summary footer (see `skill-links.ts`). `path` is always
+ * the skill directory relative to the repository it lives in, POSIX-separated.
+ */
+export type SkillOrigin =
+  | { kind: 'builtin'; name: string }
+  | { kind: 'project'; path: string }
+  | { kind: 'npm'; packageName: string; subpath: string }
+  | { kind: 'file'; path: string }
+  | { kind: 'git'; url: string; ref: string; path: string }
+  | {
+      kind: 'marketplace';
+      marketplace: string;
+      plugin: string;
+      url: string;
+      ref: string;
+      path: string;
+    };
 
 export interface Skill {
   name: string;
@@ -15,7 +35,12 @@ export interface Skill {
   filePath: string;
   rootDir: string;
   resourceDirs: string[];
-  source: 'builtin' | 'project' | 'npm' | 'file' | 'git' | 'marketplace';
+  origin: SkillOrigin;
+}
+
+/** Normalize a filesystem-relative path to the POSIX form used in URLs. */
+export function toPosixPath(path: string): string {
+  return sep === '/' ? path : path.split(sep).join('/');
 }
 
 /**
@@ -61,7 +86,7 @@ function parseFrontmatter(content: string): { name: string; description: string 
 
 export async function loadSkillFromDir(
   dirPath: string,
-  source: Skill['source'],
+  origin: SkillOrigin,
 ): Promise<Skill | null> {
   const skillMdPath = join(dirPath, 'SKILL.md');
   let content: string;
@@ -79,7 +104,7 @@ export async function loadSkillFromDir(
     filePath: skillMdPath,
     rootDir: dirPath,
     resourceDirs,
-    source,
+    origin,
   };
 }
 
@@ -88,7 +113,7 @@ export function resolveBuiltinSkillsDir(): string {
 }
 
 export async function loadBuiltinSkill(name: string): Promise<Skill | null> {
-  return loadSkillFromDir(join(resolveBuiltinSkillsDir(), name), 'builtin');
+  return loadSkillFromDir(join(resolveBuiltinSkillsDir(), name), { kind: 'builtin', name });
 }
 
 export async function loadAutoDiscoveredSkills(
@@ -119,7 +144,10 @@ export async function loadAutoDiscoveredSkills(
       }
       for (const entry of entries) {
         const entryPath = join(skillsPath, entry);
-        const skill = await loadSkillFromDir(entryPath, 'project');
+        const skill = await loadSkillFromDir(entryPath, {
+          kind: 'project',
+          path: toPosixPath(relative(gitRoot, entryPath)),
+        });
         if (skill) {
           found.set(skill.name, skill);
         } else if (warn && existsSync(join(entryPath, 'SKILL.md'))) {
@@ -444,7 +472,11 @@ export async function loadNamedSkill(
         hint: `Package ${pkgRef} was not found in node_modules. Run \`npm install ${parsed.packageName}\` in the project.`,
       });
     }
-    const skill = await loadSkillFromDir(dir, 'npm');
+    const skill = await loadSkillFromDir(dir, {
+      kind: 'npm',
+      packageName: parsed.packageName,
+      subpath: parsed.subpath,
+    });
     if (!skill) {
       throw new ConfigError(`Cannot load skill: "${spec}"`, {
         hint: `The package at ${dir} does not contain a valid SKILL.md.`,
@@ -455,7 +487,7 @@ export async function loadNamedSkill(
 
   if (parsed.protocol === 'file') {
     const resolvedPath = parsed.path.startsWith('/') ? parsed.path : join(cwd, parsed.path);
-    const skill = await loadSkillFromDir(resolvedPath, 'file');
+    const skill = await loadSkillFromDir(resolvedPath, { kind: 'file', path: resolvedPath });
     if (!skill) {
       throw new ConfigError(`Cannot load skill: "${spec}"`, {
         hint: `No valid SKILL.md was found at "${resolvedPath}". Check that the path points to a skill directory.`,
@@ -490,7 +522,12 @@ export async function loadNamedSkill(
   }
 
   const skillDir = parsed.subpath ? join(repoDir, parsed.subpath) : repoDir;
-  const skill = await loadSkillFromDir(skillDir, 'git');
+  const skill = await loadSkillFromDir(skillDir, {
+    kind: 'git',
+    url: parsed.url,
+    ref: parsed.ref,
+    path: parsed.subpath,
+  });
   if (!skill) {
     throw new ConfigError(`Cannot load skill: "${spec}"`, {
       hint: parsed.subpath

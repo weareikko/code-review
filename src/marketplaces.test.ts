@@ -191,7 +191,21 @@ describe('loadMarketplaceSkill', () => {
   it('resolves a skill via marketplace.json → plugin source → skills/<skill>', async () => {
     const skill = await loadMarketplaceSkill(spec, registry(), { cacheDir: '/cache' });
     expect(skill.name).toBe('aria-apg');
-    expect(skill.source).toBe('marketplace');
+    expect(skill.origin.kind).toBe('marketplace');
+  });
+
+  // The origin carries what the summary footer needs to link the skill back to
+  // its source: the marketplace repo, its ref, and the skill's path inside it.
+  it('records the marketplace coordinates on the loaded skill', async () => {
+    const skill = await loadMarketplaceSkill(spec, registry(), { cacheDir: '/cache' });
+    expect(skill.origin).toEqual({
+      kind: 'marketplace',
+      marketplace: 'acme',
+      plugin: 'dev',
+      url: 'https://host/group/tools.git',
+      ref: '0.6.13',
+      path: 'plugins/dev/skills/aria-apg',
+    });
   });
 
   it('honors metadata.pluginRoot for a bare plugin source', async () => {
