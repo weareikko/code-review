@@ -106,7 +106,14 @@
       }
     }
   ],
-  "ignorePatterns": ["dist", "node_modules", "coverage", "*.config.js", "*.config.ts"],
+  "ignorePatterns": [
+    "dist",
+    "node_modules",
+    "coverage",
+    "*.config.js",
+    "*.config.ts",
+    "tests/evals/fixtures/swe-prbench/repos"
+  ],
   "options": {
     "typeAware": true
   }

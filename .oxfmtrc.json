@@ -26,5 +26,5 @@
   "experimentalSortPackageJson": {
     "sortScripts": false
   },
-  "ignorePatterns": ["dist", "node_modules", "coverage"]
+  "ignorePatterns": ["dist", "node_modules", "coverage", "tests/evals/fixtures/swe-prbench/repos"]
 }
