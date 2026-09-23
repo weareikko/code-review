@@ -88,7 +88,7 @@
     "oxlint-tsgolint": "^7.0.2002",
     "vite": "^8.0.16",
     "vitest": "^4.1.8",
-    "vitest-evals": "^0.11.0"
+    "vitest-evals": "^0.17.0"
   },
   "lint-staged": {
     "*.{js,ts,json,md,yml,yaml}": "oxfmt --write --no-error-on-unmatched-pattern"
