@@ -1138,14 +1138,14 @@ describe('resolveModel (via runReview createAgent)', () => {
     const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const captured: { model?: unknown } = {};
 
-    // openrouter/ai21/jamba-large-1.7 is a registered model in pi-ai
+    // openrouter/mistralai/mistral-medium-3.1 is a registered model in pi-ai
     await runReview(
-      { ...base, cwd, model: 'openrouter/ai21/jamba-large-1.7', apiKey: 'or-key' },
+      { ...base, cwd, model: 'openrouter/mistralai/mistral-medium-3.1', apiKey: 'or-key' },
       { cwd, diff: sampleDiff, createAgent: fakeAgentWithCapture(captured) },
     );
 
     // The model ID passed to the agent should be the full multi-slash ID
-    expect((captured.model as { id?: string })?.id).toBe('ai21/jamba-large-1.7');
+    expect((captured.model as { id?: string })?.id).toBe('mistralai/mistral-medium-3.1');
     expect((captured.model as { provider?: string })?.provider).toBe('openrouter');
   });
 
@@ -1179,7 +1179,7 @@ describe('resolveModel (via runReview createAgent)', () => {
       {
         ...base,
         cwd,
-        model: 'openrouter/ai21/jamba-large-1.7',
+        model: 'openrouter/mistralai/mistral-medium-3.1',
         apiKey: 'or-key',
         baseUrl: 'https://custom-gateway.example.com/v1',
       },
@@ -1199,7 +1199,7 @@ describe('resolveModel (via runReview createAgent)', () => {
       {
         ...base,
         cwd,
-        model: 'openrouter/ai21/jamba-large-1.7',
+        model: 'openrouter/mistralai/mistral-medium-3.1',
         apiKey: 'or-key',
         maxTokens: 1024,
       },
@@ -2061,9 +2061,9 @@ describe('resolveVerifyMember', () => {
   it('resolves a distinct, keyed model and logs the routing', async () => {
     process.env.ANTHROPIC_API_KEY = 'ak';
     const { logger, infos, warns } = capturingLogger();
-    const cfg = { ...baseConfig, verifyModel: 'anthropic/claude-opus-4-1' };
+    const cfg = { ...baseConfig, verifyModel: 'anthropic/claude-opus-4-5' };
     const member = resolveVerifyMember(cfg, primary, logger);
-    expect(member?.id).toBe('anthropic/claude-opus-4-1');
+    expect(member?.id).toBe('anthropic/claude-opus-4-5');
     expect(await member?.getApiKey()).toBe('ak');
     expect(infos.some((m) => m.includes('Verify stage routed to'))).toBe(true);
     // opus is pricier than the sonnet finder → no cheaper-tier warning
