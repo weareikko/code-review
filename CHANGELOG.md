@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The summary footer's `Skills:` line now links each skill to its `SKILL.md` source (built-in, in-repo, `git:`, marketplace, `npm:`), and names marketplace skills in full as `<marketplace>:<plugin>/<skill>` ([#147]).
+
 ## [0.9.5] - 2026-08-03
 
 ### Changed
@@ -134,6 +138,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.8.6]: https://github.com/weareikko/code-review/compare/0.8.5...0.8.6
 [0.8.5]: https://github.com/weareikko/code-review/compare/0.8.4...0.8.5
 [0.8.4]: https://github.com/weareikko/code-review/compare/0.8.3...0.8.4
+[#147]: https://github.com/weareikko/code-review/pull/147
 [#144]: https://github.com/weareikko/code-review/pull/144
 [#142]: https://github.com/weareikko/code-review/pull/142
 [#141]: https://github.com/weareikko/code-review/pull/141

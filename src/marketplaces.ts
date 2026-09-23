@@ -1,5 +1,5 @@
 import { readFile, realpath } from 'node:fs/promises';
-import { join, resolve, sep } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { ConfigError } from './errors.js';
 import {
   cloneGitRepo,
@@ -7,6 +7,7 @@ import {
   normalizeGitUrl,
   redactUrl,
   resolveSkillCacheDir,
+  toPosixPath,
   type Skill,
   type SkillSpec,
 } from './skills.js';
@@ -253,7 +254,7 @@ async function resolveAnthropicSkill(
     strict && realPluginDir ? await readPluginManifest(realRoot, realPluginDir, ref) : null;
   const bases = computeSkillBases(repoDir, pluginDir, entry, pluginManifest, ref);
 
-  const skill = await findSkillInBases(realRoot, bases, pluginDir, spec.skill, ref);
+  const skill = await findSkillInBases(realRoot, bases, pluginDir, spec, ref, mp);
   if (!skill) {
     throw new ConfigError(`Cannot load skill: "${ref}"`, {
       hint: `No skill "${spec.skill}" found in plugin "${spec.plugin}". Looked under the default skills/ directory${bases.length > 1 ? ' and the plugin\'s custom "skills" paths' : ''}. Check the skill name against the marketplace.`,
@@ -346,17 +347,19 @@ async function findSkillInBases(
   realRoot: string,
   bases: string[],
   pluginDir: string,
-  skillName: string,
+  spec: MarketplaceSkillSpec,
   ref: string,
+  mp: MarketplaceRef,
 ): Promise<Skill | null> {
+  const skillName = spec.skill;
   for (const base of bases) {
     // `skillName` is validated to contain no `/`, so this stays within `base`.
-    const container = await loadSkillIfInside(realRoot, join(base, skillName), ref);
+    const container = await loadSkillIfInside(realRoot, join(base, skillName), ref, mp, spec);
     if (container) return container;
-    const single = await loadSkillIfInside(realRoot, base, ref);
+    const single = await loadSkillIfInside(realRoot, base, ref, mp, spec);
     if (single && single.name === skillName) return single;
   }
-  const root = await loadSkillIfInside(realRoot, pluginDir, ref);
+  const root = await loadSkillIfInside(realRoot, pluginDir, ref, mp, spec);
   return root && root.name === skillName ? root : null;
 }
 
@@ -417,12 +420,23 @@ async function loadSkillIfInside(
   realRoot: string,
   dir: string,
   ref: string,
+  mp: MarketplaceRef,
+  spec: MarketplaceSkillSpec,
 ): Promise<Skill | null> {
   const real = await resolveInside(realRoot, dir, ref);
   if (!real) return null;
   // Bounds-check the SKILL.md file itself before `loadSkillFromDir` reads it.
   if ((await readTextInside(realRoot, join(real, 'SKILL.md'), ref)) === null) return null;
-  return loadSkillFromDir(real, 'marketplace');
+  // The origin path is relative to the clone root, so it doubles as the skill's
+  // path inside the marketplace repository when the footer links to its source.
+  return loadSkillFromDir(real, {
+    kind: 'marketplace',
+    marketplace: mp.name,
+    plugin: spec.plugin,
+    url: mp.url,
+    ref: mp.ref,
+    path: toPosixPath(relative(realRoot, real)),
+  });
 }
 
 /**

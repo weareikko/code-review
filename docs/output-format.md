@@ -73,12 +73,25 @@ The summary is upserted **before** inline comments are posted so it appears at t
 
 Review usage: 12,345 in / 678 out tokens — $0.0421 (anthropic/claude-sonnet-4-5, thinking: off)
 
-Skills: `code-review`
+Skills: [`code-review`](https://github.com/weareikko/code-review/blob/0.9.5/skills/code-review/SKILL.md), [`ikko-tools:dev/aria-apg`](https://gitlab.example.com/tools/ikko-tools/-/blob/main/plugins/dev/skills/aria-apg/SKILL.md)
 
 Reviewed by [@weareikko/code-review](https://github.com/weareikko/code-review) for commit <sha>.
 ```
 
 The `Review usage:` line names the model and records the `--thinking` level the run used (`thinking: off` by default). The `Skills:` line is only present when one or more skills were active for the run.
+
+Each skill links to the `SKILL.md` the run loaded, so a reviewer can read the guidance the review was given:
+
+| Skill source                                   | Link target                                                                                                                                           |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Built-in                                       | This package's repository at the released tag                                                                                                         |
+| In-repo (`.claude/skills/`, `.agents/skills/`) | The repository under review at the reviewed commit — needs `CI_PROJECT_URL` (GitLab CI) or `GITHUB_SERVER_URL` + `GITHUB_REPOSITORY` (GitHub Actions) |
+| `git:` / `git+ssh:`                            | The skill's repository at the pinned ref                                                                                                              |
+| Marketplace                                    | The marketplace repository at its ref; shown under the full `<marketplace>:<plugin>/<skill>` name                                                     |
+| `npm:`                                         | The package page on npmjs.com                                                                                                                         |
+| `file:`                                        | Not linked — a local path is not reachable from a browser                                                                                             |
+
+Credentials embedded in a clone URL are stripped from the link. A skill whose source cannot be resolved (a `file:` path, or an in-repo skill on a run with no CI project URL) keeps its plain name.
 
 If a later CI job sees that the current head commit (of the MR or PR) already appears in that footer, it skips the agent run to avoid producing a different review for the same diff. Use `--force-review` or `CODE_REVIEW_FORCE_REVIEW=true` to bypass the guard. On GitLab the summary upsert runs in both `direct` and `draft` posting modes (it always uses the regular notes endpoints — the atomic bulk-publish flow is reserved for inline comments).
 

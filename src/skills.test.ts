@@ -427,7 +427,7 @@ describe('loadNamedSkill', () => {
     it('loads the built-in code-review skill', async () => {
       const cwd = await makeTmp();
       const skill = await loadNamedSkill('code-review', cwd);
-      expect(skill.source).toBe('builtin');
+      expect(skill.origin.kind).toBe('builtin');
       expect(skill.name).toBe('code-review');
       expect(skill.description).toBeTruthy();
     });
@@ -435,7 +435,7 @@ describe('loadNamedSkill', () => {
     it('loads the built-in test-integrity skill', async () => {
       const cwd = await makeTmp();
       const skill = await loadNamedSkill('test-integrity', cwd);
-      expect(skill.source).toBe('builtin');
+      expect(skill.origin.kind).toBe('builtin');
       expect(skill.name).toBe('test-integrity');
       expect(skill.description).toBeTruthy();
     });
@@ -475,7 +475,7 @@ describe('loadNamedSkill', () => {
       await writeSkillMd(skillDir, 'my-local-skill', 'A local test skill', 'Do the thing.');
 
       const skill = await loadNamedSkill('file:./my-skill', cwd);
-      expect(skill.source).toBe('file');
+      expect(skill.origin.kind).toBe('file');
       expect(skill.name).toBe('my-local-skill');
       expect(skill.description).toBe('A local test skill');
       expect(skill.filePath).toBe(join(skillDir, 'SKILL.md'));
@@ -487,7 +487,7 @@ describe('loadNamedSkill', () => {
       await writeSkillMd(skillDir, 'abs-skill', 'Absolute path skill');
 
       const skill = await loadNamedSkill(`file:${skillDir}`, cwd);
-      expect(skill.source).toBe('file');
+      expect(skill.origin.kind).toBe('file');
       expect(skill.name).toBe('abs-skill');
     });
 
@@ -521,7 +521,7 @@ describe('loadNamedSkill', () => {
       await writeSkillMd(pkgDir, 'npm-skill', 'An npm skill', 'Review npm packages.');
 
       const skill = await loadNamedSkill('npm:my-npm-skill', cwd);
-      expect(skill.source).toBe('npm');
+      expect(skill.origin.kind).toBe('npm');
       expect(skill.name).toBe('npm-skill');
       expect(skill.filePath).toBe(join(pkgDir, 'SKILL.md'));
     });
@@ -532,7 +532,7 @@ describe('loadNamedSkill', () => {
       await writeSkillMd(pkgDir, 'security', 'Company security skill');
 
       const skill = await loadNamedSkill('npm:@company/security-skill', cwd);
-      expect(skill.source).toBe('npm');
+      expect(skill.origin.kind).toBe('npm');
       expect(skill.name).toBe('security');
     });
 
@@ -542,7 +542,7 @@ describe('loadNamedSkill', () => {
       await writeSkillMd(subDir, 'bundle-security', 'Bundle security sub-skill');
 
       const skill = await loadNamedSkill('npm:@company/skills-bundle/security', cwd);
-      expect(skill.source).toBe('npm');
+      expect(skill.origin.kind).toBe('npm');
       expect(skill.name).toBe('bundle-security');
     });
 
@@ -554,7 +554,7 @@ describe('loadNamedSkill', () => {
       await mkdir(nestedCwd, { recursive: true });
 
       const skill = await loadNamedSkill('npm:shared-skill', nestedCwd);
-      expect(skill.source).toBe('npm');
+      expect(skill.origin.kind).toBe('npm');
       expect(skill.name).toBe('shared');
     });
 
@@ -629,28 +629,55 @@ describe('loadSkillFromDir frontmatter parsing', () => {
 });
 
 // ---------------------------------------------------------------------------
-// loadSkillFromDir — source field propagation
+// loadSkillFromDir — origin propagation
 // ---------------------------------------------------------------------------
 
-describe('loadSkillFromDir source field', () => {
-  it('assigns source = "npm" when requested', async () => {
+describe('loadSkillFromDir origin', () => {
+  it('carries the origin it was given', async () => {
     const dir = await makeTmp();
     await writeSkillMd(dir, 'test-skill', 'Test');
-    const skill = await loadSkillFromDir(dir, 'npm');
-    expect(skill?.source).toBe('npm');
+    const skill = await loadSkillFromDir(dir, {
+      kind: 'npm',
+      packageName: '@scope/pkg',
+      subpath: 'security',
+    });
+    expect(skill?.origin).toEqual({ kind: 'npm', packageName: '@scope/pkg', subpath: 'security' });
   });
 
-  it('assigns source = "file" when requested', async () => {
+  it('carries a file origin with its resolved path', async () => {
     const dir = await makeTmp();
     await writeSkillMd(dir, 'test-skill', 'Test');
-    const skill = await loadSkillFromDir(dir, 'file');
-    expect(skill?.source).toBe('file');
+    const skill = await loadSkillFromDir(dir, { kind: 'file', path: dir });
+    expect(skill?.origin).toEqual({ kind: 'file', path: dir });
   });
 });
 
 // ---------------------------------------------------------------------------
 // loadAutoDiscoveredSkills — warn callback for invalid SKILL.md files
 // ---------------------------------------------------------------------------
+
+describe('loadAutoDiscoveredSkills origin', () => {
+  // The path is relative to the git root so the summary footer can link the
+  // skill to its source in the repository under review.
+  it('records the skill directory relative to the git root', async () => {
+    const root = await makeTmp('auto-disc-origin-');
+    const skillDir = join(root, '.claude', 'skills', 'house-style');
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      join(skillDir, 'SKILL.md'),
+      '---\nname: house-style\ndescription: House style rules.\n---\nBody.',
+      'utf8',
+    );
+
+    const skills = await loadAutoDiscoveredSkills(join(root, 'src'), root);
+
+    expect(skills).toHaveLength(1);
+    expect(skills[0].origin).toEqual({
+      kind: 'project',
+      path: '.claude/skills/house-style',
+    });
+  });
+});
 
 describe('loadAutoDiscoveredSkills warn callback', () => {
   it('calls warn when a SKILL.md exists but is missing required frontmatter fields', async () => {

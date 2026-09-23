@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   countPostedBySeverity,
   formatPerModelUsage,
+  formatSkillsFooter,
   formatUsageLine,
   withHttpStamping,
 } from './cli.js';
@@ -9,6 +10,8 @@ import type { DiagnosticContext } from './diagnostics.js';
 import type { ReviewUsage } from './gitlab-review.js';
 import type { GitLabResponseInfo } from './gitlab.js';
 import type { GeneratedComment, Severity } from './types.js';
+
+declare const __PKG_VERSION__: string;
 
 function makeComment(severity: Severity, duplicate = false): GeneratedComment {
   return {
@@ -206,5 +209,44 @@ describe('countPostedBySeverity', () => {
 
   it('returns an empty object when every comment is a duplicate', () => {
     expect(countPostedBySeverity([makeComment('warn', true)])).toEqual({});
+  });
+});
+
+describe('formatSkillsFooter', () => {
+  it('returns undefined when no skill was loaded', () => {
+    expect(formatSkillsFooter([])).toBeUndefined();
+  });
+
+  it('links each skill to its source and names marketplace skills in full', () => {
+    const footer = formatSkillsFooter(
+      [
+        { name: 'code-review', origin: { kind: 'builtin', name: 'code-review' } },
+        { name: 'house-style', origin: { kind: 'project', path: '.claude/skills/house-style' } },
+        {
+          name: 'aria-apg',
+          origin: {
+            kind: 'marketplace',
+            marketplace: 'ikko-tools',
+            plugin: 'dev',
+            url: 'git+ssh://git@gitlab.example.com/tools/ikko-tools.git',
+            ref: 'main',
+            path: 'plugins/dev/skills/aria-apg',
+          },
+        },
+      ],
+      { projectWebUrl: 'https://gitlab.example.com/group/app', commitSha: 'abc123' },
+    );
+    expect(footer).toBe(
+      'Skills: ' +
+        `[\`code-review\`](https://github.com/weareikko/code-review/blob/${__PKG_VERSION__}/skills/code-review/SKILL.md), ` +
+        '[`house-style`](https://gitlab.example.com/group/app/-/blob/abc123/.claude/skills/house-style/SKILL.md), ' +
+        '[`ikko-tools:dev/aria-apg`](https://gitlab.example.com/tools/ikko-tools/-/blob/main/plugins/dev/skills/aria-apg/SKILL.md)',
+    );
+  });
+
+  it('falls back to plain names when a source cannot be linked', () => {
+    expect(
+      formatSkillsFooter([{ name: 'local', origin: { kind: 'file', path: '/tmp/local' } }]),
+    ).toBe('Skills: `local`');
   });
 });

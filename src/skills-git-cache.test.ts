@@ -72,7 +72,7 @@ beforeEach(async () => {
 describe('cloneGitRepo — fresh clone', () => {
   it('clones into the default cache dir entirely in memory', async () => {
     const skill = await loadNamedSkill('git:https://host/org/repo.git', '/work');
-    expect(skill.source).toBe('git');
+    expect(skill.origin.kind).toBe('git');
     expect(skill.name).toBe('cloned');
     // The default (XDG/home) cache dir was used — but it lives in memfs, so the
     // real `~/.cache` is never touched.

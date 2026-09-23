@@ -19,6 +19,7 @@ import { buildMarketplaceRegistry, loadMarketplaceSkill } from './marketplaces.j
 import { parseReviewMarkdownWithWarnings } from './parser.js';
 import type { PriorThread } from './prior-threads.js';
 import { renderPriorThreadsBlock } from './prior-threads.js';
+import type { SkillRef } from './skill-links.js';
 import type { Skill } from './skills.js';
 import { loadAutoDiscoveredSkills, loadNamedSkill, parseSkillSpec } from './skills.js';
 import {
@@ -91,7 +92,8 @@ export interface ReviewUsage {
    * single-model path leaves it undefined so output is byte-identical to before.
    */
   byModel?: ModelUsage[];
-  skills: string[];
+  /** Skills the reviewer loaded, with the origin each was loaded from. */
+  skills: SkillRef[];
   /**
    * Size signals for surfacing in the MR summary. `sizeSkippedFiles` lists files
    * dropped for the char budget; `decomposeHint` is set when the reviewed diff is
@@ -1368,7 +1370,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     tokens: aggregated.tokens,
     cost: aggregated.cost,
     byModel: buildByModelUsage(aggregated),
-    skills: context.skills.map((s) => s.name),
+    skills: context.skills.map((s) => ({ name: s.name, origin: s.origin })),
     sizeNotice,
   });
 

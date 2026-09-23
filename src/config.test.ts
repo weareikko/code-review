@@ -11,6 +11,7 @@ import {
   RESERVED_ENV_SUFFIXES,
   resolveConfig,
   resolveGitHubPr,
+  resolveProjectWebUrl,
   validateConfig,
   type Config,
   type Severity,
@@ -1328,5 +1329,32 @@ describe('applyDefaultCacheRetention', () => {
   it('returns the same env object it was given', () => {
     const env: NodeJS.ProcessEnv = {};
     expect(applyDefaultCacheRetention(env)).toBe(env);
+  });
+});
+
+describe('resolveProjectWebUrl', () => {
+  it('uses CI_PROJECT_URL on GitLab CI', () => {
+    expect(resolveProjectWebUrl({ CI_PROJECT_URL: 'https://gitlab.example.com/group/app' })).toBe(
+      'https://gitlab.example.com/group/app',
+    );
+  });
+
+  it('composes the URL from server and slug on GitHub Actions', () => {
+    expect(
+      resolveProjectWebUrl({
+        GITHUB_SERVER_URL: 'https://github.com',
+        GITHUB_REPOSITORY: 'org/repo',
+      }),
+    ).toBe('https://github.com/org/repo');
+  });
+
+  it('drops trailing slashes', () => {
+    expect(resolveProjectWebUrl({ CI_PROJECT_URL: 'https://gitlab.example.com/group/app/' })).toBe(
+      'https://gitlab.example.com/group/app',
+    );
+  });
+
+  it('returns undefined outside CI', () => {
+    expect(resolveProjectWebUrl({})).toBeUndefined();
   });
 });

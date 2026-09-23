@@ -138,6 +138,13 @@ export interface Config {
   githubApiUrl: string;
   /** GitHub server (web) URL; defaults to {@link DEFAULT_GITHUB_SERVER_URL}. */
   githubServerUrl: string;
+  /**
+   * Web URL of the repository under review (`CI_PROJECT_URL` on GitLab CI,
+   * `GITHUB_SERVER_URL` + `GITHUB_REPOSITORY` on GitHub Actions). Used to link
+   * in-repo skills to their source in the summary footer; empty outside CI, and
+   * those skills then appear unlinked.
+   */
+  projectWebUrl: string;
   model: string;
   /**
    * Optional pool of `provider/modelId` models for heterogeneous `full`-depth
@@ -531,6 +538,20 @@ export function detectPlatform(
   );
 }
 
+/**
+ * Web URL of the repository under review, as the CI environment reports it:
+ * GitLab exposes it directly, GitHub composes it from the server and the
+ * `owner/repo` slug. Returns `undefined` outside CI, where no such URL exists.
+ * Shared by the config (skill source links) and the OTel attribute builder.
+ */
+export function resolveProjectWebUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (env.CI_PROJECT_URL) return env.CI_PROJECT_URL.replace(/\/$/, '');
+  if (env.GITHUB_SERVER_URL && env.GITHUB_REPOSITORY) {
+    return `${env.GITHUB_SERVER_URL.replace(/\/$/, '')}/${env.GITHUB_REPOSITORY}`;
+  }
+  return undefined;
+}
+
 export function resolveConfig(argv = process.argv.slice(2), env = process.env): Config {
   const args = parseArgs(argv);
   const platform = detectPlatform(args, env);
@@ -547,6 +568,7 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
   const githubServerUrl = String(
     args.githubServerUrl ?? env.GITHUB_SERVER_URL ?? DEFAULT_GITHUB_SERVER_URL,
   ).replace(/\/$/, '');
+  const githubRepository = String(args.githubRepository ?? env.GITHUB_REPOSITORY ?? '');
 
   // Model and API key are both required — there is no implicit default model.
   // The model is `provider/modelId`; supply it via --model or CODE_REVIEW_MODEL.
@@ -593,11 +615,12 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     gitlabUrl,
     gitlabToken: token.token,
     gitlabAuthHeader: token.header,
-    githubRepository: String(args.githubRepository ?? env.GITHUB_REPOSITORY ?? ''),
+    githubRepository,
     githubPr: resolveGitHubPr(args, env),
     githubToken: String(args.githubToken ?? env.GITHUB_TOKEN ?? ''),
     githubApiUrl,
     githubServerUrl,
+    projectWebUrl: resolveProjectWebUrl(env) ?? '',
     model,
     modelPool: resolveModelPool(args, env),
     minSeverity: normalizeChoice(

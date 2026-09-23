@@ -27,6 +27,7 @@ import { createPlatform, type ScmResponseInfo } from './platform.js';
 import type { SummaryResult } from './posting.js';
 import { findExistingReviewedCommitSha, findExistingSummaryNote } from './posting.js';
 import { extractChangedFiles, extractPriorThreads } from './prior-threads.js';
+import { formatSkillLink, type SkillLinkContext, type SkillRef } from './skill-links.js';
 import { withCarriedOverFindings } from './summary-carryover.js';
 import type { GeneratedComment, Severity, ThinkingLevel } from './types.js';
 
@@ -440,7 +441,10 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
               costFooter: [formatUsageLine(usage), formatPerModelUsage(usage)]
                 .filter(Boolean)
                 .join('\n\n'),
-              skillsFooter: formatSkillsFooter(usage.skills),
+              skillsFooter: formatSkillsFooter(usage.skills, {
+                projectWebUrl: config.projectWebUrl,
+                commitSha: refs.head_sha,
+              }),
               reviewedCommitSha: refs.head_sha,
               runId,
               sizeNotice: usage.sizeNotice,
@@ -516,9 +520,18 @@ function zeroReviewUsage(model: string, thinkingLevel: ThinkingLevel): ReviewUsa
   };
 }
 
-export function formatSkillsFooter(skills: string[]): string | undefined {
+/**
+ * The summary footer's skills line. Each skill links to its `SKILL.md` source so
+ * a developer reading the review can check what the reviewer was told; skills
+ * with no reachable source (a `file:` path, or an in-repo skill on a run without
+ * CI project coordinates) stay as plain names.
+ */
+export function formatSkillsFooter(
+  skills: SkillRef[],
+  context: SkillLinkContext = {},
+): string | undefined {
   if (skills.length === 0) return undefined;
-  return `Skills: ${skills.map((s) => `\`${s}\``).join(', ')}`;
+  return `Skills: ${skills.map((s) => formatSkillLink(s, context)).join(', ')}`;
 }
 
 export function formatUsageLine(usage: ReviewUsage): string {

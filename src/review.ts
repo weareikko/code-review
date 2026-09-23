@@ -58,7 +58,15 @@ export {
   sha256,
 } from './fingerprints.js';
 export { buildGeneratedComments, buildPayload } from './payloads.js';
-export type { LoadNamedSkillOptions, Skill, SkillSpec } from './skills.js';
+export type { SkillLinkContext, SkillRef } from './skill-links.js';
+export {
+  blobUrl,
+  formatSkillLink,
+  gitRepoWebUrl,
+  skillDisplayName,
+  skillSourceUrl,
+} from './skill-links.js';
+export type { LoadNamedSkillOptions, Skill, SkillOrigin, SkillSpec } from './skills.js';
 export {
   gitSkillCacheKey,
   loadNamedSkill,

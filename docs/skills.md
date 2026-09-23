@@ -119,8 +119,10 @@ Project skills take precedence over built-in skills with the same name. A skill 
 
 ## Skills footer
 
-When skills are active, their names appear in the review summary footer (the MR note on GitLab, the PR summary comment on GitHub):
+When skills are active, their names appear in the review summary footer (the MR note on GitLab, the PR summary comment on GitHub), each linked to the `SKILL.md` the run loaded:
 
 ```md
-Skills: `code-review`
+Skills: [`code-review`](https://github.com/weareikko/code-review/blob/0.9.5/skills/code-review/SKILL.md), [`ikko-tools:dev/aria-apg`](https://gitlab.example.com/tools/ikko-tools/-/blob/main/plugins/dev/skills/aria-apg/SKILL.md)
 ```
+
+Marketplace skills are shown under their full `<marketplace>:<plugin>/<skill>` name, because a bare skill name says nothing about which marketplace and plugin it came from. See [Skills footer links](./output-format.md#summary-note) for the link target of each skill source, and which skills stay unlinked.

@@ -58,6 +58,7 @@ import type {
 import { context, metrics, SpanKind, SpanStatusCode, trace } from '@opentelemetry/api';
 import type { Logger, LoggerProvider } from '@opentelemetry/api-logs';
 import { logs, SeverityNumber } from '@opentelemetry/api-logs';
+import { resolveProjectWebUrl } from './config.js';
 import {
   diagnosticChannels,
   type DiagnosticContext,
@@ -1261,11 +1262,7 @@ function buildCiSpanAttrs(env: NodeJS.ProcessEnv): Record<string, string> {
   if (pipelineRunId) attrs['cicd.pipeline.run.id'] = pipelineRunId;
   // Canonical full repository URL (per-repo, so span/log only — never a metric
   // label). GitLab exposes it directly; GitHub composes it from server + slug.
-  const repositoryUrl =
-    env.CI_PROJECT_URL ??
-    (env.GITHUB_SERVER_URL && env.GITHUB_REPOSITORY
-      ? `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}`
-      : undefined);
+  const repositoryUrl = resolveProjectWebUrl(env);
   if (repositoryUrl) attrs['vcs.repository.url.full'] = repositoryUrl;
   return attrs;
 }

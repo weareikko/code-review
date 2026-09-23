@@ -1229,7 +1229,7 @@ function makeTestSkill(overrides: Partial<Skill> = {}): Skill {
     filePath: '/path/to/skills/security/SKILL.md',
     rootDir: '/path/to/skills/security',
     resourceDirs: [],
-    source: 'npm',
+    origin: { kind: 'npm', packageName: 'security-skill', subpath: '' },
     ...overrides,
   };
 }
