@@ -123,7 +123,9 @@ async function main() {
 
   if (args.only) insts = insts.filter((i) => args.only.has(i.task_id));
   if (args.repos)
-    insts = insts.filter((i) => args.repos.some((s) => i.repo.includes(s) || i.task_id.includes(s)));
+    insts = insts.filter((i) =>
+      args.repos.some((s) => i.repo.includes(s) || i.task_id.includes(s)),
+    );
   if (args.fresh)
     await Promise.all(
       insts.map((i) => rm(join(REPOS, i.task_id), { recursive: true, force: true })),
