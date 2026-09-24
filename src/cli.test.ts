@@ -135,12 +135,12 @@ describe('formatUsageLine', () => {
       ...makeUsage({ input: 200, output: 50, total: 250 }),
       byModel: [
         {
-          model: 'cloudflare-ai-gateway/gpt-4o-mini',
+          model: 'openrouter/openai/gpt-4o-mini',
           tokens: { input: 150, output: 30, cacheRead: 0, cacheWrite: 0, total: 180 },
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.0013 },
         },
         {
-          model: 'cloudflare-ai-gateway/gpt-5.4',
+          model: 'openrouter/openai/gpt-5.4',
           tokens: { input: 50, output: 20, cacheRead: 0, cacheWrite: 0, total: 70 },
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.004 },
         },

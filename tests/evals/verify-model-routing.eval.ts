@@ -15,16 +15,16 @@ import { parseReviewMarkdownWithWarnings } from '../../src/parser.js';
 // high-recall finder paired with a strong, high-precision verifier matches an
 // all-strong pipeline at a fraction of the cost.
 //
-// Calls real LLMs and costs money — OFF unless VERIFY_ROUTING_RUN=1. gpt-5.4 runs
-// via the Cloudflare AI Gateway (CLOUDFLARE_* secrets); nano via direct OpenAI.
+// Calls real LLMs and costs money — OFF unless VERIFY_ROUTING_RUN=1. Both models
+// run via OpenRouter (OPENROUTER_API_KEY).
 //
 //   VERIFY_ROUTING_RUN=1 npm run test:evals -- verify-model-routing
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const TRIALS = Number(process.env.VERIFY_ROUTING_TRIALS) || 2;
 
-const NANO = 'openai/gpt-5.4-nano';
-const GPT = 'cloudflare-ai-gateway/gpt-5.4';
+const NANO = 'openrouter/openai/gpt-5.4-nano';
+const GPT = 'openrouter/openai/gpt-5.4';
 
 const CONFIGS: Array<{ label: string; findModel: string; verifyModel: string }> = [
   { label: 'all-gpt-5.4', findModel: GPT, verifyModel: '' },
@@ -40,9 +40,7 @@ const FIXTURE_SET: Array<{ file: string; kind: 'recall' | 'precision' }> = [
   { file: 'justified-intentional.diff', kind: 'precision' },
 ];
 
-const skip =
-  process.env.VERIFY_ROUTING_RUN !== '1' ||
-  !(process.env.CLOUDFLARE_API_KEY && process.env.OPENAI_API_KEY);
+const skip = process.env.VERIFY_ROUTING_RUN !== '1' || !process.env.OPENROUTER_API_KEY;
 
 function makeConfig(findModel: string, verifyModel: string, cwd: string): Config {
   return {

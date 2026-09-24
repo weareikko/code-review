@@ -10,10 +10,9 @@ import type { Judge, JudgeContext } from 'vitest-evals';
 
 // The judge routes through the same provider stack as the reviewer. Evals must
 // NOT make direct OpenAI/Anthropic calls — everything goes through the
-// configured provider (in this project's CI, the Cloudflare AI Gateway), so the
-// judge model is a `provider/modelId` string resolved via pi-ai, not a raw
-// Anthropic endpoint.
-const DEFAULT_JUDGE_MODEL = 'cloudflare-ai-gateway/claude-haiku-4.5';
+// configured provider (in this project's CI, OpenRouter), so the judge model is
+// a `provider/modelId` string resolved via pi-ai, not a raw Anthropic endpoint.
+const DEFAULT_JUDGE_MODEL = 'openrouter/anthropic/claude-haiku-4.5';
 
 type LlmJudgeVerdict = {
   score: 0 | 1;
@@ -43,13 +42,13 @@ async function callJudge(systemPrompt: string, userPrompt: string): Promise<LlmJ
   const { provider, modelId } = splitModel(getModelId());
   if (!provider) {
     throw new Error(
-      `Judge model "${getModelId()}" must be a provider/modelId string (e.g. cloudflare-ai-gateway/claude-haiku-4.5)`,
+      `Judge model "${getModelId()}" must be a provider/modelId string (e.g. openrouter/anthropic/claude-haiku-4.5)`,
     );
   }
   const apiKey = getEnvApiKey(provider) ?? '';
   if (!apiKey) {
     throw new Error(
-      `LLM judge requires the ${provider} provider key in env (e.g. CLOUDFLARE_API_KEY for cloudflare-ai-gateway)`,
+      `LLM judge requires the ${provider} provider key in env (e.g. OPENROUTER_API_KEY for openrouter)`,
     );
   }
   // getBuiltinModel is statically typed against the MODELS table; the judge

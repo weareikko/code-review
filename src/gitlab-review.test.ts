@@ -2110,27 +2110,27 @@ describe('blendedCost', () => {
 });
 
 describe('createReviewStreamFn', () => {
-  it('threads process.env as options.env (cloudflare-ai-gateway base-URL substitution) and preserves options', () => {
+  it('threads process.env as options.env (base-URL placeholder substitution) and preserves options', () => {
     const seen: Array<Record<string, unknown>> = [];
     const fakeStream = ((_model: unknown, _context: unknown, options: unknown) => {
       seen.push(options as Record<string, unknown>);
       return undefined as never;
     }) as unknown as Parameters<typeof createReviewStreamFn>[0];
 
-    const prev = process.env.CLOUDFLARE_ACCOUNT_ID;
-    process.env.CLOUDFLARE_ACCOUNT_ID = 'acct-test';
+    const prev = process.env.CODE_REVIEW_BASE_URL_VAR;
+    process.env.CODE_REVIEW_BASE_URL_VAR = 'acct-test';
     try {
       const streamFn = createReviewStreamFn(fakeStream);
       streamFn({} as never, {} as never, { apiKey: 'k', maxTokens: 7 } as never);
       expect(seen).toHaveLength(1);
-      // env must be present so pi-ai can fill {CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}
-      expect((seen[0].env as Record<string, string>).CLOUDFLARE_ACCOUNT_ID).toBe('acct-test');
+      // env must be present so pi-ai can fill any {VAR} placeholders in the base URL
+      expect((seen[0].env as Record<string, string>).CODE_REVIEW_BASE_URL_VAR).toBe('acct-test');
       // existing options must be preserved, not clobbered
       expect(seen[0].apiKey).toBe('k');
       expect(seen[0].maxTokens).toBe(7);
     } finally {
-      if (prev === undefined) delete process.env.CLOUDFLARE_ACCOUNT_ID;
-      else process.env.CLOUDFLARE_ACCOUNT_ID = prev;
+      if (prev === undefined) delete process.env.CODE_REVIEW_BASE_URL_VAR;
+      else process.env.CODE_REVIEW_BASE_URL_VAR = prev;
     }
   });
 });

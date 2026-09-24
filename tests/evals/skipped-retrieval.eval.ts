@@ -16,9 +16,9 @@ import { parseReviewMarkdownWithWarnings } from '../../src/parser.js';
 // OFF by default (real LLM, costs money): SKIPPED_RETRIEVAL_RUN=1 to run.
 
 const TRIALS = Number(process.env.SKIPPED_RETRIEVAL_TRIALS) || 3;
-// Route through the configured provider (Cloudflare AI Gateway in CI); no direct
+// Route through the configured provider (OpenRouter in CI); no direct
 // OpenAI/Anthropic calls. Key resolved per-provider from the model id.
-const MODEL = process.env.CODE_REVIEW_EVAL_MODEL ?? 'cloudflare-ai-gateway/claude-haiku-4.5';
+const MODEL = process.env.CODE_REVIEW_EVAL_MODEL ?? 'openrouter/anthropic/claude-haiku-4.5';
 const apiKey = resolveProviderApiKey(MODEL);
 const skip = process.env.SKIPPED_RETRIEVAL_RUN !== '1' || !apiKey;
 

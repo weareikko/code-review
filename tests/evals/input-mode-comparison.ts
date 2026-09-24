@@ -29,7 +29,7 @@ import { scoreReview, type ScoreResult } from './scoring.js';
 import type { PlantedBug, SyntheticReview } from './synthetic.js';
 import { createTrajectoryCollector, filesRead, type Trajectory } from './trajectory.js';
 
-export const EVAL_MODEL = process.env.CODE_REVIEW_EVAL_MODEL ?? 'cloudflare-ai-gateway/gpt-5.4';
+export const EVAL_MODEL = process.env.CODE_REVIEW_EVAL_MODEL ?? 'openrouter/openai/gpt-5.6-luna';
 
 export interface Arm {
   label: string;

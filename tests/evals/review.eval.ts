@@ -43,11 +43,11 @@ type EvalOutput = {
   usageTokens: { input: number; output: number; total: number };
 };
 
-// Evals must route every model call through the configured provider (the
-// Cloudflare AI Gateway in CI) — no direct OpenAI/Anthropic calls. The key is
-// therefore resolved per-provider from the model id, exactly as production does,
-// instead of reaching for ANTHROPIC_API_KEY directly.
-const EVAL_MODEL = process.env.CODE_REVIEW_EVAL_MODEL ?? 'cloudflare-ai-gateway/gpt-5.4';
+// Evals must route every model call through the configured provider (OpenRouter
+// in CI) — no direct OpenAI/Anthropic calls. The key is therefore resolved
+// per-provider from the model id, exactly as production does, instead of
+// reaching for ANTHROPIC_API_KEY directly.
+const EVAL_MODEL = process.env.CODE_REVIEW_EVAL_MODEL ?? 'openrouter/openai/gpt-5.6-luna';
 
 function makeConfig(overrides: Partial<Config>): Config {
   const model = overrides.model ?? EVAL_MODEL;
@@ -206,7 +206,7 @@ const NoSevereFindingsJudge = createJudge(
 );
 
 // Skip evals when the configured provider has no key in env (e.g. no
-// CLOUDFLARE_API_KEY for the gateway). Resolved the same way as the reviewer,
+// OPENROUTER_API_KEY). Resolved the same way as the reviewer,
 // so the skip decision tracks the model the eval will actually call.
 const missingApiKey = () => !resolveProviderApiKey(EVAL_MODEL);
 

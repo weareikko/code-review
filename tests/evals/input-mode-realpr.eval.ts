@@ -25,7 +25,7 @@ import { createTrajectoryCollector, filesRead } from './trajectory.js';
 
 const RUN = process.env.INPUT_MODE_REALPR_RUN === '1';
 const TRIALS = Number(process.env.INPUT_MODE_TRIALS ?? 2);
-const EVAL_MODEL = process.env.CODE_REVIEW_EVAL_MODEL ?? 'cloudflare-ai-gateway/gpt-5.4';
+const EVAL_MODEL = process.env.CODE_REVIEW_EVAL_MODEL ?? 'openrouter/openai/gpt-5.6-luna';
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'studiometa-ui-511.diff');
 
 interface Arm {

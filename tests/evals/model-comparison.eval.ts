@@ -12,7 +12,7 @@
  *   - test-results/model-comparison.md      (human-readable comparison)
  *
  * Reviewer model is set per row; the API key is resolved per-provider via
- * resolveProviderApiKey (so GPT-via-Cloudflare-gateway uses CLOUDFLARE_API_KEY,
+ * resolveProviderApiKey (so models routed via OpenRouter use OPENROUTER_API_KEY,
  * Anthropic uses ANTHROPIC_API_KEY). The LLM judge always runs on Anthropic
  * (claude-haiku-4-5) so grading is fair and independent of the model under test.
  *
@@ -888,7 +888,7 @@ function buildReport(records: TrialRecord[]): string {
   }
   lines.push(
     '',
-    '_Per-scenario cells are mean raw judge score (%); "exp" is the desired value. Cost is real, computed by pi-ai (cache-aware). Sonnet baseline runs direct on Anthropic; GPT models run direct via the OpenAI provider (pi-ai\'s Cloudflare-gateway registry lacks the nano/mini IDs; routing does not change accuracy or per-token cost)._',
+    '_Per-scenario cells are mean raw judge score (%); "exp" is the desired value. Cost is real, computed by pi-ai (cache-aware). Sonnet baseline runs direct on Anthropic; GPT models run via OpenRouter (routing does not change accuracy or per-token cost)._',
   );
   return lines.join('\n');
 }
