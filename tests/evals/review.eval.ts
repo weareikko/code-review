@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect } from 'vitest';
-import type { JudgeContext } from 'vitest-evals';
+import type { JsonValue, JudgeContext, TranscriptEvent } from 'vitest-evals';
 // oxlint-disable eslint-plugin-jest/no-standalone-expect -- describeEval uses its own `it` wrapper that oxlint doesn't recognise
 import { createHarness, createJudge, describeEval } from 'vitest-evals';
 import type { Config } from '../../src/config.js';
@@ -122,8 +122,23 @@ const reviewHarness = createHarness<EvalInput, EvalOutput, Record<string, unknow
         },
       };
 
+      // vitest-evals requires an ordered transcript alongside the output. The
+      // reviewer is a single agent run, so the transcript is the diff it was
+      // given, the tools it called, and the review it wrote.
+      const events: TranscriptEvent[] = [
+        { type: 'message', role: 'user', content: input.diff },
+        ...trajectory.toolCalls.map((call, index) => ({
+          type: 'tool_call' as const,
+          id: `tool-${index}`,
+          name: call.name,
+          arguments: JSON.parse(JSON.stringify(call.args)) as Record<string, JsonValue>,
+        })),
+        { type: 'message', role: 'assistant', content: raw },
+      ];
+
       return {
         output,
+        events,
         usage: {
           provider: 'anthropic',
           model: usage.model,

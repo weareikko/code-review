@@ -13,7 +13,7 @@ import type { Judge, JudgeContext } from 'vitest-evals';
 // configured provider (in this project's CI, the Cloudflare AI Gateway), so the
 // judge model is a `provider/modelId` string resolved via pi-ai, not a raw
 // Anthropic endpoint.
-const DEFAULT_JUDGE_MODEL = 'cloudflare-ai-gateway/claude-haiku-4-5';
+const DEFAULT_JUDGE_MODEL = 'cloudflare-ai-gateway/claude-haiku-4.5';
 
 type LlmJudgeVerdict = {
   score: 0 | 1;
@@ -43,7 +43,7 @@ async function callJudge(systemPrompt: string, userPrompt: string): Promise<LlmJ
   const { provider, modelId } = splitModel(getModelId());
   if (!provider) {
     throw new Error(
-      `Judge model "${getModelId()}" must be a provider/modelId string (e.g. cloudflare-ai-gateway/claude-3-5-haiku)`,
+      `Judge model "${getModelId()}" must be a provider/modelId string (e.g. cloudflare-ai-gateway/claude-haiku-4.5)`,
     );
   }
   const apiKey = getEnvApiKey(provider) ?? '';
@@ -54,8 +54,13 @@ async function callJudge(systemPrompt: string, userPrompt: string): Promise<LlmJ
   }
   // getBuiltinModel is statically typed against the MODELS table; the judge
   // model is a runtime string, so resolve through a widened signature.
-  const resolve = getBuiltinModel as (p: KnownProvider, m: string) => Model<Api>;
+  const resolve = getBuiltinModel as (p: KnownProvider, m: string) => Model<Api> | undefined;
   const model = resolve(provider as KnownProvider, modelId);
+  if (!model) {
+    throw new Error(
+      `Judge model "${getModelId()}" is not in pi-ai's builtin registry. Model ids change between pi-ai releases — check the provider's current ids.`,
+    );
+  }
   const result = await completeSimple(
     model,
     {
