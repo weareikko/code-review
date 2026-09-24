@@ -1138,14 +1138,14 @@ describe('resolveModel (via runReview createAgent)', () => {
     const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const captured: { model?: unknown } = {};
 
-    // openrouter/ai21/jamba-large-1.7 is a registered model in pi-ai
+    // openrouter/mistralai/mistral-medium-3.1 is a registered model in pi-ai
     await runReview(
-      { ...base, cwd, model: 'openrouter/ai21/jamba-large-1.7', apiKey: 'or-key' },
+      { ...base, cwd, model: 'openrouter/mistralai/mistral-medium-3.1', apiKey: 'or-key' },
       { cwd, diff: sampleDiff, createAgent: fakeAgentWithCapture(captured) },
     );
 
     // The model ID passed to the agent should be the full multi-slash ID
-    expect((captured.model as { id?: string })?.id).toBe('ai21/jamba-large-1.7');
+    expect((captured.model as { id?: string })?.id).toBe('mistralai/mistral-medium-3.1');
     expect((captured.model as { provider?: string })?.provider).toBe('openrouter');
   });
 
@@ -1179,7 +1179,7 @@ describe('resolveModel (via runReview createAgent)', () => {
       {
         ...base,
         cwd,
-        model: 'openrouter/ai21/jamba-large-1.7',
+        model: 'openrouter/mistralai/mistral-medium-3.1',
         apiKey: 'or-key',
         baseUrl: 'https://custom-gateway.example.com/v1',
       },
@@ -1199,7 +1199,7 @@ describe('resolveModel (via runReview createAgent)', () => {
       {
         ...base,
         cwd,
-        model: 'openrouter/ai21/jamba-large-1.7',
+        model: 'openrouter/mistralai/mistral-medium-3.1',
         apiKey: 'or-key',
         maxTokens: 1024,
       },
@@ -2061,9 +2061,9 @@ describe('resolveVerifyMember', () => {
   it('resolves a distinct, keyed model and logs the routing', async () => {
     process.env.ANTHROPIC_API_KEY = 'ak';
     const { logger, infos, warns } = capturingLogger();
-    const cfg = { ...baseConfig, verifyModel: 'anthropic/claude-opus-4-1' };
+    const cfg = { ...baseConfig, verifyModel: 'anthropic/claude-opus-4-5' };
     const member = resolveVerifyMember(cfg, primary, logger);
-    expect(member?.id).toBe('anthropic/claude-opus-4-1');
+    expect(member?.id).toBe('anthropic/claude-opus-4-5');
     expect(await member?.getApiKey()).toBe('ak');
     expect(infos.some((m) => m.includes('Verify stage routed to'))).toBe(true);
     // opus is pricier than the sonnet finder → no cheaper-tier warning
@@ -2110,27 +2110,27 @@ describe('blendedCost', () => {
 });
 
 describe('createReviewStreamFn', () => {
-  it('threads process.env as options.env (cloudflare-ai-gateway base-URL substitution) and preserves options', () => {
+  it('threads process.env as options.env (base-URL placeholder substitution) and preserves options', () => {
     const seen: Array<Record<string, unknown>> = [];
     const fakeStream = ((_model: unknown, _context: unknown, options: unknown) => {
       seen.push(options as Record<string, unknown>);
       return undefined as never;
     }) as unknown as Parameters<typeof createReviewStreamFn>[0];
 
-    const prev = process.env.CLOUDFLARE_ACCOUNT_ID;
-    process.env.CLOUDFLARE_ACCOUNT_ID = 'acct-test';
+    const prev = process.env.CODE_REVIEW_BASE_URL_VAR;
+    process.env.CODE_REVIEW_BASE_URL_VAR = 'acct-test';
     try {
       const streamFn = createReviewStreamFn(fakeStream);
       streamFn({} as never, {} as never, { apiKey: 'k', maxTokens: 7 } as never);
       expect(seen).toHaveLength(1);
-      // env must be present so pi-ai can fill {CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}
-      expect((seen[0].env as Record<string, string>).CLOUDFLARE_ACCOUNT_ID).toBe('acct-test');
+      // env must be present so pi-ai can fill any {VAR} placeholders in the base URL
+      expect((seen[0].env as Record<string, string>).CODE_REVIEW_BASE_URL_VAR).toBe('acct-test');
       // existing options must be preserved, not clobbered
       expect(seen[0].apiKey).toBe('k');
       expect(seen[0].maxTokens).toBe(7);
     } finally {
-      if (prev === undefined) delete process.env.CLOUDFLARE_ACCOUNT_ID;
-      else process.env.CLOUDFLARE_ACCOUNT_ID = prev;
+      if (prev === undefined) delete process.env.CODE_REVIEW_BASE_URL_VAR;
+      else process.env.CODE_REVIEW_BASE_URL_VAR = prev;
     }
   });
 });

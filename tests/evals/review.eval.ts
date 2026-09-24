@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect } from 'vitest';
-import type { JudgeContext } from 'vitest-evals';
+import type { JsonValue, JudgeContext, TranscriptEvent } from 'vitest-evals';
 // oxlint-disable eslint-plugin-jest/no-standalone-expect -- describeEval uses its own `it` wrapper that oxlint doesn't recognise
 import { createHarness, createJudge, describeEval } from 'vitest-evals';
 import type { Config } from '../../src/config.js';
@@ -43,11 +43,11 @@ type EvalOutput = {
   usageTokens: { input: number; output: number; total: number };
 };
 
-// Evals must route every model call through the configured provider (the
-// Cloudflare AI Gateway in CI) — no direct OpenAI/Anthropic calls. The key is
-// therefore resolved per-provider from the model id, exactly as production does,
-// instead of reaching for ANTHROPIC_API_KEY directly.
-const EVAL_MODEL = process.env.CODE_REVIEW_EVAL_MODEL ?? 'cloudflare-ai-gateway/gpt-5.4';
+// Evals must route every model call through the configured provider (OpenRouter
+// in CI) — no direct OpenAI/Anthropic calls. The key is therefore resolved
+// per-provider from the model id, exactly as production does, instead of
+// reaching for ANTHROPIC_API_KEY directly.
+const EVAL_MODEL = process.env.CODE_REVIEW_EVAL_MODEL ?? 'openrouter/openai/gpt-5.6-luna';
 
 function makeConfig(overrides: Partial<Config>): Config {
   const model = overrides.model ?? EVAL_MODEL;
@@ -122,8 +122,23 @@ const reviewHarness = createHarness<EvalInput, EvalOutput, Record<string, unknow
         },
       };
 
+      // vitest-evals requires an ordered transcript alongside the output. The
+      // reviewer is a single agent run, so the transcript is the diff it was
+      // given, the tools it called, and the review it wrote.
+      const events: TranscriptEvent[] = [
+        { type: 'message', role: 'user', content: input.diff },
+        ...trajectory.toolCalls.map((call, index) => ({
+          type: 'tool_call' as const,
+          id: `tool-${index}`,
+          name: call.name,
+          arguments: JSON.parse(JSON.stringify(call.args)) as Record<string, JsonValue>,
+        })),
+        { type: 'message', role: 'assistant', content: raw },
+      ];
+
       return {
         output,
+        events,
         usage: {
           provider: 'anthropic',
           model: usage.model,
@@ -191,7 +206,7 @@ const NoSevereFindingsJudge = createJudge(
 );
 
 // Skip evals when the configured provider has no key in env (e.g. no
-// CLOUDFLARE_API_KEY for the gateway). Resolved the same way as the reviewer,
+// OPENROUTER_API_KEY). Resolved the same way as the reviewer,
 // so the skip decision tracks the model the eval will actually call.
 const missingApiKey = () => !resolveProviderApiKey(EVAL_MODEL);
 

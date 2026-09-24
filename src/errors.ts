@@ -42,7 +42,7 @@ export class GitlabReviewError extends Error {
 
 /**
  * Patterns that identify a provider credit/quota-exhaustion error across
- * providers (Anthropic, OpenAI, Cloudflare AI Gateway, …). Matched against the
+ * providers (Anthropic, OpenAI, OpenRouter, …). Matched against the
  * provider's error message. Deliberately excludes transient rate limits (429),
  * which are retryable rather than a billing dead-end.
  */

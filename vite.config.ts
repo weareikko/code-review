@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vitest/config';
+import { defaultExclude, defineConfig } from 'vitest/config';
 
 const external = [
   ...builtinModules,
@@ -42,6 +42,9 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    include: ['src/**/*.test.ts', 'tests/**/*.test.ts'],
+    // Materialized benchmark repos live here and carry their own test suites.
+    exclude: [...defaultExclude, 'tests/evals/fixtures/**'],
     reporters: process.env.CI ? ['default', 'junit'] : ['default'],
     outputFile: {
       junit: './test-results/junit.xml',

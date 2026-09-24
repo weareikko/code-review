@@ -148,9 +148,9 @@ describe('config env defaults', () => {
   it('resolves verifyModel from CODE_REVIEW_VERIFY_MODEL', () => {
     const cfg = resolveConfig([], {
       ...baseEnv,
-      CODE_REVIEW_VERIFY_MODEL: 'cloudflare-ai-gateway/gpt-5.4',
+      CODE_REVIEW_VERIFY_MODEL: 'openrouter/openai/gpt-5.4',
     });
-    expect(cfg.verifyModel).toBe('cloudflare-ai-gateway/gpt-5.4');
+    expect(cfg.verifyModel).toBe('openrouter/openai/gpt-5.4');
   });
 
   it('defaults marketplaces to an empty list when unset', () => {
@@ -186,7 +186,7 @@ describe('config env defaults', () => {
   it('prefers --verify-model over CODE_REVIEW_VERIFY_MODEL', () => {
     const cfg = resolveConfig(['--verify-model', 'openai/gpt-5.4'], {
       ...baseEnv,
-      CODE_REVIEW_VERIFY_MODEL: 'cloudflare-ai-gateway/gpt-5.4',
+      CODE_REVIEW_VERIFY_MODEL: 'openrouter/openai/gpt-5.4',
     });
     expect(cfg.verifyModel).toBe('openai/gpt-5.4');
   });
@@ -1199,23 +1199,23 @@ describe('provider-aware key resolution', () => {
 describe('applyCodeReviewEnvPrefix', () => {
   it('exposes CODE_REVIEW_<NAME> as <NAME> for non-reserved names', () => {
     const env: NodeJS.ProcessEnv = {
-      CODE_REVIEW_CLOUDFLARE_API_KEY: 'cf-key',
-      CODE_REVIEW_CLOUDFLARE_ACCOUNT_ID: 'acct',
+      CODE_REVIEW_OPENROUTER_API_KEY: 'cf-key',
+      CODE_REVIEW_OPENAI_API_KEY: 'acct',
       CODE_REVIEW_GITLAB_TOKEN: 'tok',
     };
     applyCodeReviewEnvPrefix(env);
-    expect(env.CLOUDFLARE_API_KEY).toBe('cf-key');
-    expect(env.CLOUDFLARE_ACCOUNT_ID).toBe('acct');
+    expect(env.OPENROUTER_API_KEY).toBe('cf-key');
+    expect(env.OPENAI_API_KEY).toBe('acct');
     expect(env.GITLAB_TOKEN).toBe('tok');
   });
 
   it('lets the prefixed value win over a plain value of the same name', () => {
     const env: NodeJS.ProcessEnv = {
-      CLOUDFLARE_API_KEY: 'project-wide',
-      CODE_REVIEW_CLOUDFLARE_API_KEY: 'scoped',
+      OPENROUTER_API_KEY: 'project-wide',
+      CODE_REVIEW_OPENROUTER_API_KEY: 'scoped',
     };
     applyCodeReviewEnvPrefix(env);
-    expect(env.CLOUDFLARE_API_KEY).toBe('scoped');
+    expect(env.OPENROUTER_API_KEY).toBe('scoped');
   });
 
   it('fills in a gap when only the prefixed value is set', () => {

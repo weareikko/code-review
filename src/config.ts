@@ -69,8 +69,8 @@ const RESERVED_ENV_SUFFIX_SET = new Set<string>(RESERVED_ENV_SUFFIXES);
  * CI-wide variable of the same name.
  *
  * This lets credentials and infra vars that `@earendil-works/pi-ai` reads
- * (`ANTHROPIC_API_KEY`, `CLOUDFLARE_API_KEY`, `CLOUDFLARE_ACCOUNT_ID`,
- * `OLLAMA_HOST`, ambient AWS/Vertex creds, …) — and the GitLab tokens — be
+ * (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `OLLAMA_HOST`,
+ * ambient AWS/Vertex creds, …) — and the GitLab tokens — be
  * scoped under `CODE_REVIEW_` in shared CI without enumerating pi-ai's
  * provider list.
  *
@@ -100,8 +100,8 @@ export function applyCodeReviewEnvPrefix(env = process.env): NodeJS.ProcessEnv {
 /**
  * Default pi-ai's prompt-cache retention to `long` when the caller has not set
  * it. pi-ai reads `PI_CACHE_RETENTION` from `process.env` at request time; `long`
- * asks providers that support it (e.g. OpenAI's `openai-responses` API, including
- * via the Cloudflare AI Gateway) to keep the cached system-prompt prefix for up
+ * asks providers that support it (e.g. OpenAI's `openai-responses` API) to keep
+ * the cached system-prompt prefix for up
  * to 24h so reviews spaced hours apart still reuse it. It is a safe no-op for
  * providers/models without long-retention support (e.g. Anthropic), where it
  * behaves exactly like the default `short`.

@@ -49,6 +49,7 @@
       }
     ],
     "no-console": "off",
+    "no-underscore-dangle": "off",
     "no-control-regex": "off",
     "no-useless-escape": "off",
     "eqeqeq": [
@@ -75,13 +76,15 @@
     "vitest/no-import-node-test": "error",
     "vitest/prefer-to-be-truthy": "off",
     "vitest/prefer-to-be-falsy": "off",
+    "vitest/require-mock-type-parameters": "off",
+    "vitest/require-to-throw-message": "off",
     "typescript/await-thenable": "error",
     "typescript/no-floating-promises": "error",
     "typescript/no-for-in-array": "error",
     "typescript/no-misused-promises": "error",
-    "node/no-process-exit": "error",
+    "unicorn/no-process-exit": "error",
     "node/no-sync": "off",
-    "node/prefer-node-protocol": "error",
+    "unicorn/prefer-node-protocol": "error",
     "promise/no-multiple-resolved": "error",
     "typescript/no-base-to-string": "off",
     "typescript/no-unsafe-type-assertion": "off",
@@ -95,7 +98,8 @@
         "typescript/no-explicit-any": "off",
         "max-lines-per-function": "off",
         "max-nested-callbacks": "off",
-        "promise/catch-or-return": "off"
+        "promise/catch-or-return": "off",
+        "unicorn/consistent-function-scoping": "off"
       }
     },
     {

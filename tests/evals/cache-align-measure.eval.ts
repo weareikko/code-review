@@ -35,9 +35,9 @@ const TRIALS = Number(process.env.CACHE_ALIGN_TRIALS) || 3;
 const LABEL = process.env.CACHE_ALIGN_LABEL ?? 'unlabeled';
 const RESULTS_FILE = process.env.CACHE_ALIGN_RESULTS ?? join(tmpdir(), 'cache-align-results.jsonl');
 
-// Route through the configured provider (Cloudflare AI Gateway in CI); no direct
+// Route through the configured provider (OpenRouter in CI); no direct
 // OpenAI/Anthropic calls. Key resolved per-provider from the model id.
-const MODEL = process.env.CODE_REVIEW_EVAL_MODEL ?? 'cloudflare-ai-gateway/claude-3-5-haiku';
+const MODEL = process.env.CODE_REVIEW_EVAL_MODEL ?? 'openrouter/anthropic/claude-haiku-4.5';
 const apiKey = resolveProviderApiKey(MODEL);
 
 // Skip unless explicitly opted in AND a key is available. The CACHE_ALIGN_RUN

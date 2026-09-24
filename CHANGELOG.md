@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Updated all dependencies, including `@earendil-works/pi-*` to 0.85.1 and the oxlint/oxfmt toolchain ([#150]).
+
 ## [0.9.6] - 2026-09-23
 
 ### Changed
@@ -141,6 +145,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.8.6]: https://github.com/weareikko/code-review/compare/0.8.5...0.8.6
 [0.8.5]: https://github.com/weareikko/code-review/compare/0.8.4...0.8.5
 [0.8.4]: https://github.com/weareikko/code-review/compare/0.8.3...0.8.4
+[#150]: https://github.com/weareikko/code-review/pull/150
 [#148]: https://github.com/weareikko/code-review/pull/148
 [#144]: https://github.com/weareikko/code-review/pull/144
 [#142]: https://github.com/weareikko/code-review/pull/142

@@ -56,17 +56,16 @@ The CLI auto-resolves values from CI variables and common token/key names.
 | `CODE_REVIEW_REFRESH_SKILLS`                  | Set to `true`/`1` to re-clone `git:` / `git+ssh:` skills and marketplaces instead of reusing the on-disk cache                                                                                                                                                                                                                                                                                                                               |
 | `CODE_REVIEW_OTEL`                            | Set to `1` to enable the OpenTelemetry bridge (generic OTLP spans + metrics)                                                                                                                                                                                                                                                                                                                                                                 |
 | `CODE_REVIEW_VERIFY_CONCURRENCY`              | Advanced: number of Verify-stage adversarial agents to run concurrently at `verify`/`full` depth. Default `4`. Lower values trade latency for higher provider prompt-cache hit rates on the shared diff.                                                                                                                                                                                                                                     |
-| `PI_CACHE_RETENTION`                          | Prompt-cache retention passed to the AI SDK: `long` (default), `short`, or `none`. `long` asks providers that support it (OpenAI's `openai-responses` API, incl. via the Cloudflare AI Gateway) to keep the cached system-prompt prefix up to 24h so reviews spaced hours apart still reuse it; a safe no-op where unsupported (e.g. Anthropic). Also settable as `CODE_REVIEW_PI_CACHE_RETENTION`.                                          |
+| `PI_CACHE_RETENTION`                          | Prompt-cache retention passed to the AI SDK: `long` (default), `short`, or `none`. `long` asks providers that support it (OpenAI's `openai-responses` API) to keep the cached system-prompt prefix up to 24h so reviews spaced hours apart still reuse it; a safe no-op where unsupported (e.g. Anthropic). Also settable as `CODE_REVIEW_PI_CACHE_RETENTION`.                                                                               |
 
 ### Namespacing provider/infra variables with `CODE_REVIEW_`
 
-In a shared CI environment (GitLab CI, or a GitHub Actions org/repo secret set), the provider credentials and infra variables read by the AI SDK use generic, provider-standard names (`ANTHROPIC_API_KEY`, `CLOUDFLARE_API_KEY`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_GATEWAY_ID`, `OLLAMA_HOST`, ambient AWS/Vertex creds, …). To avoid collisions with unrelated jobs and make it obvious which variables belong to code-review, you can optionally prefix any of them with `CODE_REVIEW_`. At startup, each `CODE_REVIEW_<NAME>` variable is exposed as `<NAME>`:
+In a shared CI environment (GitLab CI, or a GitHub Actions org/repo secret set), the provider credentials and infra variables read by the AI SDK use generic, provider-standard names (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `OLLAMA_HOST`, ambient AWS/Vertex creds, …). To avoid collisions with unrelated jobs and make it obvious which variables belong to code-review, you can optionally prefix any of them with `CODE_REVIEW_`. At startup, each `CODE_REVIEW_<NAME>` variable is exposed as `<NAME>`:
 
 ```
 CODE_REVIEW_ANTHROPIC_API_KEY     → ANTHROPIC_API_KEY
-CODE_REVIEW_CLOUDFLARE_API_KEY    → CLOUDFLARE_API_KEY
-CODE_REVIEW_CLOUDFLARE_ACCOUNT_ID → CLOUDFLARE_ACCOUNT_ID
-CODE_REVIEW_CLOUDFLARE_GATEWAY_ID → CLOUDFLARE_GATEWAY_ID
+CODE_REVIEW_OPENROUTER_API_KEY    → OPENROUTER_API_KEY
+CODE_REVIEW_OPENAI_API_KEY        → OPENAI_API_KEY
 CODE_REVIEW_OLLAMA_HOST           → OLLAMA_HOST
 CODE_REVIEW_GITLAB_TOKEN          → GITLAB_TOKEN
 ```

@@ -265,12 +265,11 @@ const exec = promisify(execFile);
  *
  * pi-ai >=0.82 requires an explicit stream function (earlier versions built one
  * internally from model + getApiKey); `streamSimple` is the drop-in. Critically,
- * 0.83 also moved cloudflare-ai-gateway base-URL substitution — the
- * `{CLOUDFLARE_ACCOUNT_ID}` / `{CLOUDFLARE_GATEWAY_ID}` placeholders — from a
- * direct `process.env` read to an explicit `env` on the stream options. Without
- * threading `env` through, the gateway URL keeps its literal placeholders and
- * every request fails with Cloudflare 401 2035 ("Invalid request path"). Passing
- * `env` is harmless for providers whose base URL has no placeholders.
+ * 0.83 also moved base-URL placeholder substitution from a direct `process.env`
+ * read to an explicit `env` on the stream options. Providers whose base URL
+ * contains `{VAR}` placeholders keep them literal — and fail every request —
+ * unless `env` is threaded through. Passing `env` is harmless for providers
+ * whose base URL has none.
  *
  * `stream` is injectable so the env threading can be unit-tested without a live call.
  */

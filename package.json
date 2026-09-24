@@ -61,15 +61,15 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.83.0",
-    "@earendil-works/pi-ai": "0.83.0",
-    "@earendil-works/pi-coding-agent": "0.83.0",
+    "@earendil-works/pi-agent-core": "0.85.1",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.85.1",
     "@opentelemetry/api": "^1.9.1",
-    "@opentelemetry/api-logs": "^0.218.0",
+    "@opentelemetry/api-logs": "^0.222.0",
     "@opentelemetry/resources": "^2.7.1",
-    "@opentelemetry/sdk-node": "^0.218.0",
+    "@opentelemetry/sdk-node": "^0.222.0",
     "@opentelemetry/semantic-conventions": "^1.41.1",
-    "diff": "^8.0.4",
+    "diff": "^9.0.0",
     "isomorphic-git": "^1.38.7",
     "jsonrepair": "^3.14.0",
     "typebox": "^1.1.38",
@@ -77,21 +77,21 @@
   },
   "devDependencies": {
     "@types/node": "^24.12.4",
-    "@typescript/native-preview": "7.0.0-dev.20260304.1",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "@vitest/coverage-v8": "^4.1.8",
-    "dotenv": "^17.4.2",
+    "dotenv": "^18.0.1",
     "husky": "9.1.7",
-    "lint-staged": "17.0.4",
+    "lint-staged": "17.5.1",
     "memfs": "^4.57.6",
-    "oxfmt": "0.36.0",
-    "oxlint": "1.51.0",
-    "oxlint-tsgolint": "^0.23.0",
+    "oxfmt": "0.68.0",
+    "oxlint": "1.83.0",
+    "oxlint-tsgolint": "^7.0.2002",
     "vite": "^8.0.16",
     "vitest": "^4.1.8",
-    "vitest-evals": "^0.11.0"
+    "vitest-evals": "^0.17.0"
   },
   "lint-staged": {
-    "*.{js,ts,json,md,yml,yaml}": "oxfmt --write"
+    "*.{js,ts,json,md,yml,yaml}": "oxfmt --write --no-error-on-unmatched-pattern"
   },
   "engines": {
     "node": ">=24"
