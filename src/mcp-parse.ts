@@ -61,14 +61,44 @@ const KNOWN_TYPES = new Set(['stdio', 'http', 'sse', 'ws']);
 // `${VAR}` or `${VAR:-default}`; the default may be empty.
 const TEMPLATE_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
 
+/**
+ * Upper bound on a server-declared `timeout`. A server definition governs its
+ * own per-call timeout, but it must not be able to stall the review for hours:
+ * connect and `tools/list` run before the agent loop, outside the review
+ * timeout, so an unclamped value there is a one-line denial of service.
+ */
+export const MAX_MCP_TIMEOUT_MS = 120_000;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The subset of `env` an operator opted into exposing to `${VAR}` expansion.
+ *
+ * Server definitions can come from the repository under review or from a
+ * marketplace plugin whose upstream ref moves, so expanding from the whole
+ * process environment would let a definition read any secret the reviewer holds
+ * (`CODE_REVIEW_GITLAB_TOKEN`, `ANTHROPIC_API_KEY`, …) and ship it out in argv,
+ * a header, or a URL query string. Only names listed in `allowlist` are
+ * readable; everything else expands as unset, which skips the server with a
+ * warning that names the variable and never a value.
+ */
+export function pickMcpEnvVars(env: McpEnvVars, allowlist: readonly string[]): McpEnvVars {
+  const picked: Record<string, string | undefined> = {};
+  for (const name of allowlist) {
+    if (env[name] !== undefined) picked[name] = env[name];
+  }
+  return picked;
 }
 
 /**
  * Expand `${VAR}` and `${VAR:-default}` references in `value`. Missing
  * variables (unset, with no default) are left untouched and reported by name in
  * `missing` so callers can skip the server without ever logging a value.
+ *
+ * `${VAR:-default}` follows POSIX: the default applies when `VAR` is unset *or*
+ * empty. Bare `${VAR}` expands to an empty string when `VAR` is set but empty.
  */
 export function expandMcpTemplate(
   value: string,
@@ -77,8 +107,8 @@ export function expandMcpTemplate(
   const missing: string[] = [];
   const expanded = value.replace(TEMPLATE_PATTERN, (match, name: string, fallback?: string) => {
     const current = vars[name];
+    if (fallback !== undefined) return current !== undefined && current !== '' ? current : fallback;
     if (current !== undefined) return current;
-    if (fallback !== undefined) return fallback;
     if (!missing.includes(name)) missing.push(name);
     return match;
   });
@@ -125,7 +155,11 @@ export function parseMcpDisableFilters(raw: unknown): McpDisableFilters {
 
 /** Options for `normalizeMcpServer` / `parseMcpServers`. */
 export interface NormalizeMcpServerOptions {
-  /** Variables for `${VAR}` expansion; defaults to `process.env`. */
+  /**
+   * Variables for `${VAR}` expansion. Defaults to none: the process
+   * environment is never exposed implicitly — callers pass the operator's
+   * allowlist (see `pickMcpEnvVars`).
+   */
   vars?: McpEnvVars;
   /** Expanded from `${CLAUDE_PLUGIN_ROOT}` for marketplace plugins. */
   pluginRoot?: string;
@@ -159,12 +193,12 @@ function describeSource(source: McpServerSource): string {
  *
  * - `type: ws`, or any `oauth` / `headersHelper` field — unsupported transports
  *   and auth flows
- * - no `command` for stdio, no `url` for http/sse
+ * - no `command` for stdio, no `url` for http/sse, before or after expansion
  * - a `${VAR}` reference with no value and no default (the warning names the
  *   variable, never a value)
  *
  * `type` defaults to `stdio` when `command` is present and `http` when `url`
- * is present.
+ * is present. A server-declared `timeout` is clamped to `MAX_MCP_TIMEOUT_MS`.
  */
 export function normalizeMcpServer(
   name: string,
@@ -217,7 +251,7 @@ export function normalizeMcpServer(
   }
 
   const vars: McpEnvVars = {
-    ...(options.vars ?? process.env),
+    ...options.vars,
     ...(options.pluginRoot === undefined ? {} : { CLAUDE_PLUGIN_ROOT: options.pluginRoot }),
   };
   const expander = createExpander(vars);
@@ -241,14 +275,26 @@ export function normalizeMcpServer(
     config.headers = expandMap(stringMap(raw.headers));
   }
   if (typeof raw.timeout === 'number' && Number.isFinite(raw.timeout) && raw.timeout > 0) {
-    config.timeoutMs = raw.timeout;
+    config.timeoutMs = Math.min(raw.timeout, MAX_MCP_TIMEOUT_MS);
   }
 
   if (expander.missing.size > 0) {
     const names = [...expander.missing].map((v) => `\${${v}}`).join(', ');
     warn(
-      `MCP server "${name}" in ${where} references unset environment variable(s) ${names} — skipped. Set them or add a default with \${VAR:-default}.`,
+      `MCP server "${name}" in ${where} references unset environment variable(s) ${names} — skipped. Set them or add a default with \${VAR:-default}, and allow them with --mcp-env / CODE_REVIEW_MCP_ENV.`,
     );
+    return null;
+  }
+
+  // Re-check the required field after expansion: `${CI_BIN:-}` outside CI is a
+  // documented way to gate a server off, and it must skip cleanly here rather
+  // than reach the transport as an empty command or URL.
+  if (type === 'stdio' && !config.command) {
+    warn(`MCP server "${name}" in ${where} expands to an empty "command" — skipped.`);
+    return null;
+  }
+  if (type !== 'stdio' && !config.url) {
+    warn(`MCP server "${name}" in ${where} expands to an empty "url" — skipped.`);
     return null;
   }
   return config;

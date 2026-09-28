@@ -1,18 +1,32 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfigError } from './errors.js';
+
+// `loadMarketplaceMcpServers` is spied on (delegating to the real implementation
+// by default) so the tests can assert which options `resolveMcpServers` forwards
+// to it without standing up a fake marketplace clone.
+const { loadMarketplaceMcpServersMock } = vi.hoisted(() => ({
+  loadMarketplaceMcpServersMock: vi.fn(),
+}));
+vi.mock('./marketplaces.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./marketplaces.js')>();
+  return { ...actual, loadMarketplaceMcpServers: loadMarketplaceMcpServersMock };
+});
+
 import { buildMarketplaceRegistry } from './marketplaces.js';
 import {
   applyMcpDisableFilters,
   expandMcpTemplate,
   extractMcpServerMap,
   loadAutoDiscoveredMcpServers,
+  MAX_MCP_TIMEOUT_MS,
   normalizeMcpServer,
   parseMcpDisableFilters,
   parseMcpServers,
   parseMcpSpec,
+  pickMcpEnvVars,
   resolveMcpServers,
   type McpServerSource,
 } from './mcp-config.js';
@@ -55,6 +69,14 @@ describe('expandMcpTemplate', () => {
 
   it('accepts an empty default', () => {
     expect(expandMcpTemplate('a${NOPE:-}b', vars)).toEqual({ value: 'ab', missing: [] });
+  });
+
+  it('uses the :- default when the var is set but empty, like POSIX', () => {
+    expect(expandMcpTemplate('${CI_BIN:-npx}', { CI_BIN: '' }).value).toBe('npx');
+  });
+
+  it('keeps a bare ${VAR} set to the empty string as empty, not missing', () => {
+    expect(expandMcpTemplate('a${EMPTY}b', { EMPTY: '' })).toEqual({ value: 'ab', missing: [] });
   });
 
   it('reports missing vars by name and leaves the reference untouched', () => {
@@ -227,6 +249,54 @@ describe('normalizeMcpServer', () => {
       normalizeMcpServer('t', { command: 'x', timeout: 0 }, source, { vars })?.timeoutMs,
     ).toBeUndefined();
   });
+
+  it('clamps an oversized timeout to MAX_MCP_TIMEOUT_MS', () => {
+    expect(
+      normalizeMcpServer('t', { command: 'x', timeout: 86_400_000 }, source, { vars })?.timeoutMs,
+    ).toBe(MAX_MCP_TIMEOUT_MS);
+  });
+
+  it('skips a server whose command expands to nothing', () => {
+    const warn = vi.fn();
+    expect(
+      normalizeMcpServer('ci_only', { command: '${CI_BIN:-}' }, source, { vars, warn }),
+    ).toBeNull();
+    expect(warn.mock.calls[0][0]).toContain('empty "command"');
+  });
+
+  it('skips a server whose url expands to nothing', () => {
+    const warn = vi.fn();
+    expect(
+      normalizeMcpServer('ci_only', { type: 'http', url: '${CI_URL:-}' }, source, { vars, warn }),
+    ).toBeNull();
+    expect(warn.mock.calls[0][0]).toContain('empty "url"');
+  });
+
+  it('expands nothing when no vars are provided', () => {
+    const warn = vi.fn();
+    expect(normalizeMcpServer('s', { command: '${HOME}' }, source, { warn })).toBeNull();
+    expect(warn.mock.calls[0][0]).toContain('${HOME}');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// pickMcpEnvVars
+// ---------------------------------------------------------------------------
+
+describe('pickMcpEnvVars', () => {
+  it('keeps only the allowlisted names', () => {
+    expect(
+      pickMcpEnvVars({ JIRA_TOKEN: 'j', CODE_REVIEW_GITLAB_TOKEN: 'secret' }, ['JIRA_TOKEN']),
+    ).toEqual({ JIRA_TOKEN: 'j' });
+  });
+
+  it('omits allowlisted names that are unset, so they stay "missing"', () => {
+    expect(pickMcpEnvVars({}, ['JIRA_TOKEN'])).toEqual({});
+  });
+
+  it('returns nothing for an empty allowlist', () => {
+    expect(pickMcpEnvVars({ ANTHROPIC_API_KEY: 'k' }, [])).toEqual({});
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -366,23 +436,37 @@ describe('loadAutoDiscoveredMcpServers', () => {
     await writeFile(join(root, '.claude', 'settings.json'), '{{', 'utf8');
     const warn = vi.fn();
     expect(await loadAutoDiscoveredMcpServers(root, root, warn, { vars })).toEqual([]);
-    expect(warn).toHaveBeenCalledTimes(2);
-    expect(warn.mock.calls[0][0]).toContain('.mcp.json');
-    expect(warn.mock.calls[1][0]).toContain('settings.json');
+    const warnings = warn.mock.calls.map((call) => String(call[0]));
+    expect(warnings.some((msg) => msg.includes('.mcp.json'))).toBe(true);
+    expect(warnings.some((msg) => msg.includes('settings.json'))).toBe(true);
   });
 
-  it('defaults to process.env for expansion', async () => {
+  it('never expands from the process environment by default', async () => {
     const root = await makeTmp();
     await writeJson(join(root, '.mcp.json'), {
       mcpServers: { p: { command: '${MCP_TEST_CMD}' } },
     });
     vi.stubEnv('MCP_TEST_CMD', 'from-env');
     try {
-      const servers = await loadAutoDiscoveredMcpServers(root, root);
-      expect(servers[0]?.command).toBe('from-env');
+      const warn = vi.fn();
+      expect(await loadAutoDiscoveredMcpServers(root, root, warn)).toEqual([]);
+      expect(warn.mock.calls[0][0]).toContain('${MCP_TEST_CMD}');
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it('applies disabledMcpjsonServers from .claude/settings.local.json', async () => {
+    const root = await makeTmp();
+    await writeJson(join(root, '.mcp.json'), {
+      mcpServers: { a: { url: 'https://a.test' }, b: { url: 'https://b.test' } },
+    });
+    await mkdir(join(root, '.claude'), { recursive: true });
+    await writeJson(join(root, '.claude', 'settings.local.json'), {
+      disabledMcpjsonServers: ['b'],
+    });
+    const servers = await loadAutoDiscoveredMcpServers(root, root, undefined, { vars });
+    expect(servers.map((s) => s.name)).toEqual(['a']);
   });
 });
 
@@ -433,7 +517,12 @@ describe('parseMcpSpec', () => {
 describe('resolveMcpServers', () => {
   const emptyRegistry = buildMarketplaceRegistry([]);
 
-  it('auto-discovers repo servers when mcpDiscovery is true (the default)', async () => {
+  beforeEach(async () => {
+    const actual = await vi.importActual<typeof import('./marketplaces.js')>('./marketplaces.js');
+    loadMarketplaceMcpServersMock.mockImplementation(actual.loadMarketplaceMcpServers);
+  });
+
+  it('auto-discovers repo servers when mcpDiscovery is opted into', async () => {
     const root = await makeTmp();
     await writeJson(join(root, '.mcp.json'), {
       mcpServers: { docs: { url: 'https://docs.test/mcp' } },
@@ -547,5 +636,56 @@ describe('resolveMcpServers', () => {
     );
     expect(servers).toEqual([]);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('acme:dev/context7'));
+  });
+
+  it('keeps a settings.json-disabled name dropped when a --mcp file: spec redeclares it', async () => {
+    const root = await makeTmp();
+    await writeJson(join(root, '.mcp.json'), { mcpServers: { a: { command: 'a' } } });
+    await writeJson(join(root, '.claude', 'settings.json'), { disabledMcpServers: ['b'] });
+    const extra = join(root, 'extra.json');
+    await writeJson(extra, { b: { command: 'b' } });
+    const servers = await resolveMcpServers(
+      { mcp: [`file:${extra}`], disableMcp: [], mcpDiscovery: true },
+      root,
+      root,
+      emptyRegistry,
+      undefined,
+      { vars },
+    );
+    expect(servers.map((s) => s.name)).toEqual(['a']);
+  });
+
+  it('forwards the marketplace refresh flag and the env allowlist', async () => {
+    const root = await makeTmp();
+    loadMarketplaceMcpServersMock.mockResolvedValue([]);
+    await resolveMcpServers(
+      { mcp: ['acme:dev'], disableMcp: [], mcpDiscovery: false },
+      root,
+      root,
+      buildMarketplaceRegistry([]),
+      undefined,
+      { vars, refresh: true },
+    );
+    expect(loadMarketplaceMcpServersMock).toHaveBeenCalledWith(
+      { protocol: 'marketplace', marketplace: 'acme', plugin: 'dev', server: '' },
+      expect.anything(),
+      expect.objectContaining({ refresh: true, vars }),
+    );
+  });
+
+  it('applies settings.json disabledMcpServers even with repo discovery off', async () => {
+    const root = await makeTmp();
+    await writeJson(join(root, '.claude', 'settings.json'), { disabledMcpServers: ['b'] });
+    const extra = join(root, 'extra.json');
+    await writeJson(extra, { a: { command: 'a' }, b: { command: 'b' } });
+    const servers = await resolveMcpServers(
+      { mcp: [`file:${extra}`], disableMcp: [], mcpDiscovery: false },
+      root,
+      root,
+      emptyRegistry,
+      undefined,
+      { vars },
+    );
+    expect(servers.map((s) => s.name)).toEqual(['a']);
   });
 });

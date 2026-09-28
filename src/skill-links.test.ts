@@ -4,6 +4,7 @@ import {
   blobUrl,
   formatSkillLink,
   gitRepoWebUrl,
+  mcpSourceUrl,
   skillDisplayName,
   skillSourceUrl,
 } from './skill-links.js';
@@ -43,6 +44,71 @@ describe('blobUrl', () => {
 
   it('returns undefined for a non-URL base', () => {
     expect(blobUrl('not a url', 'main', 'SKILL.md')).toBeUndefined();
+  });
+
+  it('builds a tree (directory) URL on both host styles', () => {
+    expect(blobUrl('https://github.com/org/repo', 'main', 'plugins/dev', 'tree')).toBe(
+      'https://github.com/org/repo/tree/main/plugins/dev',
+    );
+    expect(blobUrl('https://gitlab.example.com/g/r', 'main', 'plugins/dev', 'tree')).toBe(
+      'https://gitlab.example.com/g/r/-/tree/main/plugins/dev',
+    );
+  });
+});
+
+describe('mcpSourceUrl', () => {
+  it('links a project .mcp.json to its blob at the reviewed commit', () => {
+    expect(
+      mcpSourceUrl(
+        { kind: 'project', path: '.mcp.json' },
+        { projectWebUrl: 'https://gitlab.example.com/team/app', commitSha: 'a1b2c3d' },
+      ),
+    ).toBe('https://gitlab.example.com/team/app/-/blob/a1b2c3d/.mcp.json');
+  });
+
+  it('leaves a project source unlinked without CI project coordinates', () => {
+    expect(mcpSourceUrl({ kind: 'project', path: '.mcp.json' })).toBeUndefined();
+    expect(
+      mcpSourceUrl(
+        { kind: 'project', path: '.mcp.json' },
+        { projectWebUrl: 'https://gitlab.example.com/team/app' },
+      ),
+    ).toBeUndefined();
+  });
+
+  it('links a marketplace plugin to its directory in the marketplace repository', () => {
+    expect(
+      mcpSourceUrl({
+        kind: 'marketplace',
+        marketplace: 'ikko',
+        plugin: 'dev',
+        url: 'git+ssh://git@gitlab.example.com/ikko/tools.git',
+        ref: 'main',
+        path: 'plugins/dev',
+      }),
+    ).toBe('https://gitlab.example.com/ikko/tools/-/tree/main/plugins/dev');
+  });
+
+  it('leaves a marketplace source unlinked when its clone URL cannot be parsed', () => {
+    expect(
+      mcpSourceUrl({
+        kind: 'marketplace',
+        marketplace: 'ikko',
+        plugin: 'dev',
+        url: 'not a url',
+        ref: 'main',
+        path: 'plugins/dev',
+      }),
+    ).toBeUndefined();
+  });
+
+  it('never links a file: source', () => {
+    expect(
+      mcpSourceUrl(
+        { kind: 'file', path: '/tmp/extra.json' },
+        { projectWebUrl: 'https://gitlab.example.com/team/app', commitSha: 'a1b2c3d' },
+      ),
+    ).toBeUndefined();
   });
 });
 

@@ -20,9 +20,11 @@ export {
   applyMcpDisableFilters,
   expandMcpTemplate,
   extractMcpServerMap,
+  MAX_MCP_TIMEOUT_MS,
   normalizeMcpServer,
   parseMcpDisableFilters,
   parseMcpServers,
+  pickMcpEnvVars,
   type McpDisableFilters,
   type McpEnvVars,
   type McpServerConfig,
@@ -63,19 +65,51 @@ async function readJsonFile(
 
 /** Options for `loadAutoDiscoveredMcpServers`. */
 export interface LoadAutoDiscoveredMcpServersOptions {
-  /** Variables for `${VAR}` expansion; defaults to `process.env`. */
+  /** Variables for `${VAR}` expansion; defaults to none. */
   vars?: McpEnvVars;
+  /** Disable lists to apply; loaded with `loadMcpDisableFilters` when omitted. */
+  filters?: McpDisableFilters;
+}
+
+/**
+ * Collect the MCP disable lists declared in the repository: `.claude/settings.json`
+ * and the gitignored project-local `.claude/settings.local.json` — where Claude
+ * Code persists `disabledMcpjsonServers` when a developer declines a server —
+ * in every directory from `gitRoot` down to `cwd`. Lists from every level and
+ * both files are unioned. Enable keys are ignored: this tool never re-enables a
+ * server another config disabled.
+ */
+export async function loadMcpDisableFilters(
+  cwd: string,
+  gitRoot: string,
+  warn?: (msg: string) => void,
+): Promise<McpDisableFilters> {
+  const filters: McpDisableFilters = { disabledMcpjsonServers: [], disabledMcpServers: [] };
+  for (const dir of walkDirs(cwd, gitRoot)) {
+    for (const file of ['settings.json', 'settings.local.json']) {
+      const settingsPath = join(dir, '.claude', file);
+      const settingsFile = await readJsonFile(settingsPath);
+      if ('raw' in settingsFile) {
+        const parsed = parseMcpDisableFilters(settingsFile.raw);
+        filters.disabledMcpjsonServers.push(...parsed.disabledMcpjsonServers);
+        filters.disabledMcpServers.push(...parsed.disabledMcpServers);
+      } else if (settingsFile.error === 'invalid') {
+        warn?.(`${settingsPath} is not valid JSON — MCP disable lists from this file ignored.`);
+      }
+    }
+  }
+  return filters;
 }
 
 /**
  * Discover MCP servers declared in the repository, mirroring
- * `loadAutoDiscoveredSkills`:
+ * `loadAutoDiscoveredSkills`: `.mcp.json` in every directory from `gitRoot` down
+ * to `cwd`, the closest directory winning per server name.
  *
- * 1. `.mcp.json` in every directory from `gitRoot` down to `cwd`; the closest
- *    directory wins per server name.
- * 2. `.claude/settings.json` at the same levels; `disabledMcpjsonServers` and
- *    `disabledMcpServers` from every level are unioned and applied last.
- *    Enable lists are ignored.
+ * `disabledMcpjsonServers` is scoped to these project-declared servers and
+ * applied here. `disabledMcpServers` is *not* scoped to them — it names a server
+ * whatever its source — so `resolveMcpServers` applies it once at the end, over
+ * marketplace and `file:` servers too.
  */
 export async function loadAutoDiscoveredMcpServers(
   cwd: string,
@@ -84,7 +118,7 @@ export async function loadAutoDiscoveredMcpServers(
   options: LoadAutoDiscoveredMcpServersOptions = {},
 ): Promise<McpServerConfig[]> {
   const found = new Map<string, McpServerConfig>();
-  const filters: McpDisableFilters = { disabledMcpjsonServers: [], disabledMcpServers: [] };
+  const filters = options.filters ?? (await loadMcpDisableFilters(cwd, gitRoot, warn));
 
   for (const dir of walkDirs(cwd, gitRoot)) {
     const mcpPath = join(dir, '.mcp.json');
@@ -99,16 +133,6 @@ export async function loadAutoDiscoveredMcpServers(
       }
     } else if (mcpFile.error === 'invalid') {
       warn?.(`${mcpPath} is not valid JSON — MCP servers from this file not loaded.`);
-    }
-
-    const settingsPath = join(dir, '.claude', 'settings.json');
-    const settingsFile = await readJsonFile(settingsPath);
-    if ('raw' in settingsFile) {
-      const parsed = parseMcpDisableFilters(settingsFile.raw);
-      filters.disabledMcpjsonServers.push(...parsed.disabledMcpjsonServers);
-      filters.disabledMcpServers.push(...parsed.disabledMcpServers);
-    } else if (settingsFile.error === 'invalid') {
-      warn?.(`${settingsPath} is not valid JSON — MCP disable lists from this file ignored.`);
     }
   }
 
@@ -169,7 +193,7 @@ export interface McpServerSourcesConfig {
   mcp: string[];
   /** Server names to drop, applied last over every source. */
   disableMcp: string[];
-  /** Whether to auto-discover `.mcp.json` files walked from `gitRoot` to `cwd`. */
+  /** Whether to auto-discover `.mcp.json` files walked from `gitRoot` to `cwd`. Opt-in. */
   mcpDiscovery: boolean;
 }
 
@@ -196,14 +220,18 @@ async function loadFileMcpServers(
  * Resolve every MCP server for a review, merging sources in the approved order:
  *
  * 1. Repo auto-discovery (`.mcp.json` walked from `gitRoot` to `cwd`, closest
- *    wins, `.claude/settings.json` disable lists applied) — unless
- *    `config.mcpDiscovery` is `false`.
+ *    wins, `disabledMcpjsonServers` applied) — only when `config.mcpDiscovery`
+ *    is `true`, which is opt-in: `.mcp.json` is content of the repository under
+ *    review, so a merge request could otherwise make the reviewer spawn a
+ *    process of its choosing on the CI runner.
  * 2. Every `--mcp` / `CODE_REVIEW_MCP` spec, in the order given: a `file:` spec
  *    loads a standalone document, a `<marketplace>:<plugin>[/<server>]` spec
  *    loads from the registered marketplace. A later spec's server overrides an
  *    earlier one (from any source) of the same name.
- * 3. `config.disableMcp` (`--disable-mcp` / `CODE_REVIEW_DISABLE_MCP`), applied
- *    last over every source above.
+ * 3. `disabledMcpServers` from `.claude/settings.json` (and `settings.local.json`)
+ *    plus `config.disableMcp` (`--disable-mcp` / `CODE_REVIEW_DISABLE_MCP`),
+ *    applied last over every source above — a name disabled there stays dropped
+ *    even when a `--mcp` spec redeclares it.
  *
  * A spec that fails to resolve (bad file, unregistered marketplace, unknown
  * plugin/server) is skipped with a warning — one broken `--mcp` entry must not
@@ -215,14 +243,19 @@ export async function resolveMcpServers(
   gitRoot: string,
   registry: MarketplaceRegistry,
   logger?: Logger,
-  options: { vars?: McpEnvVars } = {},
+  options: { vars?: McpEnvVars; refresh?: boolean } = {},
 ): Promise<McpServerConfig[]> {
   const warn = (msg: string): void => logger?.warn(msg);
+
+  // Loaded even with discovery off: `disabledMcpServers` is not scoped to
+  // project-declared servers, so it must reach `--mcp` sources too.
+  const filters = await loadMcpDisableFilters(cwd, gitRoot, warn);
 
   const found = new Map<string, McpServerConfig>();
   if (config.mcpDiscovery) {
     for (const server of await loadAutoDiscoveredMcpServers(cwd, gitRoot, warn, {
       vars: options.vars,
+      filters,
     })) {
       found.set(server.name, server);
     }
@@ -234,7 +267,11 @@ export async function resolveMcpServers(
       const servers =
         spec.protocol === 'file'
           ? await loadFileMcpServers(spec.path, options.vars, warn)
-          : await loadMarketplaceMcpServers(spec, registry, { vars: options.vars, warn });
+          : await loadMarketplaceMcpServers(spec, registry, {
+              vars: options.vars,
+              refresh: options.refresh,
+              warn,
+            });
       for (const server of servers) found.set(server.name, server);
     } catch (error) {
       warn(`Skipping --mcp "${raw}": ${error instanceof Error ? error.message : String(error)}`);
@@ -243,6 +280,6 @@ export async function resolveMcpServers(
 
   return applyMcpDisableFilters([...found.values()], {
     disabledMcpjsonServers: [],
-    disabledMcpServers: config.disableMcp,
+    disabledMcpServers: [...filters.disabledMcpServers, ...config.disableMcp],
   });
 }
