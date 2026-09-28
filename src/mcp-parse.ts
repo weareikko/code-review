@@ -14,7 +14,14 @@
  */
 export type McpServerSource =
   | { kind: 'project'; path: string }
-  | { kind: 'marketplace'; marketplace: string; plugin: string }
+  | {
+      kind: 'marketplace';
+      marketplace: string;
+      plugin: string;
+      url: string;
+      ref: string;
+      path: string;
+    }
   | { kind: 'file'; path: string };
 
 /** Transports we can connect to. `ws` is recognised in files but skipped. */

@@ -1,7 +1,7 @@
 import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentEvent } from '@earendil-works/pi-agent-core';
+import type { AgentEvent, AgentTool } from '@earendil-works/pi-agent-core';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from './config.js';
@@ -740,6 +740,120 @@ describe('runReview pipeline', () => {
 
     expect(reported).toBeCloseTo(0.008, 10);
     expect(usage.cost.total).toBeCloseTo(0.008, 10);
+  });
+
+  it('appends MCP-bridged tools to the tools passed to the agent and closes the connection on success', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    const captured = vi.fn();
+    const messages = [makeAssistant('ok', { input: 1, output: 1 })];
+    const mcpTool = {
+      name: 'mcp__jira__get_issue',
+      label: 'jira: get_issue',
+      description: 'Fetch a Jira issue',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => ({ content: [], details: undefined }),
+    } as unknown as AgentTool;
+    const closeSpy = vi.fn(async () => {});
+
+    await runReview(
+      { ...minimalConfig, cwd },
+      {
+        cwd,
+        diff: sampleDiff,
+        createAgent: (params) => {
+          captured(params);
+          return fakeAgent(messages);
+        },
+        connectMcp: async () => ({
+          tools: [mcpTool],
+          servers: [
+            {
+              name: 'jira',
+              source: { kind: 'file', path: 'mcp.json' },
+              status: 'connected',
+              tools: ['get_issue'],
+              calls: 0,
+            },
+          ],
+          close: closeSpy,
+        }),
+      },
+    );
+
+    const params = captured.mock.calls[0][0];
+    expect(params.tools).toContain(mcpTool);
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the MCP connection even when the run throws', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    const messages = [makeAssistant('', { input: 1, output: 0 })]; // empty text -> ReviewerError
+    const closeSpy = vi.fn(async () => {});
+
+    await expect(
+      runReview(
+        { ...minimalConfig, cwd },
+        {
+          cwd,
+          diff: sampleDiff,
+          createAgent: () => fakeAgent(messages),
+          connectMcp: async () => ({ tools: [], servers: [], close: closeSpy }),
+        },
+      ),
+    ).rejects.toBeInstanceOf(ReviewerError);
+
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports usage.mcp with each server's status, exposed tools, and call count", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    const messages = [makeAssistant('ok', { input: 1, output: 1 })];
+
+    const usage = await runReview(
+      { ...minimalConfig, cwd },
+      {
+        cwd,
+        diff: sampleDiff,
+        createAgent: () => fakeAgent(messages),
+        connectMcp: async () => ({
+          tools: [],
+          servers: [
+            {
+              name: 'jira',
+              source: { kind: 'file', path: 'mcp.json' },
+              status: 'connected',
+              tools: ['get_issue', 'search_issues'],
+              calls: 3,
+            },
+            {
+              name: 'docs',
+              source: { kind: 'project', path: '.mcp.json' },
+              status: 'unavailable',
+              tools: [],
+              calls: 0,
+            },
+          ],
+          close: async () => {},
+        }),
+      },
+    );
+
+    expect(usage.mcp).toEqual([
+      {
+        name: 'jira',
+        status: 'connected',
+        exposedTools: ['get_issue', 'search_issues'],
+        calls: 3,
+        source: { kind: 'file', path: 'mcp.json' },
+      },
+      {
+        name: 'docs',
+        status: 'unavailable',
+        exposedTools: [],
+        calls: 0,
+        source: { kind: 'project', path: '.mcp.json' },
+      },
+    ]);
   });
 
   it('emits turn_start and tool_execution_start debug lines to the logger', async () => {
@@ -1713,6 +1827,85 @@ describe('buildUserPrompt', () => {
     );
     expect(prompt).not.toContain('<diff>');
     expect(prompt).toContain('`git_log` lists the commits in this change. Review all of them.');
+  });
+
+  it('with no MCP servers: omits the <external-context> block', () => {
+    expect(buildUserPrompt(diff)).not.toContain('<external-context>');
+    expect(
+      buildUserPrompt(
+        diff,
+        [],
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        [],
+      ),
+    ).not.toContain('<external-context>');
+  });
+
+  it('with only unavailable MCP servers: omits the <external-context> block', () => {
+    const prompt = buildUserPrompt(
+      diff,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      [
+        {
+          name: 'docs',
+          source: { kind: 'file', path: 'mcp.json' },
+          status: 'unavailable',
+          tools: [],
+          calls: 0,
+        },
+      ],
+    );
+    expect(prompt).not.toContain('<external-context>');
+  });
+
+  it('with a connected MCP server: lists it and its exposed tools, before <diff>', () => {
+    const prompt = buildUserPrompt(
+      diff,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      [
+        {
+          name: 'jira',
+          source: { kind: 'file', path: 'mcp.json' },
+          status: 'connected',
+          tools: ['get_issue', 'search_issues'],
+          calls: 0,
+        },
+        {
+          name: 'docs',
+          source: { kind: 'file', path: 'mcp.json' },
+          status: 'unavailable',
+          tools: [],
+          calls: 0,
+        },
+      ],
+    );
+    expect(prompt).toContain('<external-context>');
+    expect(prompt).toContain('- jira: get_issue, search_issues');
+    // Unavailable servers expose nothing to call — they are not listed here (the
+    // summary footer, not the prompt, is where an unavailable server is surfaced).
+    expect(prompt).not.toContain('docs');
+    expect(prompt).toContain('</external-context>');
+    expect(prompt.indexOf('<external-context>')).toBeLessThan(prompt.indexOf('<diff>'));
   });
 });
 

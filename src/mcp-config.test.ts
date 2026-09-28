@@ -167,7 +167,14 @@ describe('normalizeMcpServer', () => {
     const server = normalizeMcpServer(
       'p',
       { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/server.js'] },
-      { kind: 'marketplace', marketplace: 'acme', plugin: 'dev' },
+      {
+        kind: 'marketplace',
+        marketplace: 'acme',
+        plugin: 'dev',
+        url: 'https://host/acme.git',
+        ref: '',
+        path: 'plugins/dev',
+      },
       { vars, pluginRoot: '/cache/acme/plugins/dev' },
     );
     expect(server?.args).toEqual(['/cache/acme/plugins/dev/server.js']);

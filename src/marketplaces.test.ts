@@ -453,7 +453,14 @@ describe('loadMarketplaceMcpServers', () => {
     expect(servers[0]).toMatchObject({
       type: 'http',
       url: 'https://context7.test/mcp',
-      source: { kind: 'marketplace', marketplace: 'acme', plugin: 'dev' },
+      source: {
+        kind: 'marketplace',
+        marketplace: 'acme',
+        plugin: 'dev',
+        url: 'https://host/group/tools.git',
+        ref: '0.6.13',
+        path: 'plugins/dev',
+      },
     });
   });
 

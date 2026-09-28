@@ -46,6 +46,35 @@ describe('summary note upsert', () => {
     expect(footerIndex).toBeGreaterThan(summaryIndex);
   });
 
+  it('renders the MCP footer next to the skills footer, after cost and before the reviewed-commit footer', () => {
+    const body = buildSummaryBody(
+      'Great work.',
+      'Review usage: 100 in / 50 out — $0.0012 (model)',
+      {
+        skillsFooter: 'Skills: `code-review`',
+        mcpFooter: 'MCP: jira (get_issue, search_issues), docs (unavailable)',
+        reviewedCommitSha: 'a'.repeat(40),
+      },
+    );
+    expect(body).toContain('MCP: jira (get_issue, search_issues), docs (unavailable)');
+    const costIndex = body.indexOf('Review usage:');
+    const skillsIndex = body.indexOf('Skills:');
+    const mcpIndex = body.indexOf('MCP:');
+    const reviewedIndex = body.indexOf('Reviewed by');
+    expect(costIndex).toBeLessThan(skillsIndex);
+    expect(skillsIndex).toBeLessThan(mcpIndex);
+    expect(mcpIndex).toBeLessThan(reviewedIndex);
+  });
+
+  it('omits the MCP footer line when no MCP server was configured', () => {
+    const body = buildSummaryBody('Great work.', undefined, {
+      skillsFooter: 'Skills: `code-review`',
+    });
+    expect(body).not.toContain('MCP:');
+    // Unchanged from before mcpFooter existed — no options is still byte-identical.
+    expect(buildSummaryBody('Great work.')).toBe(buildSummaryBody('Great work.'));
+  });
+
   it('renders a prominent size-skip callout above the summary body', () => {
     const body = buildSummaryBody('Looks good.', undefined, {
       sizeNotice: {
@@ -223,6 +252,17 @@ describe('summary note upsert', () => {
     expect(createMergeRequestNote.mock.calls[0][2]).toContain(SUMMARY_MARKER);
     expect(createMergeRequestNote.mock.calls[0][2]).toContain('fresh summary');
     expect(updateMergeRequestNote).not.toHaveBeenCalled();
+  });
+
+  it('threads mcpFooter through upsertSummaryNote into the posted note body', async () => {
+    const createMergeRequestNote = vi.fn().mockResolvedValue({ id: 99, body: 'x' });
+    const updateMergeRequestNote = vi.fn();
+    const gitlab = { createMergeRequestNote, updateMergeRequestNote } as unknown as GitLabClient;
+
+    await upsertSummaryNote(gitlab, 'group/repo', '12', 'fresh summary', [], {
+      mcpFooter: 'MCP: jira (get_issue)',
+    });
+    expect(createMergeRequestNote.mock.calls[0][2]).toContain('MCP: jira (get_issue)');
   });
 
   it('updates the existing summary note in place and archives the previous run', async () => {

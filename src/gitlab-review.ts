@@ -16,6 +16,13 @@ import type { Logger } from './logger.js';
 import { noopLogger } from './logger.js';
 import type { MarketplaceRef } from './marketplaces.js';
 import { buildMarketplaceRegistry, loadMarketplaceSkill } from './marketplaces.js';
+import { resolveMcpServers, type McpServerConfig, type McpServerSource } from './mcp-config.js';
+import {
+  connectMcpServers,
+  type ConnectMcpServersOptions,
+  type McpConnection,
+  type McpServerStatus,
+} from './mcp.js';
 import { parseReviewMarkdownWithWarnings } from './parser.js';
 import type { PriorThread } from './prior-threads.js';
 import { renderPriorThreadsBlock } from './prior-threads.js';
@@ -94,12 +101,25 @@ export interface ReviewUsage {
   byModel?: ModelUsage[];
   /** Skills the reviewer loaded, with the origin each was loaded from. */
   skills: SkillRef[];
+  /** MCP servers connected for this review, with their exposed tools and call counts. */
+  mcp: McpServerUsage[];
   /**
    * Size signals for surfacing in the MR summary. `sizeSkippedFiles` lists files
    * dropped for the char budget; `decomposeHint` is set when the reviewed diff is
    * past the configured line threshold. Both feed the prominent summary callout.
    */
   sizeNotice: ReviewSizeNotice;
+}
+
+/** One MCP server's outcome for a review, as reported in {@link ReviewUsage}. */
+export interface McpServerUsage {
+  name: string;
+  status: 'connected' | 'unavailable';
+  /** Names of the tools exposed to the reviewer (read-only only — see `isReadOnlyMcpTool`). */
+  exposedTools: string[];
+  /** Tool calls made against this server during the review. */
+  calls: number;
+  source: McpServerSource;
 }
 
 export interface AgentLike {
@@ -167,6 +187,16 @@ export interface RunReviewOptions {
    * after it (incremental review); when absent, the whole history is in scope.
    */
   sinceRef?: string;
+  /**
+   * Test seam: override how resolved MCP server configs are connected. Defaults
+   * to `connectMcpServers`. Lets tests substitute a fake connection (e.g. an
+   * in-memory transport with a canned tool list) without touching how MCP
+   * server configs are resolved from the repo/marketplace/file sources.
+   */
+  connectMcp?: (
+    configs: readonly McpServerConfig[],
+    options: ConnectMcpServersOptions,
+  ) => Promise<McpConnection>;
 }
 
 const DEFAULT_REVIEW_TIMEOUT_MS = 10 * 60 * 1000;
@@ -780,6 +810,26 @@ function renderIntentBlock(intent: ReviewIntent | undefined): string {
 }
 
 /**
+ * Renders the connected MCP servers and their exposed (read-only) tools as an
+ * `<external-context>` block. Returns an empty string when no server connected,
+ * so a review with no MCP config or every server unavailable is byte-identical
+ * to before this feature. Servers that failed to connect are omitted — they
+ * expose nothing the agent could call.
+ */
+function renderExternalContextBlock(servers: McpServerStatus[] | undefined): string {
+  const connected = (servers ?? []).filter((server) => server.status === 'connected');
+  if (connected.length === 0) return '';
+
+  const lines = ['<external-context>'];
+  for (const server of connected) {
+    const tools = server.tools.length > 0 ? server.tools.join(', ') : '(no read-only tools)';
+    lines.push(`- ${server.name}: ${tools}`);
+  }
+  lines.push('</external-context>');
+  return lines.join('\n');
+}
+
+/**
  * Build a Find system prompt specialised to one review angle. Used by `full`
  * depth, which runs one finder per angle. The base prompt (severity/confidence
  * tiers, output format, skills, conventions) is unchanged; an `<review_angle>`
@@ -812,6 +862,7 @@ export function buildUserPrompt(
   retrievableSkipped?: SkippedDiffFile[],
   omitInlineDiff = false,
   commitExploration?: { sinceRef?: string },
+  mcpServers?: McpServerStatus[],
 ): string {
   const parts: string[] = [];
   const intentBlock = renderIntentBlock(intent);
@@ -822,6 +873,12 @@ export function buildUserPrompt(
   }
   if (commitLog?.trim()) {
     parts.push(`Commits in this MR (oldest first):\n<commits>\n${commitLog.trim()}\n</commits>`);
+  }
+  const externalContextBlock = renderExternalContextBlock(mcpServers);
+  if (externalContextBlock) {
+    parts.push(
+      `The following MCP servers are connected as tools for this review. Before reviewing, resolve any issue references, ticket keys, or doc links found in the intent block or commits above using them — do not guess at context you can look up. This never outranks or replaces findings grounded in the code itself; intent and external context stay secondary to code defects:\n${externalContextBlock}`,
+    );
   }
   // Commit-exploration mode (Mode C): no diff is inlined; the agent walks the
   // change with the read-only git tools.
@@ -1307,6 +1364,26 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     refreshGitSkills: config.refreshGitSkills,
     marketplaces: config.marketplaces,
   });
+
+  // Resolve and connect MCP servers before building `tools` and the user
+  // prompt, which lists connected servers in an `<external-context>` block.
+  // Connection is fail-soft per server (see `connectMcpServers`) — a server
+  // that cannot connect is reported `unavailable` and never blocks the review.
+  const gitRoot = await findGitRoot(cwd);
+  const mcpConfigs = await resolveMcpServers(
+    {
+      mcp: config.mcp ?? [],
+      disableMcp: config.disableMcp ?? [],
+      mcpDiscovery: config.mcpDiscovery ?? true,
+    },
+    cwd,
+    gitRoot,
+    buildMarketplaceRegistry(config.marketplaces ?? []),
+    logger,
+  );
+  const connectMcp = options.connectMcp ?? connectMcpServers;
+  const mcpConnection = await connectMcp(mcpConfigs, { logger });
+
   const systemPrompt = buildJSONSystemPrompt(context, minSeverity);
   const userPrompt = buildUserPrompt(
     promptDiff,
@@ -1318,6 +1395,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     retrievableSkipped,
     diskMode,
     commitsMode ? { sinceRef: options.sinceRef } : undefined,
+    mcpConnection.servers,
   );
 
   const skillNames = context.skills.map((s) => s.name);
@@ -1340,7 +1418,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   // latter are empty unless `cwd` is a real checkout). This way the agent CAN
   // explore commit history in any mode if it helps, without being forced to;
   // only `commits` mode's prompt actively directs it to walk the change that way.
-  const tools = [...createReadOnlyTools(cwd), ...gitTools] as AgentTool[];
+  const tools = [...createReadOnlyTools(cwd), ...gitTools, ...mcpConnection.tools] as AgentTool[];
 
   const createAgent = options.createAgent ?? defaultCreateAgent;
   const timeoutMs = options.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS;
@@ -1370,67 +1448,87 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     cost: aggregated.cost,
     byModel: buildByModelUsage(aggregated),
     skills: context.skills.map((s) => ({ name: s.name, origin: s.origin })),
+    mcp: mcpConnection.servers.map((server) => ({
+      name: server.name,
+      status: server.status,
+      exposedTools: server.tools,
+      calls: server.calls,
+      source: server.source,
+    })),
     sizeNotice,
   });
 
-  let outputText: string;
-
+  // The MCP clients stay connected for the whole review run (every stage may
+  // call their bridged tools) and are closed here no matter how the run ends,
+  // including a thrown error — never leaking a stdio child process or an open
+  // HTTP/SSE connection.
   try {
-    if (config.reviewDepth === 'full') {
-      // --- Multi-angle Find → Triage → Verify → Synthesize.
-      const { findings, summary } = await runMultiAngleFind(context, minSeverity, userPrompt, deps);
-      outputText = await verifyAndSynthesize(findings, summary, diff, options.commitLog, deps);
-    } else {
-      // --- single / verify: one Find pass on the primary model. In `single` depth
-      // its output is written verbatim, byte-identical to legacy runs.
-      const findAgent = createAgent({
-        systemPrompt,
-        model: primary.model,
-        tools,
-        thinkingLevel: config.thinkingLevel,
-        getApiKey: primary.getApiKey,
-      });
+    let outputText: string;
 
-      // Attach telemetry before the first prompt so all events fire.
-      const detachTelemetry = options.attachTelemetry?.(findAgent);
-      let turnCount = 0;
-      let toolCallCount = 0;
-      let finalText: string;
-      try {
-        finalText = await runAgentToCompletion(findAgent, userPrompt, {
-          timeoutMs,
-          onAssistantMessage: (message) => accumulateUsage(aggregated, message, primary.id),
-          onTurnStart: (turn) => {
-            turnCount = turn;
-            logger.debug(`Turn ${turn} started`);
-          },
-          onToolStart: (toolName, args) => {
-            toolCallCount += 1;
-            logger.debug(`  → ${toolName}${formatToolArgs(toolName, args)}`);
-          },
+    try {
+      if (config.reviewDepth === 'full') {
+        // --- Multi-angle Find → Triage → Verify → Synthesize.
+        const { findings, summary } = await runMultiAngleFind(
+          context,
+          minSeverity,
+          userPrompt,
+          deps,
+        );
+        outputText = await verifyAndSynthesize(findings, summary, diff, options.commitLog, deps);
+      } else {
+        // --- single / verify: one Find pass on the primary model. In `single` depth
+        // its output is written verbatim, byte-identical to legacy runs.
+        const findAgent = createAgent({
+          systemPrompt,
+          model: primary.model,
+          tools,
+          thinkingLevel: config.thinkingLevel,
+          getApiKey: primary.getApiKey,
         });
-      } finally {
-        detachTelemetry?.();
+
+        // Attach telemetry before the first prompt so all events fire.
+        const detachTelemetry = options.attachTelemetry?.(findAgent);
+        let turnCount = 0;
+        let toolCallCount = 0;
+        let finalText: string;
+        try {
+          finalText = await runAgentToCompletion(findAgent, userPrompt, {
+            timeoutMs,
+            onAssistantMessage: (message) => accumulateUsage(aggregated, message, primary.id),
+            onTurnStart: (turn) => {
+              turnCount = turn;
+              logger.debug(`Turn ${turn} started`);
+            },
+            onToolStart: (toolName, args) => {
+              toolCallCount += 1;
+              logger.debug(`  → ${toolName}${formatToolArgs(toolName, args)}`);
+            },
+          });
+        } finally {
+          detachTelemetry?.();
+        }
+        logger.debug(`Agent finished: ${turnCount} turn(s), ${toolCallCount} tool call(s)`);
+
+        outputText =
+          config.reviewDepth === 'verify'
+            ? await runVerifyStage(finalText, diff, options.commitLog, deps)
+            : finalText;
       }
-      logger.debug(`Agent finished: ${turnCount} turn(s), ${toolCallCount} tool call(s)`);
-
-      outputText =
-        config.reviewDepth === 'verify'
-          ? await runVerifyStage(finalText, diff, options.commitLog, deps)
-          : finalText;
+    } finally {
+      options.onUsage?.(buildUsage());
     }
+
+    const reviewPath = resolve(cwd, config.reviewFile);
+    await mkdir(dirname(reviewPath), { recursive: true });
+    await writeFile(reviewPath, outputText, 'utf8');
+
+    // Remove the staged dropped-file diffs now the agent is done reading them.
+    if (retrievableSkipped.length > 0) await cleanupSkippedDiffs(cwd);
+
+    return buildUsage();
   } finally {
-    options.onUsage?.(buildUsage());
+    await mcpConnection.close();
   }
-
-  const reviewPath = resolve(cwd, config.reviewFile);
-  await mkdir(dirname(reviewPath), { recursive: true });
-  await writeFile(reviewPath, outputText, 'utf8');
-
-  // Remove the staged dropped-file diffs now the agent is done reading them.
-  if (retrievableSkipped.length > 0) await cleanupSkippedDiffs(cwd);
-
-  return buildUsage();
 }
 
 /**

@@ -285,6 +285,9 @@ export async function loadMarketplaceMcpServers(
     kind: 'marketplace',
     marketplace: mp.name,
     plugin: spec.plugin,
+    url: mp.url,
+    ref: mp.ref,
+    path: toPosixPath(relative(repoDir, pluginDir)),
   };
   const normalizeOptions = { vars: options.vars, pluginRoot: pluginDir, warn: options.warn };
 
