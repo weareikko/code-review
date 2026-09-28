@@ -51,12 +51,12 @@ describe('summary note upsert', () => {
       'Great work.',
       'Review usage: 100 in / 50 out — $0.0012 (model)',
       {
-        skillsFooter: 'Skills: `code-review`',
-        mcpFooter: 'MCP: jira (get_issue, search_issues), docs (unavailable)',
+        skillsFooter: 'Skills: `code-review` (read)',
+        mcpFooter: 'MCP: jira (2 calls), docs (unavailable)',
         reviewedCommitSha: 'a'.repeat(40),
       },
     );
-    expect(body).toContain('MCP: jira (get_issue, search_issues), docs (unavailable)');
+    expect(body).toContain('MCP: jira (2 calls), docs (unavailable)');
     const costIndex = body.indexOf('Review usage:');
     const skillsIndex = body.indexOf('Skills:');
     const mcpIndex = body.indexOf('MCP:');
@@ -68,7 +68,7 @@ describe('summary note upsert', () => {
 
   it('omits the MCP footer line when no MCP server was configured', () => {
     const body = buildSummaryBody('Great work.', undefined, {
-      skillsFooter: 'Skills: `code-review`',
+      skillsFooter: 'Skills: `code-review` (read)',
     });
     expect(body).not.toContain('MCP:');
     // Unchanged from before mcpFooter existed — no options is still byte-identical.
