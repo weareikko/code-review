@@ -46,7 +46,7 @@ export const DEFAULT_MCP_TIMEOUT_MS = 30_000;
  */
 export const MCP_CONNECT_TIMEOUT_MS = 30_000;
 /** Default number of MCP tool calls allowed per review, across all servers. */
-export const DEFAULT_MCP_CALL_BUDGET = 40;
+export const DEFAULT_MCP_CALL_BUDGET = 20;
 /** Default cap on the content returned by one MCP tool call, text and image bytes together. */
 export const DEFAULT_MCP_MAX_RESULT_CHARS = 200_000;
 /** Cap on image blocks kept from one MCP tool call, whatever the size budget allows. */
