@@ -18,6 +18,7 @@ import { toPosixPath } from './skills.js';
 // (the bridge in `mcp.ts`, tests, …) keep working unchanged.
 export {
   applyMcpDisableFilters,
+  dropEmptyHeaders,
   expandMcpTemplate,
   extractMcpServerMap,
   MAX_MCP_TIMEOUT_MS,
