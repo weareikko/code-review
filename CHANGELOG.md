@@ -156,8 +156,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.8.6]: https://github.com/weareikko/code-review/compare/0.8.5...0.8.6
 [0.8.5]: https://github.com/weareikko/code-review/compare/0.8.4...0.8.5
 [0.8.4]: https://github.com/weareikko/code-review/compare/0.8.3...0.8.4
-[#151]: https://github.com/weareikko/code-review/pull/151
 [#156]: https://github.com/weareikko/code-review/pull/156
+[#151]: https://github.com/weareikko/code-review/pull/151
 [#150]: https://github.com/weareikko/code-review/pull/150
 [#148]: https://github.com/weareikko/code-review/pull/148
 [#144]: https://github.com/weareikko/code-review/pull/144
