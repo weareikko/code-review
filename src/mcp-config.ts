@@ -1,278 +1,35 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
+import { ConfigError } from './errors.js';
+import type { Logger } from './logger.js';
+import { loadMarketplaceMcpServers, type MarketplaceRegistry } from './marketplaces.js';
+import {
+  applyMcpDisableFilters,
+  parseMcpDisableFilters,
+  parseMcpServers,
+  type McpDisableFilters,
+  type McpEnvVars,
+  type McpServerConfig,
+  type McpServerSource,
+} from './mcp-parse.js';
 import { toPosixPath } from './skills.js';
 
-/**
- * Where an MCP server definition came from. Carried in enough detail to link
- * the server name in the summary footer back to its source (see the MCP
- * footer helper in `cli.ts`). `project.path` is the `.mcp.json` file relative to
- * the repository root, POSIX-separated, like `SkillOrigin.project`.
- */
-export type McpServerSource =
-  | { kind: 'project'; path: string }
-  | { kind: 'marketplace'; marketplace: string; plugin: string }
-  | { kind: 'file'; path: string };
-
-/** Transports we can connect to. `ws` is recognised in files but skipped. */
-export type McpTransportType = 'stdio' | 'http' | 'sse';
-
-/** A normalised, env-expanded MCP server definition ready to connect. */
-export interface McpServerConfig {
-  name: string;
-  type: McpTransportType;
-  /** stdio only. */
-  command?: string;
-  /** stdio only. */
-  args: string[];
-  /** stdio only — extra environment for the child process. */
-  env: Record<string, string>;
-  /** http / sse only. */
-  url?: string;
-  /** http / sse only. */
-  headers: Record<string, string>;
-  /** Per-call timeout; `undefined` means the bridge default. */
-  timeoutMs?: number;
-  source: McpServerSource;
-}
-
-/** Names disabled by a `.claude/settings.json` file. */
-export interface McpDisableFilters {
-  /** `disabledMcpjsonServers` — servers declared in repo `.mcp.json` files. */
-  disabledMcpjsonServers: string[];
-  /** `disabledMcpServers` — servers from any source (plugins included). */
-  disabledMcpServers: string[];
-}
-
-/** Variables available to `${VAR}` expansion. Undefined values count as unset. */
-export type McpEnvVars = Readonly<Record<string, string | undefined>>;
-
-const KNOWN_TYPES = new Set(['stdio', 'http', 'sse', 'ws']);
-// `${VAR}` or `${VAR:-default}`; the default may be empty.
-const TEMPLATE_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
- * Expand `${VAR}` and `${VAR:-default}` references in `value`. Missing
- * variables (unset, with no default) are left untouched and reported by name in
- * `missing` so callers can skip the server without ever logging a value.
- */
-export function expandMcpTemplate(
-  value: string,
-  vars: McpEnvVars,
-): { value: string; missing: string[] } {
-  const missing: string[] = [];
-  const expanded = value.replace(TEMPLATE_PATTERN, (match, name: string, fallback?: string) => {
-    const current = vars[name];
-    if (current !== undefined) return current;
-    if (fallback !== undefined) return fallback;
-    if (!missing.includes(name)) missing.push(name);
-    return match;
-  });
-  return { value: expanded, missing };
-}
-
-/**
- * Extract the server map from a parsed `.mcp.json`-style document. Two shapes
- * are accepted:
- *
- * - Claude Code project shape: `{ "mcpServers": { name: server } }`
- * - Plugin shape: `{ name: server }` (servers at the top level)
- *
- * The project shape is detected by a top-level `mcpServers` object. Returns
- * `null` when the document is not an object at all.
- */
-export function extractMcpServerMap(raw: unknown): Record<string, unknown> | null {
-  if (!isRecord(raw)) return null;
-  if (isRecord(raw.mcpServers)) return raw.mcpServers;
-  return raw;
-}
-
-function stringList(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
-}
-
-function stringMap(value: unknown): Record<string, string> {
-  if (!isRecord(value)) return {};
-  const out: Record<string, string> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (typeof entry === 'string') out[key] = entry;
-  }
-  return out;
-}
-
-/** Read the MCP disable lists from a parsed `.claude/settings.json` document. */
-export function parseMcpDisableFilters(raw: unknown): McpDisableFilters {
-  if (!isRecord(raw)) return { disabledMcpjsonServers: [], disabledMcpServers: [] };
-  return {
-    disabledMcpjsonServers: stringList(raw.disabledMcpjsonServers),
-    disabledMcpServers: stringList(raw.disabledMcpServers),
-  };
-}
-
-/** Options for `normalizeMcpServer` / `parseMcpServers`. */
-export interface NormalizeMcpServerOptions {
-  /** Variables for `${VAR}` expansion; defaults to `process.env`. */
-  vars?: McpEnvVars;
-  /** Expanded from `${CLAUDE_PLUGIN_ROOT}` for marketplace plugins. */
-  pluginRoot?: string;
-  warn?: (msg: string) => void;
-}
-
-interface Expander {
-  expand(value: string): string;
-  missing: Set<string>;
-}
-
-function createExpander(vars: McpEnvVars): Expander {
-  const missing = new Set<string>();
-  return {
-    missing,
-    expand(value) {
-      const result = expandMcpTemplate(value, vars);
-      for (const name of result.missing) missing.add(name);
-      return result.value;
-    },
-  };
-}
-
-function describeSource(source: McpServerSource): string {
-  return source.kind === 'marketplace' ? `${source.marketplace}:${source.plugin}` : source.path;
-}
-
-/**
- * Normalise one raw server entry. Returns `null` (after warning) when the
- * server is unsupported or incomplete:
- *
- * - `type: ws`, or any `oauth` / `headersHelper` field — unsupported transports
- *   and auth flows
- * - no `command` for stdio, no `url` for http/sse
- * - a `${VAR}` reference with no value and no default (the warning names the
- *   variable, never a value)
- *
- * `type` defaults to `stdio` when `command` is present and `http` when `url`
- * is present.
- */
-export function normalizeMcpServer(
-  name: string,
-  raw: unknown,
-  source: McpServerSource,
-  options: NormalizeMcpServerOptions = {},
-): McpServerConfig | null {
-  const warn = options.warn ?? (() => {});
-  const where = describeSource(source);
-  if (!isRecord(raw)) {
-    warn(`MCP server "${name}" in ${where} is not an object — skipped.`);
-    return null;
-  }
-  if (raw.oauth !== undefined || raw.headersHelper !== undefined) {
-    const field = raw.oauth !== undefined ? 'oauth' : 'headersHelper';
-    warn(`MCP server "${name}" in ${where} uses "${field}", which is not supported — skipped.`);
-    return null;
-  }
-
-  const hasCommand = typeof raw.command === 'string' && raw.command.length > 0;
-  const hasUrl = typeof raw.url === 'string' && raw.url.length > 0;
-  let type: string;
-  if (typeof raw.type === 'string') {
-    type = raw.type;
-    if (!KNOWN_TYPES.has(type)) {
-      warn(`MCP server "${name}" in ${where} has unknown type "${type}" — skipped.`);
-      return null;
-    }
-  } else if (hasCommand) {
-    type = 'stdio';
-  } else if (hasUrl) {
-    type = 'http';
-  } else {
-    warn(`MCP server "${name}" in ${where} has neither "command" nor "url" — skipped.`);
-    return null;
-  }
-  if (type === 'ws') {
-    warn(
-      `MCP server "${name}" in ${where} uses the ws transport, which is not supported — skipped.`,
-    );
-    return null;
-  }
-  if (type === 'stdio' && !hasCommand) {
-    warn(`MCP server "${name}" in ${where} is stdio but has no "command" — skipped.`);
-    return null;
-  }
-  if (type !== 'stdio' && !hasUrl) {
-    warn(`MCP server "${name}" in ${where} is ${type} but has no "url" — skipped.`);
-    return null;
-  }
-
-  const vars: McpEnvVars = {
-    ...(options.vars ?? process.env),
-    ...(options.pluginRoot === undefined ? {} : { CLAUDE_PLUGIN_ROOT: options.pluginRoot }),
-  };
-  const expander = createExpander(vars);
-  const expandMap = (map: Record<string, string>): Record<string, string> =>
-    Object.fromEntries(Object.entries(map).map(([k, v]) => [k, expander.expand(v)]));
-
-  const config: McpServerConfig = {
-    name,
-    type: type as McpTransportType,
-    args: [],
-    env: {},
-    headers: {},
-    source,
-  };
-  if (type === 'stdio') {
-    config.command = expander.expand(raw.command as string);
-    config.args = stringList(raw.args).map((arg) => expander.expand(arg));
-    config.env = expandMap(stringMap(raw.env));
-  } else {
-    config.url = expander.expand(raw.url as string);
-    config.headers = expandMap(stringMap(raw.headers));
-  }
-  if (typeof raw.timeout === 'number' && Number.isFinite(raw.timeout) && raw.timeout > 0) {
-    config.timeoutMs = raw.timeout;
-  }
-
-  if (expander.missing.size > 0) {
-    const names = [...expander.missing].map((v) => `\${${v}}`).join(', ');
-    warn(
-      `MCP server "${name}" in ${where} references unset environment variable(s) ${names} — skipped. Set them or add a default with \${VAR:-default}.`,
-    );
-    return null;
-  }
-  return config;
-}
-
-/**
- * Parse a whole `.mcp.json`-style document (either shape) into normalised
- * server configs. Invalid entries are skipped with a warning.
- */
-export function parseMcpServers(
-  raw: unknown,
-  source: McpServerSource,
-  options: NormalizeMcpServerOptions = {},
-): McpServerConfig[] {
-  const map = extractMcpServerMap(raw);
-  if (!map) {
-    options.warn?.(`MCP config in ${describeSource(source)} is not a JSON object — skipped.`);
-    return [];
-  }
-  const servers: McpServerConfig[] = [];
-  for (const [name, entry] of Object.entries(map)) {
-    const server = normalizeMcpServer(name, entry, source, options);
-    if (server) servers.push(server);
-  }
-  return servers;
-}
-
-/** Drop servers named in either disable list. */
-export function applyMcpDisableFilters(
-  servers: readonly McpServerConfig[],
-  filters: McpDisableFilters,
-): McpServerConfig[] {
-  const disabled = new Set([...filters.disabledMcpjsonServers, ...filters.disabledMcpServers]);
-  return servers.filter((server) => !disabled.has(server.name));
-}
+// Re-export the pure parsing layer so existing imports of `./mcp-config.js`
+// (the bridge in `mcp.ts`, tests, …) keep working unchanged.
+export {
+  applyMcpDisableFilters,
+  expandMcpTemplate,
+  extractMcpServerMap,
+  normalizeMcpServer,
+  parseMcpDisableFilters,
+  parseMcpServers,
+  type McpDisableFilters,
+  type McpEnvVars,
+  type McpServerConfig,
+  type McpServerSource,
+  type McpTransportType,
+  type NormalizeMcpServerOptions,
+} from './mcp-parse.js';
 
 /** Directories from `gitRoot` down to `cwd`, inclusive, root first. */
 function walkDirs(cwd: string, gitRoot: string): string[] {
@@ -356,4 +113,136 @@ export async function loadAutoDiscoveredMcpServers(
   }
 
   return applyMcpDisableFilters([...found.values()], filters);
+}
+
+/** A parsed `--mcp` spec. Produced by `parseMcpSpec`. */
+export type McpSpec =
+  | { protocol: 'file'; path: string }
+  | { protocol: 'marketplace'; marketplace: string; plugin: string; server: string };
+
+/**
+ * Parse a `--mcp` / `CODE_REVIEW_MCP` spec string, mirroring `parseSkillSpec`'s
+ * conventions:
+ *
+ * | Input                          | Result                                                          |
+ * |---------------------------------|------------------------------------------------------------------|
+ * | `file:./extra-servers.json`     | `{ protocol: 'file', path: './extra-servers.json' }`             |
+ * | `acme:dev`                      | `{ protocol: 'marketplace', marketplace: 'acme', plugin: 'dev', server: '' }` |
+ * | `acme:dev/context7`             | `{ protocol: 'marketplace', marketplace: 'acme', plugin: 'dev', server: 'context7' }` |
+ *
+ * An empty `server` means "every server the plugin exposes". Throws a
+ * `ConfigError` with an actionable hint on any malformed input.
+ */
+export function parseMcpSpec(spec: string): McpSpec {
+  if (spec.startsWith('file:')) {
+    const path = spec.slice('file:'.length);
+    if (!path) {
+      throw new ConfigError(`Invalid --mcp spec: "${spec}"`, {
+        hint: 'A file: spec needs a path, e.g. file:./mcp-extra.json.',
+      });
+    }
+    return { protocol: 'file', path };
+  }
+
+  const colonIdx = spec.indexOf(':');
+  if (colonIdx <= 0) {
+    throw new ConfigError(`Invalid --mcp spec: "${spec}"`, {
+      hint: 'Use file:<path>, <marketplace>:<plugin>, or <marketplace>:<plugin>/<server>.',
+    });
+  }
+  const marketplace = spec.slice(0, colonIdx);
+  const rest = spec.slice(colonIdx + 1);
+  const slashIdx = rest.indexOf('/');
+  const plugin = slashIdx === -1 ? rest : rest.slice(0, slashIdx);
+  const server = slashIdx === -1 ? '' : rest.slice(slashIdx + 1);
+  if (!plugin || server.includes('/')) {
+    throw new ConfigError(`Invalid --mcp spec: "${spec}"`, {
+      hint: `Marketplace MCP servers use "<marketplace>:<plugin>" or "<marketplace>:<plugin>/<server>", e.g. "${marketplace || 'acme'}:dev/context7".`,
+    });
+  }
+  return { protocol: 'marketplace', marketplace, plugin, server };
+}
+
+/** The slice of `Config` `resolveMcpServers` needs — kept structural to avoid importing `Config`. */
+export interface McpServerSourcesConfig {
+  /** Raw `--mcp` / `CODE_REVIEW_MCP` specs, in the order given. */
+  mcp: string[];
+  /** Server names to drop, applied last over every source. */
+  disableMcp: string[];
+  /** Whether to auto-discover `.mcp.json` files walked from `gitRoot` to `cwd`. */
+  mcpDiscovery: boolean;
+}
+
+/** Load a `file:` MCP spec — a standalone `.mcp.json`-style document anywhere on disk. */
+async function loadFileMcpServers(
+  path: string,
+  vars: McpEnvVars | undefined,
+  warn: (msg: string) => void,
+): Promise<McpServerConfig[]> {
+  const source: McpServerSource = { kind: 'file', path };
+  const file = await readJsonFile(path);
+  if ('error' in file) {
+    warn(
+      file.error === 'missing'
+        ? `MCP file "${path}" does not exist — skipped.`
+        : `MCP file "${path}" is not valid JSON — skipped.`,
+    );
+    return [];
+  }
+  return parseMcpServers(file.raw, source, { vars, warn });
+}
+
+/**
+ * Resolve every MCP server for a review, merging sources in the approved order:
+ *
+ * 1. Repo auto-discovery (`.mcp.json` walked from `gitRoot` to `cwd`, closest
+ *    wins, `.claude/settings.json` disable lists applied) — unless
+ *    `config.mcpDiscovery` is `false`.
+ * 2. Every `--mcp` / `CODE_REVIEW_MCP` spec, in the order given: a `file:` spec
+ *    loads a standalone document, a `<marketplace>:<plugin>[/<server>]` spec
+ *    loads from the registered marketplace. A later spec's server overrides an
+ *    earlier one (from any source) of the same name.
+ * 3. `config.disableMcp` (`--disable-mcp` / `CODE_REVIEW_DISABLE_MCP`), applied
+ *    last over every source above.
+ *
+ * A spec that fails to resolve (bad file, unregistered marketplace, unknown
+ * plugin/server) is skipped with a warning — one broken `--mcp` entry must not
+ * abort the whole review.
+ */
+export async function resolveMcpServers(
+  config: McpServerSourcesConfig,
+  cwd: string,
+  gitRoot: string,
+  registry: MarketplaceRegistry,
+  logger?: Logger,
+  options: { vars?: McpEnvVars } = {},
+): Promise<McpServerConfig[]> {
+  const warn = (msg: string): void => logger?.warn(msg);
+
+  const found = new Map<string, McpServerConfig>();
+  if (config.mcpDiscovery) {
+    for (const server of await loadAutoDiscoveredMcpServers(cwd, gitRoot, warn, {
+      vars: options.vars,
+    })) {
+      found.set(server.name, server);
+    }
+  }
+
+  for (const raw of config.mcp) {
+    try {
+      const spec = parseMcpSpec(raw);
+      const servers =
+        spec.protocol === 'file'
+          ? await loadFileMcpServers(spec.path, options.vars, warn)
+          : await loadMarketplaceMcpServers(spec, registry, { vars: options.vars, warn });
+      for (const server of servers) found.set(server.name, server);
+    } catch (error) {
+      warn(`Skipping --mcp "${raw}": ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  return applyMcpDisableFilters([...found.values()], {
+    disabledMcpjsonServers: [],
+    disabledMcpServers: config.disableMcp,
+  });
 }

@@ -26,8 +26,12 @@ vi.mock('node:fs/promises', async () => {
 });
 vi.mock('./git.js', () => ({ git: gitMock }));
 
-const { buildMarketplaceRegistry, loadMarketplaceSkill, parseMarketplaceEntry } =
-  await import('./marketplaces.js');
+const {
+  buildMarketplaceRegistry,
+  loadMarketplaceMcpServers,
+  loadMarketplaceSkill,
+  parseMarketplaceEntry,
+} = await import('./marketplaces.js');
 const { gitSkillCacheKey } = await import('./skills.js');
 
 function skillMd(name: string, description: string): string {
@@ -425,5 +429,189 @@ describe('loadMarketplaceSkill', () => {
     expect(hint).toBeDefined();
     expect(hint).not.toContain('secret-token');
     expect(hint).toContain('***@host');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loadMarketplaceMcpServers
+// ---------------------------------------------------------------------------
+
+describe('loadMarketplaceMcpServers', () => {
+  const registry = () =>
+    buildMarketplaceRegistry([parseMarketplaceEntry('acme=https://host/group/tools.git#0.6.13')]);
+
+  it("reads servers from the plugin's .mcp.json (project shape)", async () => {
+    ctl.files = {
+      '.claude-plugin/marketplace.json': manifest(),
+      'plugins/dev/.mcp.json': JSON.stringify({
+        mcpServers: { context7: { url: 'https://context7.test/mcp' } },
+      }),
+    };
+    const spec = { marketplace: 'acme', plugin: 'dev', server: '' };
+    const servers = await loadMarketplaceMcpServers(spec, registry(), { cacheDir: '/cache' });
+    expect(servers.map((s) => s.name)).toEqual(['context7']);
+    expect(servers[0]).toMatchObject({
+      type: 'http',
+      url: 'https://context7.test/mcp',
+      source: { kind: 'marketplace', marketplace: 'acme', plugin: 'dev' },
+    });
+  });
+
+  it("reads servers from the plugin's .mcp.json (plugin shape, servers at top level)", async () => {
+    ctl.files = {
+      '.claude-plugin/marketplace.json': manifest(),
+      'plugins/dev/.mcp.json': JSON.stringify({
+        context7: { url: 'https://context7.test/mcp' },
+      }),
+    };
+    const spec = { marketplace: 'acme', plugin: 'dev', server: '' };
+    const servers = await loadMarketplaceMcpServers(spec, registry(), { cacheDir: '/cache' });
+    expect(servers.map((s) => s.name)).toEqual(['context7']);
+  });
+
+  it('reads servers from the "mcpServers" field of the plugin\'s plugin.json', async () => {
+    ctl.files = {
+      '.claude-plugin/marketplace.json': manifest(),
+      'plugins/dev/.claude-plugin/plugin.json': JSON.stringify({
+        name: 'dev',
+        mcpServers: { grep: { command: 'npx', args: ['-y', 'grep-mcp'] } },
+      }),
+    };
+    const spec = { marketplace: 'acme', plugin: 'dev', server: '' };
+    const servers = await loadMarketplaceMcpServers(spec, registry(), { cacheDir: '/cache' });
+    expect(servers.map((s) => s.name)).toEqual(['grep']);
+    expect(servers[0]).toMatchObject({ type: 'stdio', command: 'npx' });
+  });
+
+  it('merges both sources; a name declared in both is taken from plugin.json', async () => {
+    ctl.files = {
+      '.claude-plugin/marketplace.json': manifest(),
+      'plugins/dev/.mcp.json': JSON.stringify({
+        shared: { command: 'from-mcp-json' },
+        json_only: { command: 'j' },
+      }),
+      'plugins/dev/.claude-plugin/plugin.json': JSON.stringify({
+        name: 'dev',
+        mcpServers: { shared: { command: 'from-plugin-json' }, manifest_only: { command: 'm' } },
+      }),
+    };
+    const spec = { marketplace: 'acme', plugin: 'dev', server: '' };
+    const servers = await loadMarketplaceMcpServers(spec, registry(), { cacheDir: '/cache' });
+    const byName = new Map(servers.map((s) => [s.name, s]));
+    expect([...byName.keys()].toSorted()).toEqual(['json_only', 'manifest_only', 'shared']);
+    expect(byName.get('shared')?.command).toBe('from-plugin-json');
+  });
+
+  it('expands ${CLAUDE_PLUGIN_ROOT} to the resolved plugin directory', async () => {
+    ctl.files = {
+      '.claude-plugin/marketplace.json': manifest(),
+      'plugins/dev/.mcp.json': JSON.stringify({
+        local: { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/server.js'] },
+      }),
+    };
+    const spec = { marketplace: 'acme', plugin: 'dev', server: '' };
+    const servers = await loadMarketplaceMcpServers(spec, registry(), { cacheDir: '/cache' });
+    const expectedPluginDir = join(
+      '/cache',
+      gitSkillCacheKey('https://host/group/tools.git', '0.6.13'),
+      'plugins/dev',
+    );
+    expect(servers[0]?.args).toEqual([join(expectedPluginDir, 'server.js')]);
+  });
+
+  it('returns only the named server when spec.server is set', async () => {
+    ctl.files = {
+      '.claude-plugin/marketplace.json': manifest(),
+      'plugins/dev/.mcp.json': JSON.stringify({
+        context7: { url: 'https://context7.test/mcp' },
+        other: { url: 'https://other.test/mcp' },
+      }),
+    };
+    const spec = { marketplace: 'acme', plugin: 'dev', server: 'context7' };
+    const servers = await loadMarketplaceMcpServers(spec, registry(), { cacheDir: '/cache' });
+    expect(servers.map((s) => s.name)).toEqual(['context7']);
+  });
+
+  it('throws with the available server list when the named server is not found', async () => {
+    ctl.files = {
+      '.claude-plugin/marketplace.json': manifest(),
+      'plugins/dev/.mcp.json': JSON.stringify({ context7: { url: 'https://context7.test/mcp' } }),
+    };
+    const spec = { marketplace: 'acme', plugin: 'dev', server: 'ghost' };
+    const error = await loadMarketplaceMcpServers(spec, registry(), { cacheDir: '/cache' }).catch(
+      (e) => e as ConfigError,
+    );
+    expect(error).toBeInstanceOf(ConfigError);
+    expect(error.hint).toMatch(/Available: context7/);
+  });
+
+  it('returns an empty list when the plugin declares no MCP servers', async () => {
+    ctl.files = { '.claude-plugin/marketplace.json': manifest() };
+    const spec = { marketplace: 'acme', plugin: 'dev', server: '' };
+    expect(await loadMarketplaceMcpServers(spec, registry(), { cacheDir: '/cache' })).toEqual([]);
+  });
+
+  it('throws for an unregistered marketplace', async () => {
+    const spec = { marketplace: 'acme', plugin: 'dev', server: '' };
+    const empty = buildMarketplaceRegistry([]);
+    const error = await loadMarketplaceMcpServers(spec, empty, { cacheDir: '/cache' }).catch(
+      (e) => e as ConfigError,
+    );
+    expect(error).toBeInstanceOf(ConfigError);
+    expect(error.hint).toMatch(/No marketplace named "acme"/);
+  });
+
+  it('throws with the available plugin list when the plugin is unknown', async () => {
+    ctl.files = { '.claude-plugin/marketplace.json': manifest() };
+    const spec = { marketplace: 'acme', plugin: 'nope', server: '' };
+    const error = await loadMarketplaceMcpServers(spec, registry(), { cacheDir: '/cache' }).catch(
+      (e) => e as ConfigError,
+    );
+    expect(error).toBeInstanceOf(ConfigError);
+    expect(error.message).toMatch(/not found in marketplace/);
+    expect(error.hint).toMatch(/Available plugins: dev/);
+  });
+
+  it('throws on a malformed .mcp.json', async () => {
+    ctl.files = {
+      '.claude-plugin/marketplace.json': manifest(),
+      'plugins/dev/.mcp.json': '{ not valid json',
+    };
+    const spec = { marketplace: 'acme', plugin: 'dev', server: '' };
+    await expect(
+      loadMarketplaceMcpServers(spec, registry(), { cacheDir: '/cache' }),
+    ).rejects.toThrow(ConfigError);
+  });
+
+  it('ignores a malformed plugin.json when the entry is strict:false, keeping .mcp.json servers', async () => {
+    ctl.files = {
+      '.claude-plugin/marketplace.json': manifest({
+        plugins: [{ name: 'dev', source: './plugins/dev', strict: false }],
+      }),
+      'plugins/dev/.mcp.json': JSON.stringify({ context7: { url: 'https://context7.test/mcp' } }),
+      'plugins/dev/.claude-plugin/plugin.json': '{ not valid json',
+    };
+    const spec = { marketplace: 'acme', plugin: 'dev', server: '' };
+    const servers = await loadMarketplaceMcpServers(spec, registry(), { cacheDir: '/cache' });
+    expect(servers.map((s) => s.name)).toEqual(['context7']);
+  });
+
+  it('warns and skips a server referencing an unset var, keeping the rest', async () => {
+    ctl.files = {
+      '.claude-plugin/marketplace.json': manifest(),
+      'plugins/dev/.mcp.json': JSON.stringify({
+        needs_token: { url: 'https://x.test', headers: { Authorization: '${UNSET_TOKEN}' } },
+        fine: { command: 'x' },
+      }),
+    };
+    const spec = { marketplace: 'acme', plugin: 'dev', server: '' };
+    const warn = vi.fn();
+    const servers = await loadMarketplaceMcpServers(spec, registry(), {
+      cacheDir: '/cache',
+      warn,
+    });
+    expect(servers.map((s) => s.name)).toEqual(['fine']);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('${UNSET_TOKEN}');
   });
 });

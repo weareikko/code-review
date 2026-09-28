@@ -2,6 +2,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { ConfigError } from './errors.js';
+import { buildMarketplaceRegistry } from './marketplaces.js';
 import {
   applyMcpDisableFilters,
   expandMcpTemplate,
@@ -10,6 +12,8 @@ import {
   normalizeMcpServer,
   parseMcpDisableFilters,
   parseMcpServers,
+  parseMcpSpec,
+  resolveMcpServers,
   type McpServerSource,
 } from './mcp-config.js';
 
@@ -372,5 +376,169 @@ describe('loadAutoDiscoveredMcpServers', () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseMcpSpec
+// ---------------------------------------------------------------------------
+
+describe('parseMcpSpec', () => {
+  it('parses a file: spec', () => {
+    expect(parseMcpSpec('file:./extra.json')).toEqual({ protocol: 'file', path: './extra.json' });
+  });
+
+  it('parses <marketplace>:<plugin>, with an empty server meaning "every server"', () => {
+    expect(parseMcpSpec('acme:dev')).toEqual({
+      protocol: 'marketplace',
+      marketplace: 'acme',
+      plugin: 'dev',
+      server: '',
+    });
+  });
+
+  it('parses <marketplace>:<plugin>/<server>', () => {
+    expect(parseMcpSpec('acme:dev/context7')).toEqual({
+      protocol: 'marketplace',
+      marketplace: 'acme',
+      plugin: 'dev',
+      server: 'context7',
+    });
+  });
+
+  it('throws on a file: spec with no path', () => {
+    expect(() => parseMcpSpec('file:')).toThrow(ConfigError);
+  });
+
+  it('throws on a spec with no ":"', () => {
+    expect(() => parseMcpSpec('acme')).toThrow(ConfigError);
+  });
+
+  it('throws on a server segment with an extra "/"', () => {
+    expect(() => parseMcpSpec('acme:dev/context7/extra')).toThrow(ConfigError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveMcpServers
+// ---------------------------------------------------------------------------
+
+describe('resolveMcpServers', () => {
+  const emptyRegistry = buildMarketplaceRegistry([]);
+
+  it('auto-discovers repo servers when mcpDiscovery is true (the default)', async () => {
+    const root = await makeTmp();
+    await writeJson(join(root, '.mcp.json'), {
+      mcpServers: { docs: { url: 'https://docs.test/mcp' } },
+    });
+    const servers = await resolveMcpServers(
+      { mcp: [], disableMcp: [], mcpDiscovery: true },
+      root,
+      root,
+      emptyRegistry,
+      undefined,
+      { vars },
+    );
+    expect(servers.map((s) => s.name)).toEqual(['docs']);
+  });
+
+  it('skips repo auto-discovery when mcpDiscovery is false', async () => {
+    const root = await makeTmp();
+    await writeJson(join(root, '.mcp.json'), {
+      mcpServers: { docs: { url: 'https://docs.test/mcp' } },
+    });
+    const servers = await resolveMcpServers(
+      { mcp: [], disableMcp: [], mcpDiscovery: false },
+      root,
+      root,
+      emptyRegistry,
+      undefined,
+      { vars },
+    );
+    expect(servers).toEqual([]);
+  });
+
+  it('merges a file: --mcp spec with repo auto-discovery, a later spec winning by name', async () => {
+    const root = await makeTmp();
+    await writeJson(join(root, '.mcp.json'), {
+      mcpServers: { shared: { command: 'repo-cmd' }, repo_only: { command: 'r' } },
+    });
+    const extra = join(root, 'extra.json');
+    await writeJson(extra, { shared: { command: 'file-cmd' }, file_only: { command: 'f' } });
+
+    const servers = await resolveMcpServers(
+      { mcp: [`file:${extra}`], disableMcp: [], mcpDiscovery: true },
+      root,
+      root,
+      emptyRegistry,
+      undefined,
+      { vars },
+    );
+    const byName = new Map(servers.map((s) => [s.name, s]));
+    expect([...byName.keys()].toSorted()).toEqual(['file_only', 'repo_only', 'shared']);
+    expect(byName.get('shared')?.command).toBe('file-cmd');
+  });
+
+  it('applies disableMcp last, over every source', async () => {
+    const root = await makeTmp();
+    await writeJson(join(root, '.mcp.json'), {
+      mcpServers: { a: { command: 'a' }, b: { command: 'b' } },
+    });
+    const servers = await resolveMcpServers(
+      { mcp: [], disableMcp: ['a'], mcpDiscovery: true },
+      root,
+      root,
+      emptyRegistry,
+      undefined,
+      { vars },
+    );
+    expect(servers.map((s) => s.name)).toEqual(['b']);
+  });
+
+  it('warns and skips a --mcp spec that fails to parse, keeping the rest', async () => {
+    const root = await makeTmp();
+    const warn = vi.fn();
+    const extra = join(root, 'extra.json');
+    await writeJson(extra, { ok: { command: 'x' } });
+    const servers = await resolveMcpServers(
+      { mcp: ['not-a-valid-spec', `file:${extra}`], disableMcp: [], mcpDiscovery: false },
+      root,
+      root,
+      emptyRegistry,
+      { warn, debug: () => {}, info: () => {}, error: () => {} },
+      { vars },
+    );
+    expect(servers.map((s) => s.name)).toEqual(['ok']);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('not-a-valid-spec'));
+  });
+
+  it('warns and skips a file: spec whose file does not exist', async () => {
+    const root = await makeTmp();
+    const warn = vi.fn();
+    const servers = await resolveMcpServers(
+      { mcp: [`file:${join(root, 'missing.json')}`], disableMcp: [], mcpDiscovery: false },
+      root,
+      root,
+      emptyRegistry,
+      { warn, debug: () => {}, info: () => {}, error: () => {} },
+      { vars },
+    );
+    expect(servers).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('does not exist'));
+  });
+
+  it('warns and skips a marketplace --mcp spec for an unregistered marketplace', async () => {
+    const warn = vi.fn();
+    const root = await makeTmp();
+    const servers = await resolveMcpServers(
+      { mcp: ['acme:dev/context7'], disableMcp: [], mcpDiscovery: false },
+      root,
+      root,
+      emptyRegistry,
+      { warn, debug: () => {}, info: () => {}, error: () => {} },
+      { vars },
+    );
+    expect(servers).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('acme:dev/context7'));
   });
 });

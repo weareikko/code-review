@@ -54,6 +54,9 @@ export const RESERVED_ENV_SUFFIXES = [
   'MARKETPLACES',
   'REFRESH_SKILLS',
   'THINKING_LEVEL',
+  'MCP',
+  'DISABLE_MCP',
+  'MCP_DISCOVERY',
 ] as const;
 
 const CODE_REVIEW_PREFIX = 'CODE_REVIEW_';
@@ -221,6 +224,20 @@ export interface Config {
   marketplaces: MarketplaceRef[];
   /** Re-clone `git:` / `git+ssh:` skills, bypassing the on-disk clone cache. */
   refreshGitSkills: boolean;
+  /**
+   * `--mcp` / `CODE_REVIEW_MCP` specs (repeatable / comma-separated), in the
+   * order given: `file:<path>`, `<marketplace>:<plugin>`, or
+   * `<marketplace>:<plugin>/<server>`. See `parseMcpSpec` in `mcp-config.ts`.
+   */
+  mcp: string[];
+  /** MCP server names to drop, applied last over every source (`--disable-mcp` / `CODE_REVIEW_DISABLE_MCP`). */
+  disableMcp: string[];
+  /**
+   * Auto-discover `.mcp.json` files walked from the git root to `cwd` (same
+   * walk as skill auto-discovery). Default `true`; disable with
+   * `--no-mcp-discovery` / `CODE_REVIEW_MCP_DISCOVERY=false`.
+   */
+  mcpDiscovery: boolean;
 }
 
 export type ParsedArgs = Record<string, string | boolean | string[]>;
@@ -233,11 +250,12 @@ const BOOLEAN_FLAGS = new Set([
   'retrieve-skipped',
   'no-retrieve-skipped',
   'verbose',
+  'no-mcp-discovery',
   'help',
   'version',
 ]);
 
-const MULTI_FLAGS = new Set(['skill', 'marketplace']);
+const MULTI_FLAGS = new Set(['skill', 'marketplace', 'mcp', 'disable-mcp']);
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const args: ParsedArgs = {};
@@ -376,6 +394,56 @@ function resolveSkills(args: ParsedArgs, env: NodeJS.ProcessEnv): string[] {
       .map((s) => s.trim())
       .filter(Boolean);
   return [];
+}
+
+/**
+ * Resolve `--mcp` (repeatable, preferred) or the comma-separated
+ * `CODE_REVIEW_MCP` into a list of raw spec strings. Parsing (`parseMcpSpec`)
+ * and resolution happen later, in `mcp-config.ts`'s `resolveMcpServers`.
+ */
+function resolveMcp(args: ParsedArgs, env: NodeJS.ProcessEnv): string[] {
+  const argMcp = args.mcp;
+  if (Array.isArray(argMcp) && argMcp.length > 0) return argMcp;
+  if (typeof argMcp === 'string' && argMcp.length > 0) return [argMcp];
+  const envVal = env.CODE_REVIEW_MCP;
+  if (envVal)
+    return envVal
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  return [];
+}
+
+/**
+ * Resolve `--disable-mcp` (repeatable, preferred) or the comma-separated
+ * `CODE_REVIEW_DISABLE_MCP` into a list of server names to drop.
+ */
+function resolveDisableMcp(args: ParsedArgs, env: NodeJS.ProcessEnv): string[] {
+  const argDisableMcp = args.disableMcp;
+  if (Array.isArray(argDisableMcp) && argDisableMcp.length > 0) return argDisableMcp;
+  if (typeof argDisableMcp === 'string' && argDisableMcp.length > 0) return [argDisableMcp];
+  const envVal = env.CODE_REVIEW_DISABLE_MCP;
+  if (envVal)
+    return envVal
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  return [];
+}
+
+/**
+ * Resolve whether repo `.mcp.json` auto-discovery runs. Default `true`;
+ * `--no-mcp-discovery` always wins, otherwise `CODE_REVIEW_MCP_DISCOVERY`
+ * falsy values (`0`, `false`, `no`, `off`) turn it off.
+ */
+function resolveMcpDiscovery(args: ParsedArgs, env: NodeJS.ProcessEnv): boolean {
+  if (args.noMcpDiscovery === true) return false;
+  const raw = env.CODE_REVIEW_MCP_DISCOVERY;
+  if (typeof raw === 'string') {
+    const normalized = raw.trim().toLowerCase();
+    if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  }
+  return true;
 }
 
 /**
@@ -657,6 +725,9 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     skills: resolveSkills(args, env),
     marketplaces: resolveMarketplaces(args, env),
     refreshGitSkills: toBoolean(env.CODE_REVIEW_REFRESH_SKILLS),
+    mcp: resolveMcp(args, env),
+    disableMcp: resolveDisableMcp(args, env),
+    mcpDiscovery: resolveMcpDiscovery(args, env),
   };
 }
 
