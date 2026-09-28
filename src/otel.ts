@@ -1423,15 +1423,52 @@ function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
   span.setAttribute('code_review.cost.cache_creation_usd', usage.cost.cacheWrite);
   span.setAttribute('code_review.cost.total_usd', usage.cost.total);
 
-  // Per-server MCP call count, JSON-encoded (span attributes carry no map
-  // type) — one attribute rather than a dynamic per-server key, so the
-  // attribute set stays fixed regardless of how many servers were configured.
-  if (usage.mcp && usage.mcp.length > 0) {
-    const mcpCalls = safeSerialize(
-      usage.mcp.map((server) => ({ server: server.name, calls: server.calls })),
-    );
-    if (mcpCalls) span.setAttribute('code_review.mcp.calls', mcpCalls);
+  applyMcpUsageAttributes(span, usage.mcp);
+  applySkillUsageAttributes(span, usage.skills);
+}
+
+/**
+ * MCP usage on `invoke_agent`: fixed aggregate attributes plus one span event
+ * per server. A per-server attribute key (`code_review.mcp.calls.<server>`)
+ * would make the attribute set depend on the configuration, so the per-server
+ * detail goes into events and a single JSON-encoded attribute instead.
+ */
+function applyMcpUsageAttributes(span: Span, mcp: DiagnosticUsage['mcp']): void {
+  if (!mcp || mcp.length === 0) return;
+  const callsTotal = mcp.reduce((total, server) => total + server.calls, 0);
+  span.setAttribute('code_review.mcp.servers_total', mcp.length);
+  span.setAttribute(
+    'code_review.mcp.servers_used',
+    mcp.filter((server) => server.status === 'connected' && server.calls > 0).length,
+  );
+  span.setAttribute('code_review.mcp.calls_total', callsTotal);
+  const mcpCalls = safeSerialize(
+    mcp.map((server) => ({ server: server.name, calls: server.calls })),
+  );
+  if (mcpCalls) span.setAttribute('code_review.mcp.calls', mcpCalls);
+  for (const server of mcp) {
+    span.addEvent('code_review.mcp.server', {
+      'code_review.mcp.server': server.name,
+      'code_review.mcp.status': server.status,
+      'code_review.mcp.calls': server.calls,
+    });
   }
+}
+
+/**
+ * Skill usage on `invoke_agent`: how many skills were loaded and how many the
+ * reviewer actually read, plus a JSON-encoded per-skill read count — same
+ * fixed-attribute-set rule as the MCP attributes above.
+ */
+function applySkillUsageAttributes(span: Span, skills: DiagnosticUsage['skills']): void {
+  if (!skills || skills.length === 0) return;
+  span.setAttribute('code_review.skills.count', skills.length);
+  span.setAttribute(
+    'code_review.skills.read_count',
+    skills.filter((skill) => skill.reads > 0).length,
+  );
+  const reads = safeSerialize(skills.map((skill) => ({ skill: skill.name, reads: skill.reads })));
+  if (reads) span.setAttribute('code_review.skills.reads', reads);
 }
 
 /**
