@@ -1,4 +1,5 @@
 import { join, resolve } from 'node:path';
+import { createReadOnlyTools } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it } from 'vitest';
 import {
   createSkillReadCounter,
@@ -15,56 +16,67 @@ const skills = [
 ];
 
 describe('readToolPath', () => {
+  it("reads the parameter name the reviewer's read tool actually declares", () => {
+    const read = createReadOnlyTools(process.cwd()).find((tool) => tool.name === 'read');
+    expect(read).toBeDefined();
+    expect(Object.keys(read!.parameters.properties)).toContain('path');
+  });
+
   it('returns the file path of a built-in read call', () => {
-    expect(readToolPath('Read', { file_path: '/skills/code-review/SKILL.md' })).toBe(
+    expect(readToolPath('Read', { path: '/skills/code-review/SKILL.md' })).toBe(
       '/skills/code-review/SKILL.md',
     );
-    expect(readToolPath('read', { file_path: 'a.ts' })).toBe('a.ts');
+    expect(readToolPath('read', { path: 'a.ts' })).toBe('a.ts');
   });
 
   it('ignores every other tool and any call with no usable path', () => {
     expect(readToolPath('Bash', { command: 'cat /skills/code-review/SKILL.md' })).toBeUndefined();
-    expect(
-      readToolPath('mcp__docs__read_doc', { file_path: '/skills/x/SKILL.md' }),
-    ).toBeUndefined();
+    expect(readToolPath('mcp__docs__read_doc', { path: '/skills/x/SKILL.md' })).toBeUndefined();
     expect(readToolPath('Read', { pattern: '**/*' })).toBeUndefined();
-    expect(readToolPath('Read', { file_path: '' })).toBeUndefined();
+    expect(readToolPath('Read', { path: '' })).toBeUndefined();
     expect(readToolPath('Read', undefined)).toBeUndefined();
   });
 });
 
 describe('findSkillForPath', () => {
   it('matches the SKILL.md itself', () => {
-    expect(findSkillForPath(skills, '/skills/code-review/SKILL.md')?.name).toBe('code-review');
-  });
-
-  it('matches any file under the skill directory, references included', () => {
-    expect(findSkillForPath(skills, '/skills/code-review/references/javascript.md')?.name).toBe(
+    expect(findSkillForPath(skills, '/skills/code-review/SKILL.md', '/repo')?.name).toBe(
       'code-review',
     );
   });
 
-  it('resolves a relative path against the working directory', () => {
-    const local = [{ name: 'local', rootDir: resolve('skills/local') }];
-    expect(findSkillForPath(local, join('skills', 'local', 'SKILL.md'))?.name).toBe('local');
+  it('matches any file under the skill directory, references included', () => {
+    expect(
+      findSkillForPath(skills, '/skills/code-review/references/javascript.md', '/repo')?.name,
+    ).toBe('code-review');
+  });
+
+  it('resolves a relative path against the review working directory', () => {
+    const local = [{ name: 'local', rootDir: resolve('/review/cwd', 'skills/local') }];
+    expect(findSkillForPath(local, join('skills', 'local', 'SKILL.md'), '/review/cwd')?.name).toBe(
+      'local',
+    );
+    expect(
+      findSkillForPath(local, join('skills', 'local', 'SKILL.md'), '/other/cwd'),
+    ).toBeUndefined();
   });
 
   it('does not match a sibling directory that shares a prefix', () => {
-    expect(findSkillForPath(skills, '/skills/code-review-extra/SKILL.md')).toBeUndefined();
+    expect(findSkillForPath(skills, '/skills/code-review-extra/SKILL.md', '/repo')).toBeUndefined();
   });
 
   it('returns undefined for a read outside every skill', () => {
-    expect(findSkillForPath(skills, '/repo/src/auth.ts')).toBeUndefined();
-    expect(findSkillForPath([], '/skills/code-review/SKILL.md')).toBeUndefined();
+    expect(findSkillForPath(skills, '/repo/src/auth.ts', '/repo')).toBeUndefined();
+    expect(findSkillForPath([], '/skills/code-review/SKILL.md', '/repo')).toBeUndefined();
   });
 });
 
 describe('createSkillReadCounter', () => {
   it('counts reads per skill and ignores everything else', () => {
-    const counter = createSkillReadCounter(skills);
-    counter.record('Read', { file_path: '/skills/code-review/SKILL.md' });
-    counter.record('Read', { file_path: '/skills/code-review/references/php.md' });
-    counter.record('Read', { file_path: '/repo/src/auth.ts' });
+    const counter = createSkillReadCounter(skills, '/repo');
+    counter.record('Read', { path: '/skills/code-review/SKILL.md' });
+    counter.record('Read', { path: '/skills/code-review/references/php.md' });
+    counter.record('Read', { path: '/repo/src/auth.ts' });
     counter.record('Bash', { command: 'cat /skills/test-integrity/SKILL.md' });
 
     expect(counter.countFor(skills[0])).toBe(2);
@@ -76,8 +88,8 @@ describe('createSkillReadCounter', () => {
       { name: 'house-style', rootDir: '/a/house-style' },
       { name: 'house-style', rootDir: '/b/house-style' },
     ];
-    const counter = createSkillReadCounter(sameName);
-    counter.record('Read', { file_path: '/b/house-style/SKILL.md' });
+    const counter = createSkillReadCounter(sameName, '/repo');
+    counter.record('Read', { path: '/b/house-style/SKILL.md' });
 
     expect(counter.countFor(sameName[0])).toBe(0);
     expect(counter.countFor(sameName[1])).toBe(1);

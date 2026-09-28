@@ -904,13 +904,13 @@ describe('runReview pipeline', () => {
           type: 'tool_execution_start',
           toolCallId: 'a',
           toolName: 'Read',
-          args: { file_path: join(skillDir, 'SKILL.md') },
+          args: { path: join(skillDir, 'SKILL.md') },
         });
         await listener({
           type: 'tool_execution_start',
           toolCallId: 'b',
           toolName: 'Read',
-          args: { file_path: join(skillDir, 'references', 'php.md') },
+          args: { path: join(skillDir, 'references', 'php.md') },
         });
         // Neither of these is a skill read: a file outside the skill, and a
         // shell command that happens to name the SKILL.md.
@@ -918,7 +918,7 @@ describe('runReview pipeline', () => {
           type: 'tool_execution_start',
           toolCallId: 'c',
           toolName: 'Read',
-          args: { file_path: join(cwd, 'src', 'a.ts') },
+          args: { path: join(cwd, 'src', 'a.ts') },
         });
         await listener({
           type: 'tool_execution_start',
@@ -1030,7 +1030,7 @@ describe('runReview pipeline', () => {
           type: 'tool_execution_start',
           toolCallId: 'id1',
           toolName: 'Read',
-          args: { file_path: 'src/auth.ts' },
+          args: { path: 'src/auth.ts' },
         });
         await listener({
           type: 'tool_execution_start',
@@ -1088,7 +1088,7 @@ describe('runReview pipeline', () => {
           type: 'tool_execution_start',
           toolCallId: 'a',
           toolName: 'Read',
-          args: { file_path: 'x.ts' },
+          args: { path: 'x.ts' },
         });
         await listener({ type: 'message_end', message: msg1 });
         await listener({ type: 'turn_start' });
@@ -1549,10 +1549,10 @@ describe('buildJSONSystemPrompt — skill section', () => {
     // The earlier one-line preamble ("Read each skill file before applying
     // it") was too soft — SkillFileReadJudge consistently scored 0 in eval
     // runs because the agent skipped the Read call entirely. The new
-    // preamble adds an explicit MUST, a worked Read({ file_path: ... }) tool
+    // preamble adds an explicit MUST, a worked read({ path: ... }) tool
     // call, and an explanation that the description alone is not enough.
     expect(prompt).toMatch(/you MUST/);
-    expect(prompt).toContain('Read({ file_path:');
+    expect(prompt).toContain('read({ path:');
     expect(prompt).toMatch(/a no-op/i);
     expect(prompt).toMatch(/description alone is not enough/i);
   });

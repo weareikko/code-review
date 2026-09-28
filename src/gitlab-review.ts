@@ -784,8 +784,8 @@ export function buildJSONSystemPrompt(
       'Read each skill file before applying it. Skills are mandatory rule sets — the actual review criteria live in the SKILL.md body, not in the one-line description below.',
       '',
       'For every skill listed below, you MUST:',
-      '  1. Call the Read tool with the path in <skill_file> to load the SKILL.md content. Example: Read({ file_path: "/abs/path/to/skills/code-review/SKILL.md" }).',
-      '  2. If the skill lists <skill_resources>, Read the references relevant to the languages or frameworks present in this diff (skip references that do not match the diff).',
+      '  1. Call the read tool with the path in <skill_file> to load the SKILL.md content. Example: read({ path: "/abs/path/to/skills/code-review/SKILL.md" }).',
+      '  2. If the skill lists <skill_resources>, read the references relevant to the languages or frameworks present in this diff (skip references that do not match the diff).',
       "  3. Apply the skill's criteria when forming and grading findings.",
       '',
       'A skill loaded but never read is a no-op — the description alone is not enough to apply the rules correctly.',
@@ -1536,7 +1536,7 @@ async function runReviewStages(params: ReviewStagesParams): Promise<ReviewUsage>
   const aggregated = emptyUsage();
   // Shared by every stage: Find and Verify run different agents over the same
   // tool list, so a skill read in either stage counts towards the same skill.
-  const skillReads = createSkillReadCounter(context.skills);
+  const skillReads = createSkillReadCounter(context.skills, cwd);
   const deps: StageDeps = {
     createAgent,
     pool,
@@ -1970,7 +1970,7 @@ function formatToolArgs(toolName: string, args: unknown): string {
   if (!args || typeof args !== 'object') return '';
   const obj = args as Record<string, unknown>;
   if (toolName === 'Read' || toolName === 'read') {
-    return typeof obj.file_path === 'string' ? ` ${obj.file_path}` : '';
+    return typeof obj.path === 'string' ? ` ${obj.path}` : '';
   }
   if (toolName === 'Bash' || toolName === 'bash') {
     return typeof obj.command === 'string' ? ` ${obj.command.slice(0, 80)}` : '';

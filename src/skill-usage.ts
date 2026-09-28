@@ -9,14 +9,16 @@ export interface SkillReadTarget {
 
 /**
  * The path a built-in read tool call targets, or `undefined` for any other tool
- * or a call with no usable `file_path`. Only the built-in read tool is
- * considered: a skill is loaded by reading its `SKILL.md`, and every other tool
- * (grep, git, MCP) says nothing about whether the reviewer read the skill.
+ * or a call with no usable `path`. The parameter name is `path`, matching the
+ * `read` tool from `createReadOnlyTools` that the reviewer is actually handed.
+ * Only the built-in read tool is considered: a skill is loaded by reading its
+ * `SKILL.md`, and every other tool (grep, git, MCP) says nothing about whether
+ * the reviewer read the skill.
  */
 export function readToolPath(toolName: string, args: unknown): string | undefined {
   if (toolName !== 'Read' && toolName !== 'read') return undefined;
   if (!args || typeof args !== 'object') return undefined;
-  const filePath = (args as Record<string, unknown>).file_path;
+  const filePath = (args as Record<string, unknown>).path;
   return typeof filePath === 'string' && filePath.length > 0 ? filePath : undefined;
 }
 
@@ -24,14 +26,16 @@ export function readToolPath(toolName: string, args: unknown): string | undefine
  * The skill whose directory contains `path`, or `undefined` when the read
  * targeted something else. Any file under the skill root counts — a reference
  * file the `SKILL.md` points at is as much a skill read as the `SKILL.md`
- * itself. Relative paths resolve against the process working directory, which
- * is where the reviewer's read tool resolves them too.
+ * itself. Relative paths resolve against `cwd` — the review working directory
+ * the reviewer's read tool resolves them against, which `--cwd` can move away
+ * from the process working directory.
  */
 export function findSkillForPath(
   skills: readonly SkillReadTarget[],
   path: string,
+  cwd: string,
 ): SkillReadTarget | undefined {
-  const target = resolve(path);
+  const target = resolve(cwd, path);
   return skills.find((skill) => {
     const rel = relative(resolve(skill.rootDir), target);
     return rel.length > 0 && !rel.startsWith('..') && !isAbsolute(rel);
@@ -50,13 +54,16 @@ export interface SkillReadCounter {
  * Build a counter shared by every review stage — Find and Verify run different
  * agents over the same tool list, so a skill read in either stage counts.
  */
-export function createSkillReadCounter(skills: readonly SkillReadTarget[]): SkillReadCounter {
+export function createSkillReadCounter(
+  skills: readonly SkillReadTarget[],
+  cwd: string,
+): SkillReadCounter {
   const counts = new Map<string, number>();
   return {
     record(toolName, args) {
       const path = readToolPath(toolName, args);
       if (!path) return;
-      const skill = findSkillForPath(skills, path);
+      const skill = findSkillForPath(skills, path, cwd);
       if (!skill) return;
       counts.set(skill.rootDir, (counts.get(skill.rootDir) ?? 0) + 1);
     },
