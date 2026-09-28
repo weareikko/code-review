@@ -124,22 +124,24 @@ code-review --marketplace 'ikko=git+ssh://git@gitlab.studiometa.dev/ikko/ikko-to
 
 ### From a public marketplace
 
-Anthropic publishes a plugin marketplace with ready-made servers. This repository's own self-review loads `context7` from it:
+Anthropic publishes a plugin marketplace with ready-made servers. This repository's own self-review loads `github` from it:
 
 ```yml
 env:
   CODE_REVIEW_MARKETPLACES: 'anthropic=https://github.com/anthropics/claude-plugins-official.git#fbe07fb6ce7d51d8e86ca6efdf050059894cdb80'
-  CODE_REVIEW_MCP: 'anthropic:context7'
+  CODE_REVIEW_MCP: 'anthropic:github'
   CODE_REVIEW_MCP_DISCOVERY: 'true'
+  GITHUB_PERSONAL_ACCESS_TOKEN: ${{ github.token }}
+  CODE_REVIEW_MCP_ENV: GITHUB_PERSONAL_ACCESS_TOKEN
 ```
 
 **Pin the ref.** A marketplace declared with no `#<ref>` fragment resolves the remote's default branch on every run, so each review clones whatever is on that third-party branch at that moment and connects to the URL it names, carrying whatever credentials the allowlist exposes. Anyone who can land a commit on that branch can then repoint the server. Pin a tag or a commit SHA, as above.
 
-At that pinned commit, `context7` needs no credential: its `Authorization` header is a `${CONTEXT7_API_KEY:-}` reference, which expands to nothing and is dropped by the empty-header rule above. Re-read the plugin's `.mcp.json` before moving the pin — the header a plugin sends is an upstream fact, not a guarantee.
+**Read the plugin's `.mcp.json` before you rely on it.** The header names, the URL, and the variables a plugin expects are upstream facts. At the pinned commit, the `github` plugin reads `${GITHUB_PERSONAL_ACCESS_TOKEN}`, so the workflow maps the job token to that name and allowlists it. The same marketplace's `context7` plugin points at `https://mcp.context7.com/mcp?client=claude-code-plugin`, and that endpoint requires an API key even though the plain `https://mcp.context7.com/mcp` URL is anonymous; its `${CONTEXT7_API_KEY:-}` header expands to nothing and is dropped by the empty-header rule above, and the server then answers "Authentication required". This repository therefore keeps `context7` in `.mcp.json` with the anonymous URL and does not load it from the marketplace.
 
-The same marketplace ships a `github` plugin, and this repository deliberately does **not** use it. Its server definition carries only an `Authorization` header, with no `X-MCP-Readonly: true`, so the connection is write-capable server side; the repo's own `.mcp.json` entry sends that header and is what the reviewer connects to. Prefer a server-side read-only guard over trusting each tool's self-declared `readOnlyHint` annotation, since the reviewer's whole input is untrusted (see [Prompt context](#prompt-context)).
+The marketplace `github` definition carries only an `Authorization` header, with no `X-MCP-Readonly: true`, so the connection is write-capable server side; the read-only gate on tool annotations is what keeps the reviewer to read-only tools. When you control the definition, add the server-side guard as well, as the repo's `.mcp.json` entry does for local sessions.
 
-A marketplace server overrides an auto-discovered `.mcp.json` server of the same name, so a repository can keep an entry in `.mcp.json` for local editor sessions and still have CI connect to the marketplace copy. That is why `context7` appears in both places here.
+A marketplace server overrides an auto-discovered `.mcp.json` server of the same name, so a repository can keep an entry in `.mcp.json` for local editor sessions and still have CI connect to the marketplace copy. That is why `github` appears in both places here.
 
 ## Prompt context
 

@@ -50,17 +50,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           CODE_REVIEW_SKILLS: code-review
-          # Dogfood one marketplace-sourced MCP server: context7 comes from
+          # Dogfood one marketplace-sourced MCP server: `github` comes from
           # Anthropic's public plugin marketplace, pinned to a commit so the
           # definition CI connects to cannot change under us. It overrides the
           # .mcp.json entry of the same name, which stays there for local
-          # sessions. `github` is deliberately NOT sourced from the marketplace:
-          # its plugin sends no X-MCP-Readonly header, so the .mcp.json entry —
-          # which does — is what the reviewer connects to.
+          # sessions. The plugin's own .mcp.json is the plugin shape (no
+          # `mcpServers` wrapper), so this also exercises that parser path.
+          # `context7` is NOT sourced from the marketplace: the plugin's URL
+          # carries `?client=claude-code-plugin`, which requires an API key,
+          # while the plain URL in .mcp.json is anonymous.
           CODE_REVIEW_MARKETPLACES: 'anthropic=https://github.com/anthropics/claude-plugins-official.git#fbe07fb6ce7d51d8e86ca6efdf050059894cdb80'
-          CODE_REVIEW_MCP: 'anthropic:context7'
-          # Keeps the docs, context7, and github servers in .mcp.json loaded.
+          CODE_REVIEW_MCP: 'anthropic:github'
+          # Keeps the docs and context7 servers in .mcp.json loaded.
           CODE_REVIEW_MCP_DISCOVERY: 'true'
-          # Let the github server in .mcp.json read the job token, and nothing else.
-          CODE_REVIEW_MCP_ENV: GITHUB_TOKEN
+          # The marketplace github plugin reads GITHUB_PERSONAL_ACCESS_TOKEN;
+          # map the job token to that name and allow only it (plus GITHUB_TOKEN
+          # for the .mcp.json fallback in local runs).
+          GITHUB_PERSONAL_ACCESS_TOKEN: ${{ github.token }}
+          CODE_REVIEW_MCP_ENV: GITHUB_TOKEN,GITHUB_PERSONAL_ACCESS_TOKEN
         run: node bin/code-review.js
