@@ -197,8 +197,10 @@ export function formatMcpToolResult(
 
   let text = texts.join('\n');
   if (text.length > maxChars) {
-    const total = text.length;
-    text = `${text.slice(0, maxChars)}\n\n[truncated: result was ${total} characters, limit is ${maxChars}]`;
+    // The notice lives inside the cap, so the returned text never exceeds
+    // `maxChars`; a cap smaller than the notice yields the notice alone.
+    const notice = `\n\n[truncated: result was ${text.length} characters, limit is ${maxChars}]`;
+    text = `${text.slice(0, Math.max(0, maxChars - notice.length))}${notice}`;
   }
   if (result.isError) {
     throw new Error(text || 'MCP tool returned an error');

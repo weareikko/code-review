@@ -172,12 +172,20 @@ describe('formatMcpToolResult', () => {
     );
   });
 
-  it('truncates oversized text with a note', () => {
-    const content = formatMcpToolResult({ content: [{ type: 'text', text: 'x'.repeat(50) }] }, 10);
+  it('truncates oversized text with a note, within the cap', () => {
+    const content = formatMcpToolResult(
+      { content: [{ type: 'text', text: 'x'.repeat(500) }] },
+      100,
+    );
     const text = textOf({ content });
     expect(text.startsWith('x'.repeat(10))).toBe(true);
-    expect(text).toContain('[truncated: result was 50 characters, limit is 10]');
-    expect(text).not.toContain('x'.repeat(11));
+    expect(text).toContain('[truncated: result was 500 characters, limit is 100]');
+    expect(text.length).toBeLessThanOrEqual(100);
+  });
+
+  it('returns only the notice when the cap is smaller than the notice', () => {
+    const content = formatMcpToolResult({ content: [{ type: 'text', text: 'x'.repeat(50) }] }, 10);
+    expect(textOf({ content })).toBe('\n\n[truncated: result was 50 characters, limit is 10]');
   });
 
   it('throws when the server flags the result as an error', () => {
@@ -345,7 +353,7 @@ describe('connectMcpServers', () => {
       const result = await conn.tools[0]!.execute('call-1', { id: '1' });
       const text = textOf(result);
       expect(text).toContain('[truncated: result was 500 characters, limit is 100]');
-      expect(text.length).toBeLessThan(200);
+      expect(text.length).toBeLessThanOrEqual(100);
     } finally {
       await conn.close();
     }
