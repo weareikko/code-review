@@ -144,6 +144,32 @@ A server name links to its source when reachable: a repo `.mcp.json` links to th
 | Result size cap        | 200,000 chars | Covers the joined text **and** the base64 bytes of any image blocks, on success and on an error result alike. Oversized text is truncated with a note stating the original length; images that no longer fit, and any beyond the fourth, are replaced by an `[image omitted: N bytes]` note. |
 | Call budget per review | 40 calls      | Shared across every MCP tool and every server. Once exhausted, a call returns a text telling the agent the budget is gone instead of erroring — the review continues on what it already has.                                                                                                 |
 
+## Library usage
+
+`runReview` resolves MCP servers from the sources above. A library caller that already has its server configs — or that wants to drive a server over a transport of its own, as the eval suite does with an in-memory fake — replaces the connect step with the `connectMcp` option:
+
+```ts
+import { connectMcpServers, runReview, type McpServerConfig } from '@weareikko/code-review';
+
+const tracker: McpServerConfig = {
+  name: 'tracker',
+  type: 'stdio',
+  command: 'tracker-mcp',
+  args: [],
+  env: {},
+  headers: {},
+  source: { kind: 'file', path: 'tracker.json' },
+};
+
+await runReview(config, {
+  diff,
+  connectMcp: (_resolved, options) =>
+    connectMcpServers([tracker], { ...options, createTransport: () => myTransport }),
+});
+```
+
+The hook receives the configs resolved from the CLI/repo sources and the options `runReview` would have passed (logger, run id). Return any `McpConnection`: the read-only gate, the call budget, the result cap, and the summary footer all work the same on what it exposes. `createTransport` is the seam for a transport the bridge would not build itself; omit it and `connectMcpServers` builds the real stdio/http/sse transport for each config.
+
 ## Diagnostics and OpenTelemetry
 
 Connect, list-tools, and call-tool operations are traced on `diagnostics_channel` and, with `CODE_REVIEW_OTEL=1`, rendered as span events and per-server / aggregate call-count attributes. See [Observability](./observability.md) for the channel names, payload shapes, and OTel attribute names.
