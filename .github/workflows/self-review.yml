@@ -50,4 +50,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           CODE_REVIEW_SKILLS: code-review
+          CODE_REVIEW_MCP_DISCOVERY: 'true'
         run: node bin/code-review.js

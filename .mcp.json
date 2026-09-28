@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "docs": {
+      "command": "node",
+      "args": ["scripts/docs-mcp.mjs"]
+    },
+    "context7": {
+      "type": "http",
+      "url": "https://mcp.context7.com/mcp"
+    }
+  }
+}
