@@ -31,11 +31,13 @@ Base tracing channel names:
 
 Node emits tracing subchannels as `tracing:<base>:start`, `:end`, `:asyncStart`, `:asyncEnd`, and `:error`. Payloads include safe run metadata (`runId`, phase, project, MR, GitLab URL, model, severity, timings, comment counts, and sanitized `errorInfo`) and intentionally exclude tokens/API keys.
 
+The MCP bridge (`src/mcp.ts`) traces its connect / list-tools / call-tool operations on three separate channels — `@weareikko/code-review:mcp.connect`, `:mcp.tools`, `:mcp.call` — keyed by the same `runId` plus a `server` name (and `tool` on `mcp.call`) instead of a full phase context, since the bridge has no `Config` of its own. Payloads carry `durationMs` and, on `mcp.tools`/`mcp.call`, `toolCount`/`resultChars` — never tool arguments or results (`traceMcpDiagnostic` deliberately discards the traced function's return value before it reaches the channel, since Node's `tracingChannel.tracePromise` would otherwise attach it as `.result`). Events publish only when the MCP bridge is given a `runId` (always the case from the CLI; omitted in ad hoc library use publishes nothing).
+
 When `--posting-mode draft` is used, the `scm.post_comments` payload also exposes `draftsAbandoned`, `draftsCreated`, `draftsDeletedPrePublish`, and `draftsPublished` counters describing the draft lifecycle within the run.
 
 The `git.get_merge_diff` payload exposes `diffFilesChanged`, `diffLinesAdded`, and `diffLinesRemoved`; the source-control (`scm.*`) read phases expose `httpRequestMethod`, `httpUrl`, `httpStatusCode`, `httpResponseBodySize`, and `serverAddress` (no secrets — the token is sent in a request header, not the URL); and the top-level `run` payload exposes `postedBySeverity`, a per-severity breakdown of posted comments.
 
-The `reviewer.run` payload exposes a `usage` field (`{ model, tokens, cost }`) once the agent has returned. The same `usage` is forwarded onto the top-level `run` payload so a subscriber on `run:asyncEnd` sees the final token and cost totals for the review.
+The `reviewer.run` payload exposes a `usage` field (`{ model, tokens, cost, mcp }`, `mcp` being a per-server `{ name, status, calls }` list) once the agent has returned. The same `usage` is forwarded onto the top-level `run` payload so a subscriber on `run:asyncEnd` sees the final token, cost, and MCP call totals for the review.
 
 ```js
 import { diagnosticChannels, run } from '@weareikko/code-review';
@@ -77,6 +79,8 @@ invoke_workflow code-review
 - `gen_ai.agent.turn` — one child span per agent turn with per-turn token counts, cost, model, and stop reason.
 - `execute_tool <name>` — one grandchild span per tool call (`gen_ai.tool.name`, `gen_ai.tool.call.id`). Error status is set on failed calls; failed calls also carry `process.exit_code`, and (only with content capture) `tool.stderr` and `tool.command`.
 - `code-review.<phase>` — one span per remaining phase (`scm.get_merge_request`, `git.get_merge_diff`, `scm.post_comments`, …) for latency and error rates.
+
+MCP connect / list-tools / call-tool operations are recorded as **span events** on `invoke_agent code-review` rather than their own spans — a review can make dozens of MCP calls (up to the per-review call budget), so an event per operation is enough without adding a child span per call. Each event is named `code_review.mcp.connect` / `code_review.mcp.tools` / `code_review.mcp.call` and carries `code_review.mcp.server`, `code_review.mcp.duration_ms`, and (respectively) `code_review.mcp.tool_count` or `code_review.mcp.tool` + `code_review.mcp.result_chars`; a failed operation adds `error.type`/`error.message` instead. `invoke_agent code-review` also carries a `code_review.mcp.calls` attribute — a JSON array of `{ server, calls }` — once the review's `ReviewUsage.mcp` is known, giving a per-server call count without an unbounded, per-server-named attribute key.
 
 Source-control API read spans (`scm.get_merge_request`, `scm.get_latest_version`, `scm.get_discussions`) carry stable OTel HTTP semantic-convention attributes — `http.request.method`, `http.response.status_code`, `url.full`, `http.response.body.size`, `server.address` — so API rate limits and 4xx/5xx responses are visible at the span level (the failing request's status is recorded even when the call throws). The `git.get_merge_diff` span carries `diff.files_changed`, `diff.lines_added`, and `diff.lines_removed` so duration and cost can be correlated with change size. The root `invoke_workflow` span carries `code_review.run_id` (and `gen_ai.conversation.id`) so a trace can be joined to its metric series and log stream.
 

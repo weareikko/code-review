@@ -10,6 +10,7 @@ import {
   type Tool as McpTool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { describe, expect, it, vi } from 'vitest';
+import { mcpDiagnosticChannels, type McpDiagnosticContext } from './diagnostics.js';
 import type { Logger } from './logger.js';
 import type { McpServerConfig } from './mcp-config.js';
 import { connectMcpServers, formatMcpToolResult, isReadOnlyMcpTool, mcpToolName } from './mcp.js';
@@ -362,6 +363,70 @@ describe('connectMcpServers', () => {
     } finally {
       await conn.close();
     }
+  });
+
+  it('publishes mcp.connect, mcp.tools, and mcp.call diagnostics when runId is set', async () => {
+    const fake = await startFakeServer();
+    const events: Array<{ channel: string; ctx: McpDiagnosticContext }> = [];
+    const record =
+      (channel: string) =>
+      (ctx: McpDiagnosticContext): void => {
+        events.push({ channel, ctx });
+      };
+    const onConnect = record('connect');
+    const onTools = record('tools');
+    const onCall = record('call');
+    mcpDiagnosticChannels.connect.asyncEnd.subscribe(onConnect);
+    mcpDiagnosticChannels.tools.asyncEnd.subscribe(onTools);
+    mcpDiagnosticChannels.call.asyncEnd.subscribe(onCall);
+
+    const conn = await connectMcpServers([config('tracker')], {
+      createTransport: fake.transport,
+      runId: 'run-diag-1',
+    });
+    try {
+      await conn.tools[0]!.execute('call-1', { id: '42' });
+    } finally {
+      mcpDiagnosticChannels.connect.asyncEnd.unsubscribe(onConnect);
+      mcpDiagnosticChannels.tools.asyncEnd.unsubscribe(onTools);
+      mcpDiagnosticChannels.call.asyncEnd.unsubscribe(onCall);
+      await conn.close();
+    }
+
+    expect(events.map((e) => e.channel)).toEqual(['connect', 'tools', 'call']);
+    for (const { ctx } of events) expect(ctx.runId).toBe('run-diag-1');
+    expect(events[0]?.ctx).toMatchObject({ op: 'mcp.connect', server: 'tracker' });
+    expect(events[1]?.ctx).toMatchObject({ op: 'mcp.tools', server: 'tracker', toolCount: 1 });
+    const callCtx = events[2]?.ctx;
+    expect(callCtx).toMatchObject({
+      op: 'mcp.call',
+      server: 'tracker',
+      tool: 'get_issue',
+      resultChars: 'get_issue:{"id":"42"}'.length,
+    });
+    // Arguments and results never reach the diagnostics payload (only their
+    // char count does) — not even via Node's tracingChannel.tracePromise,
+    // which otherwise assigns the traced function's return value as `.result`.
+    expect(callCtx).not.toHaveProperty('args');
+    expect((callCtx as { result?: unknown }).result).toBeUndefined();
+    expect(JSON.stringify(callCtx)).not.toContain('get_issue:{');
+  });
+
+  it('publishes no diagnostics when runId is not set', async () => {
+    const fake = await startFakeServer();
+    const seen: McpDiagnosticContext[] = [];
+    const onAsyncEnd = (ctx: McpDiagnosticContext) => seen.push(ctx);
+    mcpDiagnosticChannels.call.asyncEnd.subscribe(onAsyncEnd);
+
+    const conn = await connectMcpServers([config('tracker')], { createTransport: fake.transport });
+    try {
+      await conn.tools[0]!.execute('call-1', { id: '42' });
+    } finally {
+      mcpDiagnosticChannels.call.asyncEnd.unsubscribe(onAsyncEnd);
+      await conn.close();
+    }
+
+    expect(seen).toEqual([]);
   });
 
   it('uses the noop logger by default', async () => {

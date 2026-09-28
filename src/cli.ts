@@ -296,6 +296,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
             priorThreads,
             intent: { title: mr.title, description: mr.description },
             logger,
+            runId,
             // Subscribe the OTel bridge to the agent's event stream so per-turn
             // and per-tool-call spans/metrics fire in real time.
             attachTelemetry: bridges?.otel?.createAgentTelemetry(runId),

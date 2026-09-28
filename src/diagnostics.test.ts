@@ -5,9 +5,12 @@ import { ConfigError, GitLabApiError, ReviewerError } from './errors.js';
 import {
   createDiagnosticContext,
   diagnosticChannels,
+  mcpDiagnosticChannels,
   traceDiagnostic,
   traceDiagnosticPhase,
+  traceMcpDiagnostic,
   type DiagnosticContext,
+  type McpDiagnosticContext,
 } from './review.js';
 
 const diagnosticConfig: Config = {
@@ -212,6 +215,108 @@ describe('diagnostics_channel instrumentation', () => {
     expect(message).not.toContain('glpat-ABCDEFGHIJKLMNOPQRSTUV');
     expect(message).not.toContain('sk-ant-secretkeyvalue0123456789');
     expect(message).toContain('[REDACTED]');
+  });
+});
+
+describe('MCP diagnostics', () => {
+  it('publishes mcp.connect start/asyncEnd with server and durationMs, no args/results', async () => {
+    const events: Array<{ type: string; message: McpDiagnosticContext }> = [];
+    const onStart = (message: McpDiagnosticContext) => events.push({ type: 'start', message });
+    const onAsyncEnd = (message: McpDiagnosticContext) =>
+      events.push({ type: 'asyncEnd', message });
+
+    mcpDiagnosticChannels.connect.start.subscribe(onStart);
+    mcpDiagnosticChannels.connect.asyncEnd.subscribe(onAsyncEnd);
+    try {
+      await expect(
+        traceMcpDiagnostic('mcp.connect', 'run-mcp-1', 'jira', async () => 'connected'),
+      ).resolves.toBe('connected');
+    } finally {
+      mcpDiagnosticChannels.connect.start.unsubscribe(onStart);
+      mcpDiagnosticChannels.connect.asyncEnd.unsubscribe(onAsyncEnd);
+    }
+
+    expect(events.map((e) => e.type)).toEqual(['start', 'asyncEnd']);
+    expect(events[0]?.message).toMatchObject({
+      version: 1,
+      runId: 'run-mcp-1',
+      op: 'mcp.connect',
+      server: 'jira',
+    });
+    expect(events[1]?.message.durationMs).toEqual(expect.any(Number));
+    expect(events[1]?.message.completedAt).toEqual(expect.any(String));
+  });
+
+  it('lets the operation set toolCount on mcp.tools', async () => {
+    const ends: McpDiagnosticContext[] = [];
+    const onAsyncEnd = (message: McpDiagnosticContext) => ends.push(message);
+
+    mcpDiagnosticChannels.tools.asyncEnd.subscribe(onAsyncEnd);
+    try {
+      await traceMcpDiagnostic('mcp.tools', 'run-mcp-2', 'jira', async (ctx) => {
+        ctx.toolCount = 3;
+        return ['get_issue', 'search_issues', 'list_projects'];
+      });
+    } finally {
+      mcpDiagnosticChannels.tools.asyncEnd.unsubscribe(onAsyncEnd);
+    }
+
+    expect(ends[0]).toMatchObject({ op: 'mcp.tools', server: 'jira', toolCount: 3 });
+  });
+
+  it('lets the operation set tool and resultChars on mcp.call', async () => {
+    const ends: McpDiagnosticContext[] = [];
+    const onAsyncEnd = (message: McpDiagnosticContext) => ends.push(message);
+
+    mcpDiagnosticChannels.call.asyncEnd.subscribe(onAsyncEnd);
+    try {
+      await expect(
+        traceMcpDiagnostic('mcp.call', 'run-mcp-3', 'jira', async (ctx) => {
+          ctx.tool = 'get_issue';
+          ctx.resultChars = 42;
+          return 'the actual result, never published on the channel';
+        }),
+      ).resolves.toBe('the actual result, never published on the channel');
+    } finally {
+      mcpDiagnosticChannels.call.asyncEnd.unsubscribe(onAsyncEnd);
+    }
+
+    expect(ends[0]).toMatchObject({
+      op: 'mcp.call',
+      server: 'jira',
+      tool: 'get_issue',
+      resultChars: 42,
+    });
+    // The result value itself is never on the context — only its char count is.
+    // (Node's tracingChannel.tracePromise otherwise assigns the traced
+    // function's return value onto the published context as `.result`; the
+    // traced function here always resolves to `undefined` to prevent that.)
+    expect((ends[0] as { result?: unknown }).result).toBeUndefined();
+    expect(JSON.stringify(ends[0])).not.toContain('the actual result');
+  });
+
+  it('records a sanitized errorInfo on mcp.call failure and still rejects', async () => {
+    const errors: McpDiagnosticContext[] = [];
+    const onError = (message: McpDiagnosticContext) => errors.push(message);
+
+    mcpDiagnosticChannels.call.error.subscribe(onError);
+    try {
+      await expect(
+        traceMcpDiagnostic('mcp.call', 'run-mcp-4', 'jira', async (ctx) => {
+          ctx.tool = 'get_issue';
+          throw new Error('MCP tool returned an error');
+        }),
+      ).rejects.toThrow('MCP tool returned an error');
+    } finally {
+      mcpDiagnosticChannels.call.error.unsubscribe(onError);
+    }
+
+    expect(errors[0]).toMatchObject({
+      op: 'mcp.call',
+      server: 'jira',
+      tool: 'get_issue',
+      errorInfo: { name: 'Error', message: 'MCP tool returned an error' },
+    });
   });
 });
 

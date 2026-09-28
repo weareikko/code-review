@@ -25,6 +25,11 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { CallToolResult, Tool as McpTool } from '@modelcontextprotocol/sdk/types.js';
 import type { TSchema } from 'typebox';
+import {
+  traceMcpDiagnostic,
+  type McpDiagnosticContext,
+  type McpDiagnosticOp,
+} from './diagnostics.js';
 import { noopLogger, type Logger } from './logger.js';
 import type { McpServerConfig, McpServerSource } from './mcp-config.js';
 import { PRODUCT_NAME } from './product.js';
@@ -60,6 +65,13 @@ export interface ConnectMcpServersOptions {
   maxResultChars?: number;
   /** Test seam: build the transport for a config instead of the real one. */
   createTransport?: (config: McpServerConfig) => Transport;
+  /**
+   * The enclosing review's diagnostic run id. When set, connect/list-tools/call
+   * are traced on the `mcp.connect` / `mcp.tools` / `mcp.call` diagnostics
+   * channels (see `src/diagnostics.ts`); omitted (e.g. ad hoc library use, most
+   * tests) means no diagnostics events are published.
+   */
+  runId?: string;
 }
 
 export interface McpConnection {
@@ -114,6 +126,21 @@ export function createMcpTransport(config: McpServerConfig): Transport {
 function errorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return redactUrl(message);
+}
+
+/**
+ * Runs `operation` traced on the given MCP diagnostics channel when `runId` is
+ * set, or plain when it isn't (no channel publish). Keeps `connectOne` and
+ * `bridgeTool` free of `if (runId) { traced } else { plain }` branching at
+ * every call site.
+ */
+function withMcpTrace<T>(
+  runId: string | undefined,
+  op: McpDiagnosticOp,
+  server: string,
+  operation: (context?: McpDiagnosticContext) => Promise<T>,
+): Promise<T> {
+  return runId ? traceMcpDiagnostic(op, runId, server, operation) : operation();
 }
 
 /**
@@ -189,10 +216,11 @@ interface BridgeDeps {
   budget: Budget;
   timeoutMs: number;
   maxResultChars: number;
+  runId?: string;
 }
 
 function bridgeTool(tool: McpTool, deps: BridgeDeps): AgentTool {
-  const { client, status, budget, timeoutMs, maxResultChars } = deps;
+  const { client, status, budget, timeoutMs, maxResultChars, runId } = deps;
   const bridged: AgentTool<TSchema, undefined> = {
     name: mcpToolName(status.name, tool.name),
     label: `${status.name}: ${tool.name}`,
@@ -212,15 +240,22 @@ function bridgeTool(tool: McpTool, deps: BridgeDeps): AgentTool {
       }
       budget.remaining -= 1;
       status.calls += 1;
-      const result = await client.callTool(
-        { name: tool.name, arguments: params as Record<string, unknown> },
-        undefined,
-        { timeout: timeoutMs, signal },
-      );
-      return {
-        content: formatMcpToolResult(result as CallToolResult, maxResultChars),
-        details: undefined,
-      };
+      return withMcpTrace(runId, 'mcp.call', status.name, async (context) => {
+        if (context) context.tool = tool.name;
+        const result = await client.callTool(
+          { name: tool.name, arguments: params as Record<string, unknown> },
+          undefined,
+          { timeout: timeoutMs, signal },
+        );
+        const content = formatMcpToolResult(result as CallToolResult, maxResultChars);
+        if (context) {
+          context.resultChars = content.reduce(
+            (chars, block) => chars + (block.type === 'text' ? block.text.length : 0),
+            0,
+          );
+        }
+        return { content, details: undefined };
+      });
     },
   };
   return bridged as AgentTool;
@@ -245,12 +280,13 @@ interface ConnectedServer {
 
 async function connectOne(
   config: McpServerConfig,
-  options: Required<Omit<ConnectMcpServersOptions, 'createTransport'>> & {
+  options: Required<Omit<ConnectMcpServersOptions, 'createTransport' | 'runId'>> & {
     createTransport: (config: McpServerConfig) => Transport;
     budget: Budget;
+    runId?: string;
   },
 ): Promise<ConnectedServer> {
-  const { logger, budget, maxResultChars } = options;
+  const { logger, budget, maxResultChars, runId } = options;
   const timeoutMs = config.timeoutMs ?? options.timeoutMs;
   const status: McpServerStatus = {
     name: config.name,
@@ -261,10 +297,21 @@ async function connectOne(
   };
   const client = new Client({ name: PRODUCT_NAME, version: __PKG_VERSION__ });
   try {
-    await client.connect(options.createTransport(config), { timeout: timeoutMs });
-    const listed = await listAllTools(client, timeoutMs);
-    const exposed = listed.filter(isReadOnlyMcpTool);
-    const dropped = listed.filter((tool) => !isReadOnlyMcpTool(tool));
+    await withMcpTrace(runId, 'mcp.connect', config.name, () =>
+      client.connect(options.createTransport(config), { timeout: timeoutMs }),
+    );
+    const { exposed, dropped } = await withMcpTrace(
+      runId,
+      'mcp.tools',
+      config.name,
+      async (context) => {
+        const listed = await listAllTools(client, timeoutMs);
+        const readOnly = listed.filter(isReadOnlyMcpTool);
+        const notReadOnly = listed.filter((tool) => !isReadOnlyMcpTool(tool));
+        if (context) context.toolCount = readOnly.length;
+        return { exposed: readOnly, dropped: notReadOnly };
+      },
+    );
     if (dropped.length > 0) {
       logger.debug(
         `MCP server "${config.name}": dropped ${dropped.length} tool(s) without readOnlyHint: ${dropped.map((t) => t.name).join(', ')}`,
@@ -279,7 +326,7 @@ async function connectOne(
       client,
       status,
       tools: exposed.map((tool) =>
-        bridgeTool(tool, { client, status, budget, timeoutMs, maxResultChars }),
+        bridgeTool(tool, { client, status, budget, timeoutMs, maxResultChars, runId }),
       ),
     };
   } catch (error) {
@@ -306,6 +353,7 @@ export async function connectMcpServers(
     maxResultChars: options.maxResultChars ?? DEFAULT_MCP_MAX_RESULT_CHARS,
     createTransport: options.createTransport ?? createMcpTransport,
     budget: { remaining: total, total },
+    runId: options.runId,
   };
   const connected = await Promise.all(configs.map((config) => connectOne(config, resolved)));
 

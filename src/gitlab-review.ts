@@ -197,6 +197,13 @@ export interface RunReviewOptions {
     configs: readonly McpServerConfig[],
     options: ConnectMcpServersOptions,
   ) => Promise<McpConnection>;
+  /**
+   * The enclosing review's diagnostic run id (from `createDiagnosticRunId()` in
+   * `cli.ts`). Forwarded to `connectMcpServers` so MCP connect/list-tools/call
+   * are traced on the same run as the rest of the review's diagnostics/OTel
+   * data; omitted means no MCP diagnostics events are published.
+   */
+  runId?: string;
 }
 
 const DEFAULT_REVIEW_TIMEOUT_MS = 10 * 60 * 1000;
@@ -1382,7 +1389,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     logger,
   );
   const connectMcp = options.connectMcp ?? connectMcpServers;
-  const mcpConnection = await connectMcp(mcpConfigs, { logger });
+  const mcpConnection = await connectMcp(mcpConfigs, { logger, runId: options.runId });
 
   const systemPrompt = buildJSONSystemPrompt(context, minSeverity);
   const userPrompt = buildUserPrompt(

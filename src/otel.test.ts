@@ -11,6 +11,7 @@ import {
   createDiagnosticContext,
   diagnosticChannels,
   traceDiagnostic,
+  traceMcpDiagnostic,
   type DiagnosticContext,
 } from './review.js';
 
@@ -65,11 +66,16 @@ describe('OpenTelemetry bridge', () => {
     key: string;
     value: string | number | boolean;
   }
+  interface RecordedEvent {
+    name: string;
+    attributes: Record<string, unknown>;
+  }
   interface RecordedSpan {
     name: string;
     attributes: RecordedAttribute[];
     status?: { code: number; message?: string };
     exceptions: Array<{ name?: string; message: string }>;
+    events: RecordedEvent[];
     ended: boolean;
     parent?: RecordedSpan;
   }
@@ -96,6 +102,7 @@ describe('OpenTelemetry bridge', () => {
         name,
         attributes: [],
         exceptions: [],
+        events: [],
         ended: false,
         parent,
       };
@@ -134,6 +141,9 @@ describe('OpenTelemetry bridge', () => {
           },
           recordException(exception: { name?: string; message: string }) {
             span.exceptions.push(exception);
+          },
+          addEvent(eventName: string, attributes?: Record<string, unknown>) {
+            span.events.push({ name: eventName, attributes: attributes ?? {} });
           },
           end() {
             span.ended = true;
@@ -341,6 +351,88 @@ describe('OpenTelemetry bridge', () => {
       'gen_ai.usage.cache_creation.input_tokens': 10,
       'code_review.cost.total_usd': 0.049,
     });
+  });
+
+  it('records MCP connect/tools/call operations as span events on invoke_agent', async () => {
+    const { spans } = await runWithBridge(async (ctx) => {
+      await traceMcpDiagnostic('mcp.connect', ctx.runId, 'jira', async () => undefined);
+      await traceMcpDiagnostic('mcp.tools', ctx.runId, 'jira', async (mcpCtx) => {
+        mcpCtx.toolCount = 2;
+      });
+      await traceMcpDiagnostic('mcp.call', ctx.runId, 'jira', async (mcpCtx) => {
+        mcpCtx.tool = 'get_issue';
+        mcpCtx.resultChars = 128;
+      });
+    });
+    const reviewer = spans.find((s) => s.name === 'invoke_agent code-review');
+    expect(reviewer!.events.map((e) => e.name)).toEqual([
+      'code_review.mcp.connect',
+      'code_review.mcp.tools',
+      'code_review.mcp.call',
+    ]);
+    expect(reviewer!.events[0]?.attributes).toMatchObject({ 'code_review.mcp.server': 'jira' });
+    expect(reviewer!.events[0]?.attributes['code_review.mcp.duration_ms']).toEqual(
+      expect.any(Number),
+    );
+    expect(reviewer!.events[1]?.attributes).toMatchObject({
+      'code_review.mcp.server': 'jira',
+      'code_review.mcp.tool_count': 2,
+    });
+    expect(reviewer!.events[2]?.attributes).toMatchObject({
+      'code_review.mcp.server': 'jira',
+      'code_review.mcp.tool': 'get_issue',
+      'code_review.mcp.result_chars': 128,
+    });
+  });
+
+  it('records an MCP call error as a span event with error.type/message', async () => {
+    const { spans } = await runWithBridge(async (ctx) => {
+      await traceMcpDiagnostic('mcp.call', ctx.runId, 'jira', async (mcpCtx) => {
+        mcpCtx.tool = 'get_issue';
+        throw new Error('boom');
+      }).catch(() => {});
+    });
+    const reviewer = spans.find((s) => s.name === 'invoke_agent code-review');
+    const event = reviewer!.events.find((e) => e.name === 'code_review.mcp.call');
+    expect(event?.attributes).toMatchObject({
+      'code_review.mcp.server': 'jira',
+      'code_review.mcp.tool': 'get_issue',
+      'error.type': 'Error',
+      'error.message': 'boom',
+    });
+  });
+
+  it('stamps a per-server MCP call-count attribute on invoke_agent from DiagnosticUsage.mcp', async () => {
+    const { spans } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-sonnet-4-5',
+        tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+        cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+        mcp: [
+          { name: 'jira', status: 'connected', calls: 3 },
+          { name: 'docs', status: 'unavailable', calls: 0 },
+        ],
+      };
+    });
+    const reviewer = spans.find((s) => s.name === 'invoke_agent code-review');
+    const attrs = Object.fromEntries(reviewer!.attributes.map((a) => [a.key, a.value]));
+    expect(JSON.parse(String(attrs['code_review.mcp.calls']))).toEqual([
+      { server: 'jira', calls: 3 },
+      { server: 'docs', calls: 0 },
+    ]);
+  });
+
+  it('omits the MCP call-count attribute when no MCP servers were configured', async () => {
+    const { spans } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-sonnet-4-5',
+        tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+        cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+        mcp: [],
+      };
+    });
+    const reviewer = spans.find((s) => s.name === 'invoke_agent code-review');
+    expect(reviewer!.attributes.some((a) => a.key === 'code_review.mcp.calls')).toBe(false);
   });
 
   it('records gen_ai.client.operation.duration from reviewer phase context', async () => {

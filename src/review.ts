@@ -1,18 +1,24 @@
 export type {
   DiagnosticContext,
   DiagnosticError,
+  DiagnosticMcpUsage,
   DiagnosticPhase,
   DiagnosticUsage,
   DiagnosticUsageBreakdown,
+  McpDiagnosticContext,
+  McpDiagnosticOp,
 } from './diagnostics.js';
 export {
   DIAGNOSTIC_CHANNEL_NAMES,
   DIAGNOSTIC_CHANNEL_PREFIX,
+  MCP_DIAGNOSTIC_CHANNEL_NAMES,
   createDiagnosticContext,
   createDiagnosticRunId,
   diagnosticChannels,
+  mcpDiagnosticChannels,
   traceDiagnostic,
   traceDiagnosticPhase,
+  traceMcpDiagnostic,
 } from './diagnostics.js';
 export type { OtelBridge, OtelBridgeOptions, OtelRuntime } from './otel.js';
 export { isOtelEnabled, startOtelBridge } from './otel.js';
