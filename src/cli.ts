@@ -17,7 +17,7 @@ import {
 import { formatError, isQuotaExceededError, ParseError, RuntimeError } from './errors.js';
 import { extractExistingFingerprints } from './fingerprints.js';
 import { getMergeCommitLog, getMergeDiff, prepareGitHistory, summarizeDiff } from './git.js';
-import type { McpServerUsage, ReviewUsage } from './gitlab-review.js';
+import type { McpServerUsage, ReviewUsage, SkillUsage } from './gitlab-review.js';
 import { runReview } from './gitlab-review.js';
 import { createLogger } from './logger.js';
 import type { OtelBridge } from './otel.js';
@@ -27,12 +27,8 @@ import { createPlatform, type ScmResponseInfo } from './platform.js';
 import type { SummaryResult } from './posting.js';
 import { findExistingReviewedCommitSha, findExistingSummaryNote } from './posting.js';
 import { extractChangedFiles, extractPriorThreads } from './prior-threads.js';
-import {
-  formatSkillLink,
-  mcpSourceUrl,
-  type SkillLinkContext,
-  type SkillRef,
-} from './skill-links.js';
+import { formatSkillLink, mcpSourceUrl, type SkillLinkContext } from './skill-links.js';
+import { formatMcpUsageState, formatSkillUsageState } from './skill-usage.js';
 import { withCarriedOverFindings } from './summary-carryover.js';
 import type { GeneratedComment, Severity, ThinkingLevel } from './types.js';
 
@@ -538,19 +534,24 @@ function zeroReviewUsage(model: string, thinkingLevel: ThinkingLevel): ReviewUsa
  * CI project coordinates) stay as plain names.
  */
 export function formatSkillsFooter(
-  skills: SkillRef[],
+  skills: SkillUsage[],
   context: SkillLinkContext = {},
 ): string | undefined {
   if (skills.length === 0) return undefined;
-  return `Skills: ${skills.map((s) => formatSkillLink(s, context)).join(', ')}`;
+  const parts = skills.map(
+    (skill) => `${formatSkillLink(skill, context)} (${formatSkillUsageState(skill)})`,
+  );
+  return `Skills: ${parts.join(', ')}`;
 }
 
 /**
- * The summary footer's MCP line, e.g. `MCP: jira (get_issue, search_issues),
- * docs (unavailable)`. A connected server names its exposed (read-only) tools;
- * an unavailable one is flagged as such with none listed. Each server name
- * links to its source (the repo `.mcp.json` or the marketplace plugin) when one
- * is reachable, the same way `formatSkillsFooter` links skills.
+ * The summary footer's MCP line, e.g. `MCP: jira (2 calls), docs (unused),
+ * context7 (unavailable)`. A connected server reports how many tool calls the
+ * reviewer actually made against it; an unavailable one is flagged as such. The
+ * exposed tool list stays in the usage artifact — the footer answers what was
+ * used, not what was offered. Each server name links to its source (the repo
+ * `.mcp.json` or the marketplace plugin) when one is reachable, the same way
+ * `formatSkillsFooter` links skills.
  */
 export function formatMcpFooter(
   servers: McpServerUsage[],
@@ -560,13 +561,7 @@ export function formatMcpFooter(
   const parts = servers.map((server) => {
     const url = mcpSourceUrl(server.source, context);
     const name = url ? `[${server.name}](${url})` : server.name;
-    const detail =
-      server.status === 'connected'
-        ? server.exposedTools.length > 0
-          ? server.exposedTools.join(', ')
-          : 'no read-only tools'
-        : 'unavailable';
-    return `${name} (${detail})`;
+    return `${name} (${formatMcpUsageState(server)})`;
   });
   return `MCP: ${parts.join(', ')}`;
 }

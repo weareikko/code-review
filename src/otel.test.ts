@@ -435,6 +435,71 @@ describe('OpenTelemetry bridge', () => {
     expect(reviewer!.attributes.some((a) => a.key === 'code_review.mcp.calls')).toBe(false);
   });
 
+  it('stamps aggregate MCP usage attributes and one event per server on invoke_agent', async () => {
+    const { spans } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-sonnet-4-5',
+        tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+        cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+        mcp: [
+          { name: 'jira', status: 'connected', calls: 3 },
+          { name: 'context7', status: 'connected', calls: 0 },
+          { name: 'docs', status: 'unavailable', calls: 0 },
+        ],
+      };
+    });
+    const reviewer = spans.find((s) => s.name === 'invoke_agent code-review');
+    const attrs = Object.fromEntries(reviewer!.attributes.map((a) => [a.key, a.value]));
+    expect(attrs['code_review.mcp.servers_total']).toBe(3);
+    expect(attrs['code_review.mcp.servers_used']).toBe(1);
+    expect(attrs['code_review.mcp.calls_total']).toBe(3);
+
+    const events = reviewer!.events.filter((e) => e.name === 'code_review.mcp.server');
+    expect(events).toHaveLength(3);
+    expect(events[0].attributes).toMatchObject({
+      'code_review.mcp.server': 'jira',
+      'code_review.mcp.status': 'connected',
+      'code_review.mcp.server_calls': 3,
+    });
+    // The event must not reuse the span's JSON-string `calls` key.
+    expect(events[0].attributes).not.toHaveProperty('code_review.mcp.calls');
+  });
+
+  it('stamps skill usage attributes on invoke_agent from DiagnosticUsage.skills', async () => {
+    const { spans } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-sonnet-4-5',
+        tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+        cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+        skills: [
+          { name: 'code-review', reads: 2 },
+          { name: 'test-integrity', reads: 0 },
+        ],
+      };
+    });
+    const reviewer = spans.find((s) => s.name === 'invoke_agent code-review');
+    const attrs = Object.fromEntries(reviewer!.attributes.map((a) => [a.key, a.value]));
+    expect(attrs['code_review.skills.count']).toBe(2);
+    expect(attrs['code_review.skills.read_count']).toBe(1);
+    expect(JSON.parse(String(attrs['code_review.skills.reads']))).toEqual([
+      { skill: 'code-review', reads: 2 },
+      { skill: 'test-integrity', reads: 0 },
+    ]);
+  });
+
+  it('omits the skill attributes when no skill was loaded', async () => {
+    const { spans } = await runWithBridge(async (ctx) => {
+      ctx.usage = {
+        model: 'anthropic/claude-sonnet-4-5',
+        tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+        cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
+        skills: [],
+      };
+    });
+    const reviewer = spans.find((s) => s.name === 'invoke_agent code-review');
+    expect(reviewer!.attributes.some((a) => a.key.startsWith('code_review.skills.'))).toBe(false);
+  });
+
   it('records gen_ai.client.operation.duration from reviewer phase context', async () => {
     // gen_ai.client.operation.duration is emitted by recordGenAiMetrics at
     // reviewer-phase close. Token usage and cost are emitted per-turn by

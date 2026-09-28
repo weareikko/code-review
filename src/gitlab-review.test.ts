@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentEvent, AgentTool } from '@earendil-works/pi-agent-core';
@@ -879,6 +879,133 @@ describe('runReview pipeline', () => {
     ]);
   });
 
+  it('counts skill reads across the review, SKILL.md and reference files alike', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    const skillDir = join(cwd, 'my-skill');
+    await mkdir(join(skillDir, 'references'), { recursive: true });
+    await writeFile(
+      join(skillDir, 'SKILL.md'),
+      '---\nname: my-skill\ndescription: A local test skill\n---\nBody.',
+      'utf8',
+    );
+    await writeFile(join(skillDir, 'references', 'php.md'), 'Reference.', 'utf8');
+    const messages = [makeAssistant('ok', { input: 1, output: 1 })];
+
+    let listener: ((event: AgentEvent) => void | Promise<void>) | undefined;
+    const agent: AgentLike = {
+      subscribe(fn) {
+        listener = fn;
+        return () => {};
+      },
+      async prompt() {
+        if (!listener) return;
+        await listener({ type: 'turn_start' });
+        await listener({
+          type: 'tool_execution_start',
+          toolCallId: 'a',
+          toolName: 'Read',
+          args: { path: join(skillDir, 'SKILL.md') },
+        });
+        await listener({
+          type: 'tool_execution_start',
+          toolCallId: 'b',
+          toolName: 'Read',
+          args: { path: join(skillDir, 'references', 'php.md') },
+        });
+        // Neither of these is a skill read: a file outside the skill, and a
+        // shell command that happens to name the SKILL.md.
+        await listener({
+          type: 'tool_execution_start',
+          toolCallId: 'c',
+          toolName: 'Read',
+          args: { path: join(cwd, 'src', 'a.ts') },
+        });
+        await listener({
+          type: 'tool_execution_start',
+          toolCallId: 'd',
+          toolName: 'Bash',
+          args: { command: `cat ${join(skillDir, 'SKILL.md')}` },
+        });
+        await listener({ type: 'message_end', message: messages[0] });
+        await listener({ type: 'agent_end', messages });
+      },
+    };
+
+    const usage = await runReview(
+      { ...minimalConfig, cwd, skills: [`file:${skillDir}`] },
+      { cwd, diff: sampleDiff, createAgent: () => agent },
+    );
+
+    expect(usage.skills).toHaveLength(1);
+    expect(usage.skills[0].name).toBe('my-skill');
+    expect(usage.skills[0].reads).toBe(2);
+  });
+
+  it('reports zero reads for a skill the reviewer never opened', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    const skillDir = join(cwd, 'unread-skill');
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(
+      join(skillDir, 'SKILL.md'),
+      '---\nname: unread-skill\ndescription: Never opened\n---\nBody.',
+      'utf8',
+    );
+    const messages = [makeAssistant('ok', { input: 1, output: 1 })];
+
+    const usage = await runReview(
+      { ...minimalConfig, cwd, skills: [`file:${skillDir}`] },
+      { cwd, diff: sampleDiff, createAgent: () => fakeAgent(messages) },
+    );
+
+    expect(usage.skills).toEqual([
+      { name: 'unread-skill', origin: { kind: 'file', path: skillDir }, reads: 0 },
+    ]);
+  });
+
+  it('logs one usage line naming the skills and MCP servers the review used', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    const messages = [makeAssistant('ok', { input: 1, output: 1 })];
+    const infoLines: string[] = [];
+    const logger: Logger = {
+      ...noopLogger,
+      info: (msg) => {
+        infoLines.push(msg);
+      },
+    };
+
+    await runReview(
+      { ...minimalConfig, cwd },
+      {
+        cwd,
+        diff: sampleDiff,
+        createAgent: () => fakeAgent(messages),
+        logger,
+        connectMcp: async () => ({
+          tools: [],
+          servers: [
+            {
+              name: 'docs',
+              source: { kind: 'file', path: 'mcp.json' },
+              status: 'connected',
+              tools: ['read_doc'],
+              calls: 2,
+            },
+            {
+              name: 'context7',
+              source: { kind: 'file', path: 'mcp.json' },
+              status: 'connected',
+              tools: ['query_docs'],
+              calls: 0,
+            },
+          ],
+          close: async () => {},
+        }),
+      },
+    );
+
+    expect(infoLines).toContain('Usage: MCP docs (2 calls), context7 (unused)');
+  });
+
   it('emits turn_start and tool_execution_start debug lines to the logger', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const messages = [makeAssistant('Done.', { input: 1, output: 1 })];
@@ -903,7 +1030,7 @@ describe('runReview pipeline', () => {
           type: 'tool_execution_start',
           toolCallId: 'id1',
           toolName: 'Read',
-          args: { file_path: 'src/auth.ts' },
+          args: { path: 'src/auth.ts' },
         });
         await listener({
           type: 'tool_execution_start',
@@ -961,7 +1088,7 @@ describe('runReview pipeline', () => {
           type: 'tool_execution_start',
           toolCallId: 'a',
           toolName: 'Read',
-          args: { file_path: 'x.ts' },
+          args: { path: 'x.ts' },
         });
         await listener({ type: 'message_end', message: msg1 });
         await listener({ type: 'turn_start' });
@@ -1422,10 +1549,10 @@ describe('buildJSONSystemPrompt — skill section', () => {
     // The earlier one-line preamble ("Read each skill file before applying
     // it") was too soft — SkillFileReadJudge consistently scored 0 in eval
     // runs because the agent skipped the Read call entirely. The new
-    // preamble adds an explicit MUST, a worked Read({ file_path: ... }) tool
+    // preamble adds an explicit MUST, a worked read({ path: ... }) tool
     // call, and an explanation that the description alone is not enough.
     expect(prompt).toMatch(/you MUST/);
-    expect(prompt).toContain('Read({ file_path:');
+    expect(prompt).toContain('read({ path:');
     expect(prompt).toMatch(/a no-op/i);
     expect(prompt).toMatch(/description alone is not enough/i);
   });

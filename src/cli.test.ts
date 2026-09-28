@@ -223,10 +223,15 @@ describe('formatSkillsFooter', () => {
   it('links each skill to its source and names marketplace skills in full', () => {
     const footer = formatSkillsFooter(
       [
-        { name: 'code-review', origin: { kind: 'builtin', name: 'code-review' } },
-        { name: 'house-style', origin: { kind: 'project', path: '.claude/skills/house-style' } },
+        { name: 'code-review', reads: 2, origin: { kind: 'builtin', name: 'code-review' } },
+        {
+          name: 'house-style',
+          reads: 0,
+          origin: { kind: 'project', path: '.claude/skills/house-style' },
+        },
         {
           name: 'aria-apg',
+          reads: 1,
           origin: {
             kind: 'marketplace',
             marketplace: 'ikko-tools',
@@ -241,16 +246,18 @@ describe('formatSkillsFooter', () => {
     );
     expect(footer).toBe(
       'Skills: ' +
-        `[\`code-review\`](https://github.com/weareikko/code-review/blob/${__PKG_VERSION__}/skills/code-review/SKILL.md), ` +
-        '[`house-style`](https://gitlab.example.com/group/app/-/blob/abc123/.claude/skills/house-style/SKILL.md), ' +
-        '[`ikko-tools:dev/aria-apg`](https://gitlab.example.com/tools/ikko-tools/-/blob/main/plugins/dev/skills/aria-apg/SKILL.md)',
+        `[\`code-review\`](https://github.com/weareikko/code-review/blob/${__PKG_VERSION__}/skills/code-review/SKILL.md) (read), ` +
+        '[`house-style`](https://gitlab.example.com/group/app/-/blob/abc123/.claude/skills/house-style/SKILL.md) (not read), ' +
+        '[`ikko-tools:dev/aria-apg`](https://gitlab.example.com/tools/ikko-tools/-/blob/main/plugins/dev/skills/aria-apg/SKILL.md) (read)',
     );
   });
 
   it('falls back to plain names when a source cannot be linked', () => {
     expect(
-      formatSkillsFooter([{ name: 'local', origin: { kind: 'file', path: '/tmp/local' } }]),
-    ).toBe('Skills: `local`');
+      formatSkillsFooter([
+        { name: 'local', reads: 3, origin: { kind: 'file', path: '/tmp/local' } },
+      ]),
+    ).toBe('Skills: `local` (read)');
   });
 });
 
@@ -259,7 +266,7 @@ describe('formatMcpFooter', () => {
     expect(formatMcpFooter([])).toBeUndefined();
   });
 
-  it('lists a connected server with its exposed tools and an unavailable one with none', () => {
+  it('counts the calls of a connected server and flags an unavailable one', () => {
     const servers: McpServerUsage[] = [
       {
         name: 'jira',
@@ -276,12 +283,10 @@ describe('formatMcpFooter', () => {
         source: { kind: 'file', path: 'mcp-extra.json' },
       },
     ];
-    expect(formatMcpFooter(servers)).toBe(
-      'MCP: jira (get_issue, search_issues), docs (unavailable)',
-    );
+    expect(formatMcpFooter(servers)).toBe('MCP: jira (2 calls), docs (unavailable)');
   });
 
-  it('reports a connected server with no read-only tools distinctly from unavailable', () => {
+  it('reports a connected server that was never called as unused, not unavailable', () => {
     const servers: McpServerUsage[] = [
       {
         name: 'empty',
@@ -290,8 +295,15 @@ describe('formatMcpFooter', () => {
         calls: 0,
         source: { kind: 'file', path: 'mcp-extra.json' },
       },
+      {
+        name: 'once',
+        status: 'connected',
+        exposedTools: ['search'],
+        calls: 1,
+        source: { kind: 'file', path: 'mcp-extra.json' },
+      },
     ];
-    expect(formatMcpFooter(servers)).toBe('MCP: empty (no read-only tools)');
+    expect(formatMcpFooter(servers)).toBe('MCP: empty (unused), once (1 call)');
   });
 
   it('links a server to its repo .mcp.json when project coordinates are available', () => {
@@ -300,7 +312,7 @@ describe('formatMcpFooter', () => {
         name: 'jira',
         status: 'connected',
         exposedTools: ['get_issue'],
-        calls: 0,
+        calls: 3,
         source: { kind: 'project', path: '.mcp.json' },
       },
     ];
@@ -309,7 +321,7 @@ describe('formatMcpFooter', () => {
       commitSha: 'abc123',
     });
     expect(footer).toBe(
-      'MCP: [jira](https://gitlab.example.com/group/app/-/blob/abc123/.mcp.json) (get_issue)',
+      'MCP: [jira](https://gitlab.example.com/group/app/-/blob/abc123/.mcp.json) (3 calls)',
     );
   });
 
@@ -331,7 +343,7 @@ describe('formatMcpFooter', () => {
       },
     ];
     expect(formatMcpFooter(servers)).toBe(
-      'MCP: [context7](https://gitlab.example.com/tools/ikko-tools/-/tree/main/plugins/dev) (search)',
+      'MCP: [context7](https://gitlab.example.com/tools/ikko-tools/-/tree/main/plugins/dev) (unused)',
     );
   });
 
@@ -341,17 +353,17 @@ describe('formatMcpFooter', () => {
         name: 'local',
         status: 'connected',
         exposedTools: ['x'],
-        calls: 0,
+        calls: 1,
         source: { kind: 'file', path: '/tmp/mcp-extra.json' },
       },
       {
         name: 'inrepo',
         status: 'connected',
         exposedTools: ['y'],
-        calls: 0,
+        calls: 2,
         source: { kind: 'project', path: '.mcp.json' },
       },
     ];
-    expect(formatMcpFooter(servers)).toBe('MCP: local (x), inrepo (y)');
+    expect(formatMcpFooter(servers)).toBe('MCP: local (1 call), inrepo (2 calls)');
   });
 });

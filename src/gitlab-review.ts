@@ -32,6 +32,8 @@ import { parseReviewMarkdownWithWarnings } from './parser.js';
 import type { PriorThread } from './prior-threads.js';
 import { renderPriorThreadsBlock } from './prior-threads.js';
 import type { SkillRef } from './skill-links.js';
+import type { SkillReadCounter } from './skill-usage.js';
+import { createSkillReadCounter, formatReviewUsageSummary } from './skill-usage.js';
 import type { Skill } from './skills.js';
 import { loadAutoDiscoveredSkills, loadNamedSkill, parseSkillSpec } from './skills.js';
 import {
@@ -105,7 +107,7 @@ export interface ReviewUsage {
    */
   byModel?: ModelUsage[];
   /** Skills the reviewer loaded, with the origin each was loaded from. */
-  skills: SkillRef[];
+  skills: SkillUsage[];
   /** MCP servers connected for this review, with their exposed tools and call counts. */
   mcp: McpServerUsage[];
   /**
@@ -114,6 +116,15 @@ export interface ReviewUsage {
    * past the configured line threshold. Both feed the prominent summary callout.
    */
   sizeNotice: ReviewSizeNotice;
+}
+
+/** One loaded skill's outcome for a review, as reported in {@link ReviewUsage}. */
+export interface SkillUsage extends SkillRef {
+  /**
+   * Files the reviewer read under the skill's directory — its `SKILL.md` or a
+   * reference file it points at. Zero means the skill was offered but never read.
+   */
+  reads: number;
 }
 
 /** One MCP server's outcome for a review, as reported in {@link ReviewUsage}. */
@@ -773,8 +784,8 @@ export function buildJSONSystemPrompt(
       'Read each skill file before applying it. Skills are mandatory rule sets — the actual review criteria live in the SKILL.md body, not in the one-line description below.',
       '',
       'For every skill listed below, you MUST:',
-      '  1. Call the Read tool with the path in <skill_file> to load the SKILL.md content. Example: Read({ file_path: "/abs/path/to/skills/code-review/SKILL.md" }).',
-      '  2. If the skill lists <skill_resources>, Read the references relevant to the languages or frameworks present in this diff (skip references that do not match the diff).',
+      '  1. Call the read tool with the path in <skill_file> to load the SKILL.md content. Example: read({ path: "/abs/path/to/skills/code-review/SKILL.md" }).',
+      '  2. If the skill lists <skill_resources>, read the references relevant to the languages or frameworks present in this diff (skip references that do not match the diff).',
       "  3. Apply the skill's criteria when forming and grading findings.",
       '',
       'A skill loaded but never read is a no-op — the description alone is not enough to apply the rules correctly.',
@@ -1523,6 +1534,9 @@ async function runReviewStages(params: ReviewStagesParams): Promise<ReviewUsage>
   const createAgent = options.createAgent ?? defaultCreateAgent;
   const timeoutMs = options.timeoutMs ?? DEFAULT_REVIEW_TIMEOUT_MS;
   const aggregated = emptyUsage();
+  // Shared by every stage: Find and Verify run different agents over the same
+  // tool list, so a skill read in either stage counts towards the same skill.
+  const skillReads = createSkillReadCounter(context.skills, cwd);
   const deps: StageDeps = {
     createAgent,
     pool,
@@ -1534,6 +1548,7 @@ async function runReviewStages(params: ReviewStagesParams): Promise<ReviewUsage>
     verifyMember: resolveVerifyMember(config, primary, logger),
     attachTelemetry: options.attachTelemetry,
     verifyStaged: diskMode ? retrievableSkipped : undefined,
+    skillReads,
   };
 
   // Snapshot builder for the accumulated usage. Used for the normal return and,
@@ -1547,7 +1562,11 @@ async function runReviewStages(params: ReviewStagesParams): Promise<ReviewUsage>
     tokens: aggregated.tokens,
     cost: aggregated.cost,
     byModel: buildByModelUsage(aggregated),
-    skills: context.skills.map((s) => ({ name: s.name, origin: s.origin })),
+    skills: context.skills.map((s) => ({
+      name: s.name,
+      origin: s.origin,
+      reads: skillReads.countFor(s),
+    })),
     mcp: mcpConnection.servers.map((server) => ({
       name: server.name,
       status: server.status,
@@ -1591,6 +1610,7 @@ async function runReviewStages(params: ReviewStagesParams): Promise<ReviewUsage>
           },
           onToolStart: (toolName, args) => {
             toolCallCount += 1;
+            skillReads.record(toolName, args);
             logger.debug(`  → ${toolName}${formatToolArgs(toolName, args)}`);
           },
         });
@@ -1605,7 +1625,12 @@ async function runReviewStages(params: ReviewStagesParams): Promise<ReviewUsage>
           : finalText;
     }
   } finally {
-    options.onUsage?.(buildUsage());
+    const usage = buildUsage();
+    // Emitted here, not after the stages, so a run that fails mid-flight still
+    // reports what it managed to use.
+    const usageSummary = formatReviewUsageSummary(usage);
+    if (usageSummary) logger.info(usageSummary);
+    options.onUsage?.(usage);
   }
 
   const reviewPath = resolve(cwd, config.reviewFile);
@@ -1752,6 +1777,8 @@ interface StageDeps {
    * pool-based selection.
    */
   verifyMember?: PoolMember | null;
+  /** Skill read counter, shared across stages so counts span Find and Verify. */
+  skillReads: SkillReadCounter;
   /**
    * Optional telemetry attach hook, applied to EVERY agent the stages spawn
    * (multi-angle finders and per-finding verifiers), not just the single/verify
@@ -1814,8 +1841,10 @@ async function runMultiAngleFind(
       const text = await runAgentToCompletion(agent, userPrompt, {
         timeoutMs: deps.timeoutMs,
         onAssistantMessage: (message) => accumulateUsage(deps.aggregated, message, member.id),
-        onToolStart: (toolName, args) =>
-          deps.logger.debug(`  [${angle.key}] → ${toolName}${formatToolArgs(toolName, args)}`),
+        onToolStart: (toolName, args) => {
+          deps.skillReads.record(toolName, args);
+          deps.logger.debug(`  [${angle.key}] → ${toolName}${formatToolArgs(toolName, args)}`);
+        },
       });
       const parsed = parseReviewMarkdownWithWarnings(text);
       // Annotate each finding with the model that authored it. This is internal
@@ -1886,6 +1915,7 @@ async function verifyAndSynthesize(
           timeoutMs: deps.timeoutMs,
           onAssistantMessage: (message) =>
             accumulateUsage(deps.aggregated, message, verifierMember.id),
+          onToolStart: (toolName, args) => deps.skillReads.record(toolName, args),
         });
         verdicts.set(index, parseVerdict(text));
       } catch (error) {
@@ -1940,7 +1970,7 @@ function formatToolArgs(toolName: string, args: unknown): string {
   if (!args || typeof args !== 'object') return '';
   const obj = args as Record<string, unknown>;
   if (toolName === 'Read' || toolName === 'read') {
-    return typeof obj.file_path === 'string' ? ` ${obj.file_path}` : '';
+    return typeof obj.path === 'string' ? ` ${obj.path}` : '';
   }
   if (toolName === 'Bash' || toolName === 'bash') {
     return typeof obj.command === 'string' ? ` ${obj.command.slice(0, 80)}` : '';
