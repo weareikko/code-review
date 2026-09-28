@@ -50,7 +50,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           CODE_REVIEW_SKILLS: code-review
+          # Dogfood marketplace-sourced MCP servers: context7 and github come
+          # from Anthropic's public plugin marketplace, not from this repo.
+          CODE_REVIEW_MARKETPLACES: 'anthropic=https://github.com/anthropics/claude-plugins-official.git'
+          CODE_REVIEW_MCP: 'anthropic:context7,anthropic:github'
+          # The github plugin reads this name; context7 needs no key.
+          GITHUB_PERSONAL_ACCESS_TOKEN: ${{ github.token }}
+          CODE_REVIEW_MCP_ENV: GITHUB_PERSONAL_ACCESS_TOKEN
+          # Keeps the local docs server in .mcp.json loaded.
           CODE_REVIEW_MCP_DISCOVERY: 'true'
-          # Let the github server in .mcp.json read the job token, and nothing else.
-          CODE_REVIEW_MCP_ENV: GITHUB_TOKEN
         run: node bin/code-review.js

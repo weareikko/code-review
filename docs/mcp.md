@@ -57,6 +57,8 @@ A server declared with `type: ws`, or with an `oauth` or `headersHelper` field, 
 
 `${VAR}` and `${VAR:-default}` are expanded in `command`, `args`, `env` values, `url`, and `headers` values. `${VAR:-default}` uses the default when `VAR` is unset **or** empty, as in POSIX. `${CLAUDE_PLUGIN_ROOT}` additionally expands to the plugin's own directory for marketplace-sourced servers, the same as it does for skills.
 
+A header whose value expands to an empty or whitespace-only string is **dropped**, not sent: `"Authorization": "${API_KEY:-}"` with no key set means no `Authorization` header at all, rather than a malformed empty one some servers reject. `env` values for stdio servers are kept as-is — an empty environment variable is a meaningful, distinct value there.
+
 ### The variable allowlist
 
 A server definition is not always operator-authored — it can come from the repository under review, or from a marketplace plugin whose upstream ref moves — and expansion writes values into argv, headers, and URL query strings. So expansion reads **only** the variables you name with `--mcp-env` / `CODE_REVIEW_MCP_ENV`; the reviewer's own secrets (`CODE_REVIEW_GITLAB_TOKEN`, `ANTHROPIC_API_KEY`, …) are never readable unless you list them.
@@ -119,6 +121,21 @@ code-review --marketplace 'ikko=git+ssh://git@gitlab.studiometa.dev/ikko/ikko-to
 # or a single server from the same plugin:
 code-review --marketplace 'ikko=git+ssh://git@gitlab.studiometa.dev/ikko/ikko-tools.git#main' --mcp ikko:dev/context7
 ```
+
+### From a public marketplace
+
+Anthropic publishes a plugin marketplace with ready-made servers. This repository's own self-review loads two of them instead of declaring the same servers in `.mcp.json`:
+
+```yml
+env:
+  CODE_REVIEW_MARKETPLACES: 'anthropic=https://github.com/anthropics/claude-plugins-official.git'
+  CODE_REVIEW_MCP: 'anthropic:context7,anthropic:github'
+  # The github plugin's Authorization header reads this name, and nothing else.
+  GITHUB_PERSONAL_ACCESS_TOKEN: ${{ github.token }}
+  CODE_REVIEW_MCP_ENV: GITHUB_PERSONAL_ACCESS_TOKEN
+```
+
+`context7` needs no credential: its `Authorization` header is a `${CONTEXT7_API_KEY:-}` reference, which expands to nothing and is dropped by the empty-header rule above.
 
 ## Prompt context
 
