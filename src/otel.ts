@@ -1446,11 +1446,14 @@ function applyMcpUsageAttributes(span: Span, mcp: DiagnosticUsage['mcp']): void 
     mcp.map((server) => ({ server: server.name, calls: server.calls })),
   );
   if (mcpCalls) span.setAttribute('code_review.mcp.calls', mcpCalls);
+  // The event uses `server_calls`, not `calls`: `code_review.mcp.calls` is the
+  // JSON span attribute above, and a backend that indexes span and event
+  // attributes into one typed field rejects the same key as string and int.
   for (const server of mcp) {
     span.addEvent('code_review.mcp.server', {
       'code_review.mcp.server': server.name,
       'code_review.mcp.status': server.status,
-      'code_review.mcp.calls': server.calls,
+      'code_review.mcp.server_calls': server.calls,
     });
   }
 }

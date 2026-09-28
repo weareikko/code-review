@@ -92,7 +92,7 @@ MCP connect / list-tools / call-tool operations are recorded as **span events** 
 | `code_review.skills.read_count` | int    | Skills the reviewer read at least one file of                |
 | `code_review.skills.reads`      | string | JSON array of `{ skill, reads }`                             |
 
-The MCP attributes are omitted when no server was configured, the skill attributes when no skill was loaded. Each server additionally gets a `code_review.mcp.server` span **event** carrying `code_review.mcp.server`, `code_review.mcp.status`, and `code_review.mcp.calls`.
+The MCP attributes are omitted when no server was configured, the skill attributes when no skill was loaded. Each server additionally gets a `code_review.mcp.server` span **event** carrying `code_review.mcp.server`, `code_review.mcp.status`, and `code_review.mcp.server_calls` (an int; the event does not reuse the `code_review.mcp.calls` key, which is a JSON string on the span).
 
 Source-control API read spans (`scm.get_merge_request`, `scm.get_latest_version`, `scm.get_discussions`) carry stable OTel HTTP semantic-convention attributes — `http.request.method`, `http.response.status_code`, `url.full`, `http.response.body.size`, `server.address` — so API rate limits and 4xx/5xx responses are visible at the span level (the failing request's status is recorded even when the call throws). The `git.get_merge_diff` span carries `diff.files_changed`, `diff.lines_added`, and `diff.lines_removed` so duration and cost can be correlated with change size. The root `invoke_workflow` span carries `code_review.run_id` (and `gen_ai.conversation.id`) so a trace can be joined to its metric series and log stream.
 

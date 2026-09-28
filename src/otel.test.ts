@@ -459,8 +459,10 @@ describe('OpenTelemetry bridge', () => {
     expect(events[0].attributes).toMatchObject({
       'code_review.mcp.server': 'jira',
       'code_review.mcp.status': 'connected',
-      'code_review.mcp.calls': 3,
+      'code_review.mcp.server_calls': 3,
     });
+    // The event must not reuse the span's JSON-string `calls` key.
+    expect(events[0].attributes).not.toHaveProperty('code_review.mcp.calls');
   });
 
   it('stamps skill usage attributes on invoke_agent from DiagnosticUsage.skills', async () => {
