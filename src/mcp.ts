@@ -221,6 +221,9 @@ export function formatMcpToolResult(
   }
   if (notes.length > 0) {
     text = text.length > 0 ? `${text}\n${notes.join('\n')}` : notes.join('\n');
+    // The omission notes are part of the result too: when they push the text
+    // past the cap, cut the tail so the bound holds for the assembled output.
+    if (text.length > maxChars) text = text.slice(0, maxChars);
   }
 
   const content: (TextContent | ImageContent)[] = [];

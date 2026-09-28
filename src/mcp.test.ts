@@ -183,6 +183,15 @@ describe('formatMcpToolResult', () => {
     expect(text.length).toBeLessThanOrEqual(100);
   });
 
+  it('keeps image omission notes within the cap', () => {
+    const content = formatMcpToolResult(
+      { content: [{ type: 'image', data: 'a'.repeat(100), mimeType: 'image/png' }] },
+      10,
+    );
+    expect(content).toHaveLength(1);
+    expect(textOf({ content }).length).toBeLessThanOrEqual(10);
+  });
+
   it('returns only the notice when the cap is smaller than the notice', () => {
     const content = formatMcpToolResult({ content: [{ type: 'text', text: 'x'.repeat(50) }] }, 10);
     expect(textOf({ content })).toBe('\n\n[truncated: result was 50 characters, limit is 10]');
@@ -217,7 +226,7 @@ describe('formatMcpToolResult', () => {
           { type: 'image', data: 'b'.repeat(200), mimeType: 'image/png' },
         ],
       },
-      20,
+      60,
     );
     expect(content).toEqual([
       { type: 'text', text: 'hello\n[image omitted: 200 bytes]' },
