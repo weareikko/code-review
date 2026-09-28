@@ -40,7 +40,7 @@ export type {
 } from './gitlab-review.js';
 export type { McpServerConfig, McpServerSource } from './mcp-config.js';
 export type { ConnectMcpServersOptions, McpConnection, McpServerStatus } from './mcp.js';
-export { connectMcpServers, createMcpTransport, isReadOnlyMcpTool } from './mcp.js';
+export { connectMcpServers } from './mcp.js';
 export { filterDiff } from './gitlab-review.js';
 export { runReview } from './gitlab-review.js';
 export type {
