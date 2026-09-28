@@ -126,11 +126,13 @@ Connected servers and their exposed tools are listed in one `<external-context>`
 
 ## Summary footer
 
-When at least one server was configured, the summary note carries an `MCP:` line next to the `Skills:` line, listing only exposed read-only tools:
+When at least one server was configured, the summary note carries an `MCP:` line next to the `Skills:` line, reporting how many tool calls the reviewer made against each server:
 
 ```md
-MCP: [jira](https://gitlab.example.com/team/app/-/blob/a1b2c3d/.mcp.json) (get_issue, search_issues), docs (unavailable)
+MCP: [jira](https://gitlab.example.com/team/app/-/blob/a1b2c3d/.mcp.json) (2 calls), [context7](https://gitlab.example.com/tools/ikko-tools/-/tree/main/plugins/dev) (unused), docs (unavailable)
 ```
+
+`unused` is a server that connected but was never called; `unavailable` is one that failed to connect. The list of exposed read-only tools is no longer rendered here — it stays in the usage artifact (`review-usage.json`) under each server's `exposedTools`.
 
 A server name links to its source when reachable: a repo `.mcp.json` links to that file's blob at the reviewed commit (CI project coordinates required); a marketplace plugin links to the plugin's directory in the marketplace repository. A `file:` source, or a repo server on a run without CI project coordinates, stays an unlinked name — same rule as the [skills footer](./skills.md#skills-footer).
 
@@ -144,13 +146,13 @@ A server name links to its source when reachable: a repo `.mcp.json` links to th
 
 ## Diagnostics and OpenTelemetry
 
-Connect, list-tools, and call-tool operations are traced on `diagnostics_channel` and, with `CODE_REVIEW_OTEL=1`, rendered as span events and a per-server call-count attribute. See [Observability](./observability.md) for the channel names, payload shapes, and OTel attribute names.
+Connect, list-tools, and call-tool operations are traced on `diagnostics_channel` and, with `CODE_REVIEW_OTEL=1`, rendered as span events and per-server / aggregate call-count attributes. See [Observability](./observability.md) for the channel names, payload shapes, and OTel attribute names.
 
 ## Troubleshooting
 
 - **A server never appears in the footer.** It failed to resolve before connecting — check the CLI warning: a malformed `--mcp` spec, an unregistered marketplace, or invalid JSON in `.mcp.json` all warn and skip rather than fail the review.
 - **A server shows `(unavailable)`.** It resolved but the connection failed (bad command, unreachable URL, timeout) — check the warning logged at connect time; the review continues without it.
-- **A tool the server offers is missing from the footer.** It either lacks `readOnlyHint: true`, or sets `destructiveHint: true` — the gate drops it on purpose. Check the server's tool annotations; this tool cannot expose it without them.
+- **A tool the server offers is missing from `exposedTools`.** It either lacks `readOnlyHint: true`, or sets `destructiveHint: true` — the gate drops it on purpose. Check the server's tool annotations; this tool cannot expose it without them.
 - **A server is skipped for an "unset environment variable" that is clearly set.** Expansion reads only the allowlist — add the name to `--mcp-env` / `CODE_REVIEW_MCP_ENV`.
 - **A CI-only server should not run locally.** Gate it in `.mcp.json` with a `${VAR:-}` default that resolves to nothing outside CI: an empty `command` or `url` after expansion skips the server cleanly. Or use `--disable-mcp <name>` / `CODE_REVIEW_DISABLE_MCP` locally.
 - **Two servers' tools collide.** Bridged names sanitise every character outside `[A-Za-z0-9_-]`, so `jira.internal` and `jira_internal` produce the same `mcp__jira_internal__…` name. The first server wins; the later one's tool is dropped with a warning. Rename one of the servers.

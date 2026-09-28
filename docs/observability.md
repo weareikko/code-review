@@ -37,7 +37,7 @@ When `--posting-mode draft` is used, the `scm.post_comments` payload also expose
 
 The `git.get_merge_diff` payload exposes `diffFilesChanged`, `diffLinesAdded`, and `diffLinesRemoved`; the source-control (`scm.*`) read phases expose `httpRequestMethod`, `httpUrl`, `httpStatusCode`, `httpResponseBodySize`, and `serverAddress` (no secrets — the token is sent in a request header, not the URL); and the top-level `run` payload exposes `postedBySeverity`, a per-severity breakdown of posted comments.
 
-The `reviewer.run` payload exposes a `usage` field (`{ model, tokens, cost, mcp }`, `mcp` being a per-server `{ name, status, calls }` list) once the agent has returned. The same `usage` is forwarded onto the top-level `run` payload so a subscriber on `run:asyncEnd` sees the final token, cost, and MCP call totals for the review.
+The `reviewer.run` payload exposes a `usage` field (`{ model, tokens, cost, mcp, skills }`, `mcp` being a per-server `{ name, status, calls }` list and `skills` a per-skill `{ name, reads }` list) once the agent has returned. The same `usage` is forwarded onto the top-level `run` payload so a subscriber on `run:asyncEnd` sees the final token, cost, and MCP call totals for the review.
 
 ```js
 import { diagnosticChannels, run } from '@weareikko/code-review';
@@ -80,7 +80,19 @@ invoke_workflow code-review
 - `execute_tool <name>` — one grandchild span per tool call (`gen_ai.tool.name`, `gen_ai.tool.call.id`). Error status is set on failed calls; failed calls also carry `process.exit_code`, and (only with content capture) `tool.stderr` and `tool.command`.
 - `code-review.<phase>` — one span per remaining phase (`scm.get_merge_request`, `git.get_merge_diff`, `scm.post_comments`, …) for latency and error rates.
 
-MCP connect / list-tools / call-tool operations are recorded as **span events** on `invoke_agent code-review` rather than their own spans — a review can make dozens of MCP calls (up to the per-review call budget), so an event per operation is enough without adding a child span per call. Each event is named `code_review.mcp.connect` / `code_review.mcp.tools` / `code_review.mcp.call` and carries `code_review.mcp.server`, `code_review.mcp.duration_ms`, and (respectively) `code_review.mcp.tool_count` or `code_review.mcp.tool` + `code_review.mcp.result_chars`; a failed operation adds `error.type`/`error.message` instead. `invoke_agent code-review` also carries a `code_review.mcp.calls` attribute — a JSON array of `{ server, calls }` — once the review's `ReviewUsage.mcp` is known, giving a per-server call count without an unbounded, per-server-named attribute key.
+MCP connect / list-tools / call-tool operations are recorded as **span events** on `invoke_agent code-review` rather than their own spans — a review can make dozens of MCP calls (up to the per-review call budget), so an event per operation is enough without adding a child span per call. Each event is named `code_review.mcp.connect` / `code_review.mcp.tools` / `code_review.mcp.call` and carries `code_review.mcp.server`, `code_review.mcp.duration_ms`, and (respectively) `code_review.mcp.tool_count` or `code_review.mcp.tool` + `code_review.mcp.result_chars`; a failed operation adds `error.type`/`error.message` instead. Once the review's `ReviewUsage` is known, `invoke_agent code-review` also carries fixed usage attributes — never a per-server or per-skill attribute **key**, which would make the attribute set depend on the run's configuration:
+
+| Attribute                       | Type   | Meaning                                                      |
+| ------------------------------- | ------ | ------------------------------------------------------------ |
+| `code_review.mcp.servers_total` | int    | Servers configured for the review, connected or not          |
+| `code_review.mcp.servers_used`  | int    | Connected servers the reviewer actually called at least once |
+| `code_review.mcp.calls_total`   | int    | Tool calls across every server                               |
+| `code_review.mcp.calls`         | string | JSON array of `{ server, calls }`                            |
+| `code_review.skills.count`      | int    | Skills loaded for the review                                 |
+| `code_review.skills.read_count` | int    | Skills the reviewer read at least one file of                |
+| `code_review.skills.reads`      | string | JSON array of `{ skill, reads }`                             |
+
+The MCP attributes are omitted when no server was configured, the skill attributes when no skill was loaded. Each server additionally gets a `code_review.mcp.server` span **event** carrying `code_review.mcp.server`, `code_review.mcp.status`, and `code_review.mcp.calls`.
 
 Source-control API read spans (`scm.get_merge_request`, `scm.get_latest_version`, `scm.get_discussions`) carry stable OTel HTTP semantic-convention attributes — `http.request.method`, `http.response.status_code`, `url.full`, `http.response.body.size`, `server.address` — so API rate limits and 4xx/5xx responses are visible at the span level (the failing request's status is recorded even when the call throws). The `git.get_merge_diff` span carries `diff.files_changed`, `diff.lines_added`, and `diff.lines_removed` so duration and cost can be correlated with change size. The root `invoke_workflow` span carries `code_review.run_id` (and `gen_ai.conversation.id`) so a trace can be joined to its metric series and log stream.
 
