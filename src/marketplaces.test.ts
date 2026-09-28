@@ -476,6 +476,24 @@ describe('loadMarketplaceMcpServers', () => {
     expect(servers.map((s) => s.name)).toEqual(['context7']);
   });
 
+  it('drops a plugin header whose ${VAR:-} default expands to nothing', async () => {
+    ctl.files = {
+      '.claude-plugin/marketplace.json': manifest(),
+      'plugins/dev/.mcp.json': JSON.stringify({
+        mcpServers: {
+          context7: {
+            type: 'http',
+            url: 'https://context7.test/mcp',
+            headers: { Authorization: '${CONTEXT7_API_KEY:-}' },
+          },
+        },
+      }),
+    };
+    const spec = { marketplace: 'acme', plugin: 'dev', server: '' };
+    const servers = await loadMarketplaceMcpServers(spec, registry(), { cacheDir: '/cache' });
+    expect(servers[0]?.headers).toEqual({});
+  });
+
   it('reads servers from the "mcpServers" field of the plugin\'s plugin.json', async () => {
     ctl.files = {
       '.claude-plugin/marketplace.json': manifest(),

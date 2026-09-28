@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The summary footer now reports usage instead of availability: `MCP:` gives each server's call count and `Skills:` marks each skill read / not read, with matching OTel attributes and an end-of-run usage log line ([#156]).
 
+### Fixed
+
+- MCP headers that expand to an empty value are dropped instead of sent ([#999]).
+
 ## [0.9.7] - 2026-09-24
 
 ### Changed
@@ -160,6 +164,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#156]: https://github.com/weareikko/code-review/pull/156
 [#155]: https://github.com/weareikko/code-review/pull/155
 [#151]: https://github.com/weareikko/code-review/pull/151
+[#999]: https://github.com/weareikko/code-review/pull/999
 [#150]: https://github.com/weareikko/code-review/pull/150
 [#148]: https://github.com/weareikko/code-review/pull/148
 [#144]: https://github.com/weareikko/code-review/pull/144
