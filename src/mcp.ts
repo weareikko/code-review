@@ -71,7 +71,10 @@ export interface ConnectMcpServersOptions {
   callBudget?: number;
   /** Cap on the text returned by one call; longer results are truncated. */
   maxResultChars?: number;
-  /** Test seam: build the transport for a config instead of the real one. */
+  /**
+   * Supported library extension point (also the test seam): build the transport
+   * for a config instead of the real stdio/http/sse one. See `docs/mcp.md`.
+   */
   createTransport?: (config: McpServerConfig) => Transport;
   /**
    * The enclosing review's diagnostic run id. When set, connect/list-tools/call
