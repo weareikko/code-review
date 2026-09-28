@@ -204,10 +204,11 @@ export interface RunReviewOptions {
    */
   sinceRef?: string;
   /**
-   * Test seam: override how resolved MCP server configs are connected. Defaults
-   * to `connectMcpServers`. Lets tests substitute a fake connection (e.g. an
-   * in-memory transport with a canned tool list) without touching how MCP
-   * server configs are resolved from the repo/marketplace/file sources.
+   * Supported library extension point: override how resolved MCP server configs
+   * are connected. Defaults to `connectMcpServers`. A caller (or a test) can
+   * substitute its own connection — e.g. an in-memory transport with a canned
+   * tool list — without touching how MCP server configs are resolved from the
+   * repo/marketplace/file sources. See `docs/mcp.md`.
    */
   connectMcp?: (
     configs: readonly McpServerConfig[],

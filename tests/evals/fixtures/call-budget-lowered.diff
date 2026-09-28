@@ -1,0 +1,15 @@
+diff --git a/src/limits.ts b/src/limits.ts
+index 1a2b3c4..5d6e7f8 100644
+--- a/src/limits.ts
++++ b/src/limits.ts
+@@ -1,9 +1,9 @@
+ /**
+  * Shared limits for one review run.
+  */
+ 
+ /** Tool calls one review may make before the budget is exhausted. */
+-export const DEFAULT_CALL_BUDGET = 40;
++export const DEFAULT_CALL_BUDGET = 20;
+ 
+ export function callBudget(override?: number): number {
+   return override ?? DEFAULT_CALL_BUDGET;

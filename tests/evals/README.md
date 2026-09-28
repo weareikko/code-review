@@ -72,6 +72,28 @@ The reproduction-first loop:
    - `judgeThreshold: null` — recording only. Use when the property is
      valuable to track but model variance would cause noise.
 
+## MCP context lookups (`mcp-context.eval.ts`)
+
+Covers the reviewer's use of a connected MCP server, not its bug recall. An
+in-memory `tracker` server (SDK low-level `Server` + `InMemoryTransport`, the
+pattern from `src/mcp.test.ts`) exposes one read-only `issue_read` tool and is
+wired in through `runReview`'s `connectMcp` option — no process spawns, no
+network call.
+
+Two cases run on the same diff (`fixtures/call-budget-lowered.diff`, which
+lowers `DEFAULT_CALL_BUDGET` from 40 to 20):
+
+- **Issue referenced** — description `Closes #7`. The tracker must be called in
+  every trial, and an LLM judge must confirm the summary reports the
+  contradiction (issue 7 asks for 60, the diff implements 20) in at least two
+  trials out of three.
+- **Nothing referenced** — description `Tidy constant naming`. The tracker must
+  be called zero times in every trial.
+
+Trials default to 3; set `MCP_CONTEXT_TRIALS` to change that. The tool-call
+assertions are deterministic (they read `ReviewUsage.mcp[].calls`), so only the
+contradiction check tolerates model variance.
+
 ## Pruning policy
 
 > "20 high-signal cases beats 200 low-signal ones."
