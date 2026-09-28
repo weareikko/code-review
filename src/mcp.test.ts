@@ -1,3 +1,5 @@
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 // The low-level `Server` accepts raw JSON-schema tool definitions, which is what
 // the bridge consumes; `McpServer` would need zod schemas.
@@ -13,7 +15,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { mcpDiagnosticChannels, type McpDiagnosticContext } from './diagnostics.js';
 import type { Logger } from './logger.js';
 import type { McpServerConfig } from './mcp-config.js';
-import { connectMcpServers, formatMcpToolResult, isReadOnlyMcpTool, mcpToolName } from './mcp.js';
+import {
+  connectMcpServers,
+  createMcpTransport,
+  formatMcpToolResult,
+  isReadOnlyMcpTool,
+  MAX_MCP_IMAGE_BLOCKS,
+  mcpToolName,
+} from './mcp.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -175,6 +184,100 @@ describe('formatMcpToolResult', () => {
     expect(() =>
       formatMcpToolResult({ isError: true, content: [{ type: 'text', text: 'boom' }] }, 1000),
     ).toThrow('boom');
+  });
+
+  it('caps an oversized error result the same way as a successful one', () => {
+    let message = '';
+    try {
+      formatMcpToolResult(
+        { isError: true, content: [{ type: 'text', text: 'x'.repeat(5000) }] },
+        10,
+      );
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('[truncated: result was 5000 characters, limit is 10]');
+    expect(message.length).toBeLessThan(200);
+  });
+
+  it('counts image bytes against the same budget and notes what it dropped', () => {
+    const content = formatMcpToolResult(
+      {
+        content: [
+          { type: 'text', text: 'hello' },
+          { type: 'image', data: 'a'.repeat(10), mimeType: 'image/png' },
+          { type: 'image', data: 'b'.repeat(200), mimeType: 'image/png' },
+        ],
+      },
+      20,
+    );
+    expect(content).toEqual([
+      { type: 'text', text: 'hello\n[image omitted: 200 bytes]' },
+      { type: 'image', data: 'a'.repeat(10), mimeType: 'image/png' },
+    ]);
+  });
+
+  it('keeps at most MAX_MCP_IMAGE_BLOCKS images however small they are', () => {
+    const content = formatMcpToolResult(
+      {
+        content: Array.from({ length: MAX_MCP_IMAGE_BLOCKS + 2 }, () => ({
+          type: 'image' as const,
+          data: 'A',
+          mimeType: 'image/png',
+        })),
+      },
+      1000,
+    );
+    expect(content.filter((block) => block.type === 'image')).toHaveLength(MAX_MCP_IMAGE_BLOCKS);
+    expect(content[0]).toEqual({
+      type: 'text',
+      text: '[image omitted: 1 bytes]\n[image omitted: 1 bytes]',
+    });
+  });
+});
+
+describe('createMcpTransport', () => {
+  it('builds a streamable HTTP transport with the configured headers', () => {
+    const transport = createMcpTransport(
+      config('docs', {
+        type: 'http',
+        command: undefined,
+        url: 'https://docs.test/mcp',
+        headers: { Authorization: 'Bearer t' },
+      }),
+    );
+    expect(transport).toBeInstanceOf(StreamableHTTPClientTransport);
+    const built = transport as unknown as {
+      _url: URL;
+      _requestInit?: { headers?: Record<string, string> };
+    };
+    expect(built._url.href).toBe('https://docs.test/mcp');
+    expect(built._requestInit?.headers).toEqual({ Authorization: 'Bearer t' });
+  });
+
+  it('builds an SSE transport with the configured headers', () => {
+    const transport = createMcpTransport(
+      config('docs', {
+        type: 'sse',
+        command: undefined,
+        url: 'https://docs.test/sse',
+        headers: { 'X-Key': 'k' },
+      }),
+    );
+    // oxlint-disable-next-line typescript/no-deprecated
+    expect(transport).toBeInstanceOf(SSEClientTransport);
+    const built = transport as unknown as {
+      _url: URL;
+      _requestInit?: { headers?: Record<string, string> };
+    };
+    expect(built._url.href).toBe('https://docs.test/sse');
+    expect(built._requestInit?.headers).toEqual({ 'X-Key': 'k' });
+  });
+
+  it('rejects a transport type the bridge cannot build', () => {
+    expect(() =>
+      createMcpTransport(config('bad', { type: 'ws' as unknown as McpServerConfig['type'] })),
+    ).toThrow('Unsupported MCP transport');
   });
 });
 
@@ -439,5 +542,31 @@ describe('connectMcpServers', () => {
     await conn.close();
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+
+  it('drops a bridged tool whose name collides with an earlier server', async () => {
+    // `jira.internal` and `jira_internal` both sanitise to `jira_internal`, so
+    // their bridged tools would share one name and the later would shadow the
+    // earlier in the agent's dispatch.
+    const first = await startFakeServer();
+    const second = await startFakeServer();
+    const logger = captureLogger();
+    const conn = await connectMcpServers([config('jira.internal'), config('jira_internal')], {
+      logger,
+      createTransport: (cfg) =>
+        cfg.name === 'jira.internal' ? first.transport() : second.transport(),
+    });
+    try {
+      expect(conn.tools.map((t) => t.name)).toEqual(['mcp__jira_internal__get_issue']);
+      expect(conn.servers.map((s) => s.tools)).toEqual([['get_issue'], []]);
+      expect(logger.lines.warn.join('\n')).toContain('collides');
+
+      // The surviving tool is the first server's.
+      await conn.tools[0]!.execute('call-1', { id: '42' });
+      expect(first.calls).toHaveLength(1);
+      expect(second.calls).toHaveLength(0);
+    } finally {
+      await conn.close();
+    }
   });
 });

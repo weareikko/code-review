@@ -37,12 +37,20 @@ import { redactUrl } from './skills.js';
 
 declare const __PKG_VERSION__: string;
 
-/** Default per-call timeout, also used for connect and tools/list. */
+/** Default per-call timeout. A server config may lower or raise it, up to `MAX_MCP_TIMEOUT_MS`. */
 export const DEFAULT_MCP_TIMEOUT_MS = 30_000;
+/**
+ * Timeout for connect and `tools/list`. Deliberately not overridable by a server
+ * definition: both run before the agent loop starts, so they are outside the
+ * review timeout and a large per-server `timeout` must not stall the pipeline.
+ */
+export const MCP_CONNECT_TIMEOUT_MS = 30_000;
 /** Default number of MCP tool calls allowed per review, across all servers. */
 export const DEFAULT_MCP_CALL_BUDGET = 40;
-/** Default cap on the text returned by one MCP tool call. */
+/** Default cap on the content returned by one MCP tool call, text and image bytes together. */
 export const DEFAULT_MCP_MAX_RESULT_CHARS = 200_000;
+/** Cap on image blocks kept from one MCP tool call, whatever the size budget allows. */
+export const MAX_MCP_IMAGE_BLOCKS = 4;
 
 /** Connection outcome for one configured server, rendered in the summary footer. */
 export interface McpServerStatus {
@@ -145,9 +153,13 @@ function withMcpTrace<T>(
 
 /**
  * Convert an MCP `tools/call` result into pi tool content. Text-like blocks are
- * joined into one text block and capped at `maxChars`; images are passed
- * through. Throws when the server flagged the result as an error so the agent
- * loop records an error tool result.
+ * joined into one text block; images follow. Server output is untrusted and
+ * unbounded, so `maxChars` caps the whole result — the joined text first, then
+ * each image's base64 payload against what the text left — and at most
+ * `MAX_MCP_IMAGE_BLOCKS` images survive. Dropped images leave a note in the text
+ * so the agent knows something was there. The cap applies on the error path too:
+ * a result the server flagged as an error throws the same capped text, so the
+ * agent loop records a bounded error tool result.
  */
 export function formatMcpToolResult(
   result: CallToolResult,
@@ -184,17 +196,34 @@ export function formatMcpToolResult(
   }
 
   let text = texts.join('\n');
-  if (result.isError) {
-    throw new Error(text || 'MCP tool returned an error');
-  }
   if (text.length > maxChars) {
     const total = text.length;
     text = `${text.slice(0, maxChars)}\n\n[truncated: result was ${total} characters, limit is ${maxChars}]`;
   }
+  if (result.isError) {
+    throw new Error(text || 'MCP tool returned an error');
+  }
+
+  // Images count against what the text left of the same budget, so a server
+  // cannot bypass the cap by returning megabytes of base64 instead of text.
+  let remaining = Math.max(0, maxChars - text.length);
+  const kept: ImageContent[] = [];
+  const notes: string[] = [];
+  for (const image of images) {
+    if (kept.length >= MAX_MCP_IMAGE_BLOCKS || image.data.length > remaining) {
+      notes.push(`[image omitted: ${image.data.length} bytes]`);
+      continue;
+    }
+    remaining -= image.data.length;
+    kept.push(image);
+  }
+  if (notes.length > 0) {
+    text = text.length > 0 ? `${text}\n${notes.join('\n')}` : notes.join('\n');
+  }
 
   const content: (TextContent | ImageContent)[] = [];
-  if (text.length > 0 || images.length === 0) content.push({ type: 'text', text });
-  content.push(...images);
+  if (text.length > 0 || kept.length === 0) content.push({ type: 'text', text });
+  content.push(...kept);
   return content;
 }
 
@@ -261,14 +290,32 @@ function bridgeTool(tool: McpTool, deps: BridgeDeps): AgentTool {
   return bridged as AgentTool;
 }
 
+/**
+ * `Client.listTools` caches each tool's output-schema validator and task-support
+ * flags, and clears that cache at the start of every call — so after paginating,
+ * the client only holds metadata for the last page and `callTool` silently skips
+ * output validation for every tool listed before it. The SDK exposes no public
+ * re-prime, so re-seed the cache with the full set through its (typed-private,
+ * runtime-public) `cacheToolMetadata`, guarded so a future SDK that drops it
+ * degrades to today's single-page behaviour instead of throwing.
+ */
+function recacheToolMetadata(client: Client, tools: readonly McpTool[]): void {
+  const recache = (client as unknown as { cacheToolMetadata?: (tools: readonly McpTool[]) => void })
+    .cacheToolMetadata;
+  if (typeof recache === 'function') recache.call(client, tools);
+}
+
 async function listAllTools(client: Client, timeoutMs: number): Promise<McpTool[]> {
   const tools: McpTool[] = [];
   let cursor: string | undefined;
+  let pages = 0;
   do {
     const page = await client.listTools(cursor ? { cursor } : undefined, { timeout: timeoutMs });
     tools.push(...page.tools);
     cursor = page.nextCursor;
+    pages += 1;
   } while (cursor);
+  if (pages > 1) recacheToolMetadata(client, tools);
   return tools;
 }
 
@@ -287,6 +334,9 @@ async function connectOne(
   },
 ): Promise<ConnectedServer> {
   const { logger, budget, maxResultChars, runId } = options;
+  // Per-call timeout may come from the server config (already clamped by the
+  // parser); connect and tools/list keep the fixed timeout — see
+  // `MCP_CONNECT_TIMEOUT_MS`.
   const timeoutMs = config.timeoutMs ?? options.timeoutMs;
   const status: McpServerStatus = {
     name: config.name,
@@ -298,14 +348,14 @@ async function connectOne(
   const client = new Client({ name: PRODUCT_NAME, version: __PKG_VERSION__ });
   try {
     await withMcpTrace(runId, 'mcp.connect', config.name, () =>
-      client.connect(options.createTransport(config), { timeout: timeoutMs }),
+      client.connect(options.createTransport(config), { timeout: MCP_CONNECT_TIMEOUT_MS }),
     );
     const { exposed, dropped } = await withMcpTrace(
       runId,
       'mcp.tools',
       config.name,
       async (context) => {
-        const listed = await listAllTools(client, timeoutMs);
+        const listed = await listAllTools(client, MCP_CONNECT_TIMEOUT_MS);
         const readOnly = listed.filter(isReadOnlyMcpTool);
         const notReadOnly = listed.filter((tool) => !isReadOnlyMcpTool(tool));
         if (context) context.toolCount = readOnly.length;
@@ -357,9 +407,33 @@ export async function connectMcpServers(
   };
   const connected = await Promise.all(configs.map((config) => connectOne(config, resolved)));
 
+  // `mcpToolName` sanitises both segments, so two distinct servers (`jira.internal`
+  // and `jira_internal`, say) can produce the same bridged name — which would let
+  // a lower-trust server shadow a trusted one in the agent's tool dispatch. First
+  // one wins; a later collision is dropped with a warning and removed from the
+  // server's exposed-tool list so the summary footer stays truthful.
+  const emitted = new Set<string>();
+  const tools: AgentTool[] = [];
+  for (const server of connected) {
+    for (const tool of server.tools) {
+      if (emitted.has(tool.name)) {
+        resolved.logger.warn(
+          `MCP server "${server.status.name}": tool "${tool.name}" collides with an already-bridged tool name — dropped.`,
+        );
+        const index = server.status.tools.findIndex(
+          (name) => mcpToolName(server.status.name, name) === tool.name,
+        );
+        if (index !== -1) server.status.tools.splice(index, 1);
+        continue;
+      }
+      emitted.add(tool.name);
+      tools.push(tool);
+    }
+  }
+
   let closed = false;
   return {
-    tools: connected.flatMap((server) => server.tools),
+    tools,
     servers: connected.map((server) => server.status),
     async close() {
       if (closed) return;
