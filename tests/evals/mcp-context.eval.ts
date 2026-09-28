@@ -125,6 +125,10 @@ type EvalInput = {
 type EvalOutput = {
   summary: string;
   comments: Array<{ file: string; line: number; severity: string; body: string }>;
+  /** Connection outcome for the `tracker` server: `'missing'` when no entry was reported. */
+  trackerStatus: string;
+  /** Tools the bridge exposed to the reviewer from the `tracker` server. */
+  trackerTools: string[];
   /** Calls the reviewer made against the `tracker` server during this run. */
   trackerCalls: number;
   cost: number;
@@ -182,6 +186,10 @@ const mcpHarness = createHarness<EvalInput, EvalOutput, Record<string, unknown>>
 
       const raw = await readFile(join(dir, 'code-review.md'), 'utf8');
       const parsed = parseReviewMarkdownWithWarnings(raw);
+      // Carried into the output so both cases can assert the bridge actually
+      // worked: a server that failed to connect also reports zero calls, which
+      // would make the "stays quiet" case pass for the wrong reason.
+      const trackerUsage = usage.mcp.find((server) => server.name === 'tracker');
       const output: EvalOutput = {
         summary: parsed.summary ?? '',
         comments: parsed.comments.map((c) => ({
@@ -190,7 +198,9 @@ const mcpHarness = createHarness<EvalInput, EvalOutput, Record<string, unknown>>
           severity: c.severity,
           body: c.body,
         })),
-        trackerCalls: usage.mcp.find((server) => server.name === 'tracker')?.calls ?? -1,
+        trackerStatus: trackerUsage?.status ?? 'missing',
+        trackerTools: trackerUsage?.exposedTools ?? [],
+        trackerCalls: trackerUsage?.calls ?? -1,
         cost: usage.cost.total,
       };
 
@@ -247,6 +257,16 @@ async function judgeOnce(
 
 const missingApiKey = () => !resolveProviderApiKey(EVAL_MODEL);
 
+/**
+ * Fail loudly when the bridge itself broke. Without this, a server that never
+ * connected — or whose `issue_read` was dropped by the read-only gate or a name
+ * collision — reports zero calls, and the "stays quiet" case passes vacuously.
+ */
+function expectTrackerWired(output: EvalOutput): void {
+  expect(output.trackerStatus).toBe('connected');
+  expect(output.trackerTools).toContain('issue_read');
+}
+
 // --- Cases -----------------------------------------------------------------
 
 describeEval(
@@ -275,6 +295,7 @@ describeEval(
           const result = await run(input);
           const output = result.output;
           cost += output.cost;
+          expectTrackerWired(output);
           if (output.trackerCalls >= 1) calledTracker += 1;
           judged += await judgeOnce(input, output, result);
         }
@@ -308,6 +329,7 @@ describeEval(
           const result = await run(input);
           const output = result.output;
           cost += output.cost;
+          expectTrackerWired(output);
           if (output.trackerCalls === 0) quiet += 1;
         }
 
