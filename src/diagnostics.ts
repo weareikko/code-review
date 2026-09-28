@@ -100,12 +100,24 @@ export interface DiagnosticMcpUsage {
   calls: number;
 }
 
+/**
+ * One loaded skill's outcome, as carried on {@link DiagnosticUsage.skills}. The
+ * same minimal-subset rule as {@link DiagnosticMcpUsage}: just what the OTel
+ * bridge needs to report whether the reviewer actually read the skill.
+ */
+export interface DiagnosticSkillUsage {
+  name: string;
+  reads: number;
+}
+
 export interface DiagnosticUsage {
   model: string;
   tokens: DiagnosticUsageBreakdown;
   cost: DiagnosticUsageBreakdown;
   /** MCP servers connected for the review, with their call counts. */
   mcp?: DiagnosticMcpUsage[];
+  /** Skills loaded for the review, with the number of files read under each. */
+  skills?: DiagnosticSkillUsage[];
 }
 
 export interface DiagnosticContext {

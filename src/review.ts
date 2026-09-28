@@ -3,6 +3,7 @@ export type {
   DiagnosticError,
   DiagnosticMcpUsage,
   DiagnosticPhase,
+  DiagnosticSkillUsage,
   DiagnosticUsage,
   DiagnosticUsageBreakdown,
   McpDiagnosticContext,
@@ -72,6 +73,15 @@ export {
   skillDisplayName,
   skillSourceUrl,
 } from './skill-links.js';
+export type { SkillReadCounter, SkillReadTarget } from './skill-usage.js';
+export {
+  createSkillReadCounter,
+  findSkillForPath,
+  formatMcpUsageState,
+  formatReviewUsageSummary,
+  formatSkillUsageState,
+  readToolPath,
+} from './skill-usage.js';
 export type { LoadNamedSkillOptions, Skill, SkillOrigin, SkillSpec } from './skills.js';
 export {
   gitSkillCacheKey,
