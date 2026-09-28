@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- MCP server support: connect Model Context Protocol servers (marketplace plugins, `--mcp file:`, and opt-in repo `.mcp.json` discovery) and expose their read-only tools to the reviewer, with a summary footer `MCP:` line. `${VAR}` expansion reads only the `--mcp-env` / `CODE_REVIEW_MCP_ENV` allowlist ([#151]).
+
 ## [0.9.7] - 2026-09-24
 
 ### Changed
@@ -148,6 +152,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.8.6]: https://github.com/weareikko/code-review/compare/0.8.5...0.8.6
 [0.8.5]: https://github.com/weareikko/code-review/compare/0.8.4...0.8.5
 [0.8.4]: https://github.com/weareikko/code-review/compare/0.8.3...0.8.4
+[#151]: https://github.com/weareikko/code-review/pull/151
 [#150]: https://github.com/weareikko/code-review/pull/150
 [#148]: https://github.com/weareikko/code-review/pull/148
 [#144]: https://github.com/weareikko/code-review/pull/144

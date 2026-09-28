@@ -1,3 +1,4 @@
+import type { McpServerSource } from './mcp-parse.js';
 import { PRODUCT_URL } from './product.js';
 import type { SkillOrigin } from './skills.js';
 
@@ -37,11 +38,17 @@ function encodePath(path: string): string {
 }
 
 /**
- * Build a blob URL for `path` at `ref` inside the repository served at
- * `repoWebUrl`. An empty ref resolves to `HEAD`, which both GitHub and GitLab
- * accept, so a skill pinned to a remote's default branch still links.
+ * Build a blob (file) or tree (directory) URL for `path` at `ref` inside the
+ * repository served at `repoWebUrl`. An empty ref resolves to `HEAD`, which both
+ * GitHub and GitLab accept, so a skill or MCP server pinned to a remote's
+ * default branch still links.
  */
-export function blobUrl(repoWebUrl: string, ref: string, path: string): string | undefined {
+export function blobUrl(
+  repoWebUrl: string,
+  ref: string,
+  path: string,
+  kind: 'blob' | 'tree' = 'blob',
+): string | undefined {
   let parsed: URL;
   try {
     parsed = new URL(repoWebUrl);
@@ -49,7 +56,7 @@ export function blobUrl(repoWebUrl: string, ref: string, path: string): string |
     return undefined;
   }
   const base = `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`;
-  const segment = GITHUB_HOSTS.has(parsed.host) ? 'blob' : '-/blob';
+  const segment = GITHUB_HOSTS.has(parsed.host) ? kind : `-/${kind}`;
   return `${base}/${segment}/${encodeURIComponent(ref || 'HEAD')}/${encodePath(path)}`;
 }
 
@@ -109,6 +116,32 @@ export function skillSourceUrl(
       if (!repoWebUrl) return undefined;
       const path = origin.path ? `${origin.path}/SKILL.md` : 'SKILL.md';
       return blobUrl(repoWebUrl, origin.ref, path);
+    }
+  }
+}
+
+/**
+ * Resolve a link to an MCP server's source, or `undefined` when it is not
+ * reachable from a browser (a `file:` spec, or a repo `.mcp.json` on a run with
+ * no CI project URL). A `project` source links to the `.mcp.json` file it was
+ * declared in; a `marketplace` source links to the plugin's directory in the
+ * marketplace repository.
+ */
+export function mcpSourceUrl(
+  source: McpServerSource,
+  context: SkillLinkContext = {},
+): string | undefined {
+  switch (source.kind) {
+    case 'project': {
+      if (!context.projectWebUrl || !context.commitSha) return undefined;
+      return blobUrl(context.projectWebUrl, context.commitSha, source.path);
+    }
+    case 'file':
+      return undefined;
+    case 'marketplace': {
+      const repoWebUrl = gitRepoWebUrl(source.url);
+      if (!repoWebUrl) return undefined;
+      return blobUrl(repoWebUrl, source.ref, source.path, 'tree');
     }
   }
 }

@@ -226,6 +226,75 @@ describe('config env defaults', () => {
       'commits',
     );
   });
+
+  it('defaults mcp/disableMcp/mcpEnv to empty and mcpDiscovery to false when unset', () => {
+    const cfg = resolveConfig([], { ...baseEnv });
+    expect(cfg.mcp).toEqual([]);
+    expect(cfg.disableMcp).toEqual([]);
+    expect(cfg.mcpEnv).toEqual([]);
+    expect(cfg.mcpDiscovery).toBe(false);
+  });
+
+  it('collects repeatable --mcp-env flags, and falls back to CODE_REVIEW_MCP_ENV', () => {
+    expect(
+      resolveConfig(['--mcp-env', 'JIRA_TOKEN', '--mcp-env', 'SENTRY_TOKEN'], { ...baseEnv })
+        .mcpEnv,
+    ).toEqual(['JIRA_TOKEN', 'SENTRY_TOKEN']);
+    expect(
+      resolveConfig([], { ...baseEnv, CODE_REVIEW_MCP_ENV: ' JIRA_TOKEN , SENTRY_TOKEN ,' }).mcpEnv,
+    ).toEqual(['JIRA_TOKEN', 'SENTRY_TOKEN']);
+  });
+
+  it('collects repeatable --mcp flags, in order', () => {
+    const cfg = resolveConfig(['--mcp', 'file:./a.json', '--mcp', 'acme:dev/context7'], {
+      ...baseEnv,
+    });
+    expect(cfg.mcp).toEqual(['file:./a.json', 'acme:dev/context7']);
+  });
+
+  it('parses CODE_REVIEW_MCP as a comma-separated, trimmed list', () => {
+    const cfg = resolveConfig([], {
+      ...baseEnv,
+      CODE_REVIEW_MCP: ' file:./a.json , acme:dev/context7 ,',
+    });
+    expect(cfg.mcp).toEqual(['file:./a.json', 'acme:dev/context7']);
+  });
+
+  it('prefers repeatable --mcp flags over CODE_REVIEW_MCP', () => {
+    const cfg = resolveConfig(['--mcp', 'file:./a.json'], {
+      ...baseEnv,
+      CODE_REVIEW_MCP: 'file:./b.json',
+    });
+    expect(cfg.mcp).toEqual(['file:./a.json']);
+  });
+
+  it('collects repeatable --disable-mcp flags, and falls back to CODE_REVIEW_DISABLE_MCP', () => {
+    expect(
+      resolveConfig(['--disable-mcp', 'a', '--disable-mcp', 'b'], { ...baseEnv }).disableMcp,
+    ).toEqual(['a', 'b']);
+    expect(
+      resolveConfig([], { ...baseEnv, CODE_REVIEW_DISABLE_MCP: ' a , b ,' }).disableMcp,
+    ).toEqual(['a', 'b']);
+  });
+
+  it('enables mcpDiscovery via --mcp-discovery or a truthy env value', () => {
+    expect(resolveConfig(['--mcp-discovery'], { ...baseEnv }).mcpDiscovery).toBe(true);
+    expect(resolveConfig([], { ...baseEnv, CODE_REVIEW_MCP_DISCOVERY: 'true' }).mcpDiscovery).toBe(
+      true,
+    );
+    expect(resolveConfig([], { ...baseEnv, CODE_REVIEW_MCP_DISCOVERY: '1' }).mcpDiscovery).toBe(
+      true,
+    );
+  });
+
+  it('keeps mcpDiscovery off for a falsy or unrecognised CODE_REVIEW_MCP_DISCOVERY', () => {
+    expect(resolveConfig([], { ...baseEnv, CODE_REVIEW_MCP_DISCOVERY: 'false' }).mcpDiscovery).toBe(
+      false,
+    );
+    expect(resolveConfig([], { ...baseEnv, CODE_REVIEW_MCP_DISCOVERY: 'maybe' }).mcpDiscovery).toBe(
+      false,
+    );
+  });
 });
 
 describe('parsePrNumberFromEvent', () => {
@@ -1285,10 +1354,14 @@ describe('applyCodeReviewEnvPrefix', () => {
         'API_KEY',
         'BASE_URL',
         'DECOMPOSE_HINT_LINES',
+        'DISABLE_MCP',
         'FORCE_REVIEW',
         'MAX_DIFF_CHARS',
         'MARKETPLACES',
         'MAX_TOKENS',
+        'MCP',
+        'MCP_DISCOVERY',
+        'MCP_ENV',
         'MIN_SEVERITY',
         'MODEL',
         'MODEL_POOL',

@@ -13,6 +13,7 @@ const external = [
   /^@earendil-works\//,
   /^@opentelemetry\//,
   /^@grpc\//,
+  /^@modelcontextprotocol\/sdk/,
 ];
 
 const pkg = JSON.parse(

@@ -87,10 +87,25 @@ export interface DiagnosticUsageBreakdown {
   total: number;
 }
 
+/**
+ * One MCP server's outcome, as carried on {@link DiagnosticUsage.mcp}. A
+ * deliberately minimal subset of `McpServerUsage` (`src/gitlab-review.ts`) —
+ * only the fields the OTel bridge needs for the per-server call-count
+ * attribute — kept local so `diagnostics.ts` does not depend on the
+ * higher-level review module.
+ */
+export interface DiagnosticMcpUsage {
+  name: string;
+  status: 'connected' | 'unavailable';
+  calls: number;
+}
+
 export interface DiagnosticUsage {
   model: string;
   tokens: DiagnosticUsageBreakdown;
   cost: DiagnosticUsageBreakdown;
+  /** MCP servers connected for the review, with their call counts. */
+  mcp?: DiagnosticMcpUsage[];
 }
 
 export interface DiagnosticContext {
@@ -264,6 +279,108 @@ export function traceDiagnosticPhase<T>(
     operation,
     collectSecrets(config),
   );
+}
+
+// ---------------------------------------------------------------------------
+// MCP diagnostics
+// ---------------------------------------------------------------------------
+
+/** One MCP bridge operation traced independently of the phase channels above. */
+export type McpDiagnosticOp = 'mcp.connect' | 'mcp.tools' | 'mcp.call';
+
+/**
+ * Safe payload for an MCP connect/list-tools/call-tool operation. Deliberately
+ * excludes tool arguments and results — only the server/tool identity and
+ * result size (`resultChars`, already capped and never the content itself)
+ * are carried, matching the no-secrets/no-content rule the phase channels
+ * follow for GitLab tokens and API keys.
+ */
+export interface McpDiagnosticContext {
+  version: 1;
+  runId: string;
+  op: McpDiagnosticOp;
+  /** Configured MCP server name. */
+  server: string;
+  /** Tool name; set on `mcp.call` only. */
+  tool?: string;
+  startedAt: string;
+  completedAt?: string;
+  durationMs?: number;
+  /** Number of read-only tools exposed; set on `mcp.tools` only. */
+  toolCount?: number;
+  /** Characters returned to the agent, after truncation; set on `mcp.call` only. */
+  resultChars?: number;
+  errorInfo?: DiagnosticError;
+}
+
+const MCP_DIAGNOSTIC_CHANNEL_KEYS = {
+  'mcp.connect': 'connect',
+  'mcp.tools': 'tools',
+  'mcp.call': 'call',
+} as const satisfies Record<McpDiagnosticOp, string>;
+
+export const MCP_DIAGNOSTIC_CHANNEL_NAMES = {
+  connect: `${DIAGNOSTIC_CHANNEL_PREFIX}:mcp.connect`,
+  tools: `${DIAGNOSTIC_CHANNEL_PREFIX}:mcp.tools`,
+  call: `${DIAGNOSTIC_CHANNEL_PREFIX}:mcp.call`,
+} as const;
+
+export const mcpDiagnosticChannels = Object.fromEntries(
+  Object.entries(MCP_DIAGNOSTIC_CHANNEL_NAMES).map(([key, name]) => [
+    key,
+    tracingChannel<McpDiagnosticContext>(name),
+  ]),
+) as Record<
+  keyof typeof MCP_DIAGNOSTIC_CHANNEL_NAMES,
+  ReturnType<typeof tracingChannel<McpDiagnosticContext>>
+>;
+
+/**
+ * Traces one MCP bridge operation on its own `mcp.connect` / `mcp.tools` /
+ * `mcp.call` channel. Mirrors {@link traceDiagnosticPhase} (context built,
+ * `tracePromise`d, `durationMs`/`completedAt` stamped, errors sanitized) but
+ * is keyed by `runId` + server name instead of a `Config`, since the MCP
+ * bridge (`src/mcp.ts`) has no `Config` of its own.
+ *
+ * Node's `tracingChannel.tracePromise` assigns the traced function's return
+ * value onto the published context as `.result` — fine for the phase channels
+ * above (their payloads are small counts/flags), but `mcp.call`'s return value
+ * is the MCP tool's arguments/result content, which must never reach a
+ * diagnostics payload. The traced function here always resolves to
+ * `undefined`; the operation's real result is captured in a closure and
+ * returned to the caller separately, after tracing completes.
+ */
+export function traceMcpDiagnostic<T>(
+  op: McpDiagnosticOp,
+  runId: string,
+  server: string,
+  operation: (context: McpDiagnosticContext) => Promise<T>,
+  overrides: Partial<McpDiagnosticContext> = {},
+): Promise<T> {
+  const context: McpDiagnosticContext = {
+    version: 1,
+    runId,
+    op,
+    server,
+    startedAt: new Date().toISOString(),
+    ...overrides,
+  };
+  const started = performance.now();
+  const channel = mcpDiagnosticChannels[MCP_DIAGNOSTIC_CHANNEL_KEYS[op]];
+  let result: T;
+  return channel
+    .tracePromise(async () => {
+      try {
+        result = await operation(context);
+      } catch (error) {
+        context.errorInfo = toDiagnosticError(error);
+        throw error;
+      } finally {
+        context.completedAt = new Date().toISOString();
+        context.durationMs = Number((performance.now() - started).toFixed(3));
+      }
+    }, context)
+    .then(() => result);
 }
 
 function toDiagnosticError(error: unknown, secretValues: readonly string[] = []): DiagnosticError {

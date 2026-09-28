@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   countPostedBySeverity,
+  formatMcpFooter,
   formatPerModelUsage,
   formatSkillsFooter,
   formatUsageLine,
   withHttpStamping,
 } from './cli.js';
 import type { DiagnosticContext } from './diagnostics.js';
-import type { ReviewUsage } from './gitlab-review.js';
+import type { McpServerUsage, ReviewUsage } from './gitlab-review.js';
 import type { GitLabResponseInfo } from './gitlab.js';
 import type { GeneratedComment, Severity } from './types.js';
 
@@ -45,6 +46,8 @@ function makeUsage(overrides: Partial<ReviewUsage['tokens']> = {}): ReviewUsage 
     },
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.0533 },
     skills: [],
+    mcp: [],
+    sizeNotice: { sizeSkippedFiles: [] },
   };
 }
 
@@ -248,5 +251,107 @@ describe('formatSkillsFooter', () => {
     expect(
       formatSkillsFooter([{ name: 'local', origin: { kind: 'file', path: '/tmp/local' } }]),
     ).toBe('Skills: `local`');
+  });
+});
+
+describe('formatMcpFooter', () => {
+  it('returns undefined when no MCP server was configured', () => {
+    expect(formatMcpFooter([])).toBeUndefined();
+  });
+
+  it('lists a connected server with its exposed tools and an unavailable one with none', () => {
+    const servers: McpServerUsage[] = [
+      {
+        name: 'jira',
+        status: 'connected',
+        exposedTools: ['get_issue', 'search_issues'],
+        calls: 2,
+        source: { kind: 'file', path: 'mcp-extra.json' },
+      },
+      {
+        name: 'docs',
+        status: 'unavailable',
+        exposedTools: [],
+        calls: 0,
+        source: { kind: 'file', path: 'mcp-extra.json' },
+      },
+    ];
+    expect(formatMcpFooter(servers)).toBe(
+      'MCP: jira (get_issue, search_issues), docs (unavailable)',
+    );
+  });
+
+  it('reports a connected server with no read-only tools distinctly from unavailable', () => {
+    const servers: McpServerUsage[] = [
+      {
+        name: 'empty',
+        status: 'connected',
+        exposedTools: [],
+        calls: 0,
+        source: { kind: 'file', path: 'mcp-extra.json' },
+      },
+    ];
+    expect(formatMcpFooter(servers)).toBe('MCP: empty (no read-only tools)');
+  });
+
+  it('links a server to its repo .mcp.json when project coordinates are available', () => {
+    const servers: McpServerUsage[] = [
+      {
+        name: 'jira',
+        status: 'connected',
+        exposedTools: ['get_issue'],
+        calls: 0,
+        source: { kind: 'project', path: '.mcp.json' },
+      },
+    ];
+    const footer = formatMcpFooter(servers, {
+      projectWebUrl: 'https://gitlab.example.com/group/app',
+      commitSha: 'abc123',
+    });
+    expect(footer).toBe(
+      'MCP: [jira](https://gitlab.example.com/group/app/-/blob/abc123/.mcp.json) (get_issue)',
+    );
+  });
+
+  it('links a marketplace server to the plugin directory in the marketplace repo', () => {
+    const servers: McpServerUsage[] = [
+      {
+        name: 'context7',
+        status: 'connected',
+        exposedTools: ['search'],
+        calls: 0,
+        source: {
+          kind: 'marketplace',
+          marketplace: 'ikko-tools',
+          plugin: 'dev',
+          url: 'git+ssh://git@gitlab.example.com/tools/ikko-tools.git',
+          ref: 'main',
+          path: 'plugins/dev',
+        },
+      },
+    ];
+    expect(formatMcpFooter(servers)).toBe(
+      'MCP: [context7](https://gitlab.example.com/tools/ikko-tools/-/tree/main/plugins/dev) (search)',
+    );
+  });
+
+  it('falls back to a plain name when a source cannot be linked (a file: spec, or no project coordinates)', () => {
+    const servers: McpServerUsage[] = [
+      {
+        name: 'local',
+        status: 'connected',
+        exposedTools: ['x'],
+        calls: 0,
+        source: { kind: 'file', path: '/tmp/mcp-extra.json' },
+      },
+      {
+        name: 'inrepo',
+        status: 'connected',
+        exposedTools: ['y'],
+        calls: 0,
+        source: { kind: 'project', path: '.mcp.json' },
+      },
+    ];
+    expect(formatMcpFooter(servers)).toBe('MCP: local (x), inrepo (y)');
   });
 });

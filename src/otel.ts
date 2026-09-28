@@ -61,9 +61,11 @@ import { logs, SeverityNumber } from '@opentelemetry/api-logs';
 import { resolveProjectWebUrl } from './config.js';
 import {
   diagnosticChannels,
+  mcpDiagnosticChannels,
   type DiagnosticContext,
   type DiagnosticPhase,
   type DiagnosticUsage,
+  type McpDiagnosticContext,
 } from './diagnostics.js';
 import type { AgentLike } from './gitlab-review.js';
 import { splitModel, type GeneratedComment } from './types.js';
@@ -463,6 +465,36 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     }
   };
 
+  // MCP connect/list-tools/call-tool operations are recorded as span EVENTS
+  // (not their own spans/metrics) on the enclosing reviewer.run span — they can
+  // fire dozens of times per review (one per tool call, up to the call budget),
+  // so a full child span per call would be noisy where an event is enough.
+  // Falls back to the ROOT_PHASE span on the (should-not-happen) chance the
+  // reviewer.run span already closed, and is a no-op if neither is open.
+  const recordMcpEvent = (ctx: McpDiagnosticContext, isError: boolean): void => {
+    const phases = openByRun.get(ctx.runId);
+    const entry = phases?.get(GEN_AI_PHASE) ?? phases?.get(ROOT_PHASE);
+    if (!entry || entry.closed) return;
+    const attributes: Attributes = {
+      'code_review.mcp.server': ctx.server,
+      ...(ctx.tool ? { 'code_review.mcp.tool': ctx.tool } : {}),
+      ...(typeof ctx.durationMs === 'number'
+        ? { 'code_review.mcp.duration_ms': ctx.durationMs }
+        : {}),
+      ...(typeof ctx.toolCount === 'number' ? { 'code_review.mcp.tool_count': ctx.toolCount } : {}),
+      ...(typeof ctx.resultChars === 'number'
+        ? { 'code_review.mcp.result_chars': ctx.resultChars }
+        : {}),
+      ...(isError && ctx.errorInfo
+        ? {
+            'error.type': ctx.errorInfo.code ?? ctx.errorInfo.name ?? '_OTHER',
+            'error.message': ctx.errorInfo.message,
+          }
+        : {}),
+    };
+    entry.span.addEvent(`code_review.${ctx.op}`, attributes);
+  };
+
   const handlers = {
     start: (ctx: DiagnosticContext) => openSpan(ctx),
     end: noop,
@@ -470,11 +502,22 @@ export async function startOtelBridge(options: OtelBridgeOptions = {}): Promise<
     asyncEnd: (ctx: DiagnosticContext) => closeSpan(ctx, false),
     error: (ctx: DiagnosticContext) => closeSpan(ctx, true),
   };
+  const mcpHandlers = {
+    start: noop,
+    end: noop,
+    asyncStart: noop,
+    asyncEnd: (ctx: McpDiagnosticContext) => recordMcpEvent(ctx, false),
+    error: (ctx: McpDiagnosticContext) => recordMcpEvent(ctx, true),
+  };
 
   const unsubs: Array<() => void> = [];
   for (const channel of Object.values(diagnosticChannels)) {
     channel.subscribe(handlers);
     unsubs.push(() => channel.unsubscribe(handlers));
+  }
+  for (const channel of Object.values(mcpDiagnosticChannels)) {
+    channel.subscribe(mcpHandlers);
+    unsubs.push(() => channel.unsubscribe(mcpHandlers));
   }
 
   return {
@@ -1379,6 +1422,16 @@ function applyGenAiAttributes(span: Span, ctx: DiagnosticContext): void {
   span.setAttribute('code_review.cost.cache_read_usd', usage.cost.cacheRead);
   span.setAttribute('code_review.cost.cache_creation_usd', usage.cost.cacheWrite);
   span.setAttribute('code_review.cost.total_usd', usage.cost.total);
+
+  // Per-server MCP call count, JSON-encoded (span attributes carry no map
+  // type) — one attribute rather than a dynamic per-server key, so the
+  // attribute set stays fixed regardless of how many servers were configured.
+  if (usage.mcp && usage.mcp.length > 0) {
+    const mcpCalls = safeSerialize(
+      usage.mcp.map((server) => ({ server: server.name, calls: server.calls })),
+    );
+    if (mcpCalls) span.setAttribute('code_review.mcp.calls', mcpCalls);
+  }
 }
 
 /**

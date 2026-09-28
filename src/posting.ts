@@ -69,6 +69,7 @@ export interface SummaryBodyOptions {
   historyEntries?: string[];
   reviewedCommitSha?: string;
   skillsFooter?: string;
+  mcpFooter?: string;
   runId?: string;
   /** Prominent size/decompose callout rendered above the reviewer's summary. */
   sizeNotice?: SizeNotice;
@@ -147,6 +148,7 @@ export function buildSummaryBody(
   const footerLines = [
     costFooter?.trim(),
     options.skillsFooter?.trim(),
+    options.mcpFooter?.trim(),
     options.reviewedCommitSha ? buildReviewedCommitFooter(options.reviewedCommitSha) : undefined,
     options.runId ? `<sub>Run ID: \`${options.runId}\`</sub>` : undefined,
   ].filter((line): line is string => Boolean(line));
@@ -278,6 +280,7 @@ export function buildUpsertSummary(
     historyEntries,
     reviewedCommitSha: options.reviewedCommitSha,
     skillsFooter: options.skillsFooter,
+    mcpFooter: options.mcpFooter,
     sizeNotice: options.sizeNotice,
   });
   return { body, existing };

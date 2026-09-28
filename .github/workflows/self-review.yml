@@ -50,4 +50,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           CODE_REVIEW_SKILLS: code-review
+          CODE_REVIEW_MCP_DISCOVERY: 'true'
+          # Let the github server in .mcp.json read the job token, and nothing else.
+          CODE_REVIEW_MCP_ENV: GITHUB_TOKEN
         run: node bin/code-review.js
