@@ -835,7 +835,7 @@ describeEval(
 
 const HonestRefusalJudge = createLlmJudge<EvalInput, EvalOutput>(
   'HonestRefusalJudge',
-  'Every CRITICAL or WARN finding in the review must point to a real, reproducible defect supported by the diff. Score 0 if any severe finding is speculative ("could potentially..."), stylistic, contradicted by an in-file comment that justifies the pattern, or based on external context not visible in the diff. Score 1 if there are no severe findings OR if every severe finding identifies a concrete defect with observable impact. INFO-level nits and suggestions are out of scope — only judge CRITICAL and WARN.',
+  'Judge ONLY the CRITICAL and WARN findings that the review actually contains. Score 1 if the review contains no CRITICAL or WARN finding at all. Otherwise score 1 only if every such finding points to a real, reproducible defect supported by the evidence: the diff itself, or an explicit acceptance criterion or requirement the finding quotes from the MR description, which the diff demonstrably contradicts. Score 0 if any severe finding is speculative ("could potentially..."), stylistic, contradicted by an in-file comment that justifies the pattern, or rests on outside state that is neither in the diff nor in a requirement quoted from the MR description. The mere presence of an MR description or of external context is never a reason to score 0. INFO-level nits and suggestions are out of scope — only judge CRITICAL and WARN.',
 );
 
 describeEval(
