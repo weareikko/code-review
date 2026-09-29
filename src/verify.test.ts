@@ -129,10 +129,12 @@ describe('renderExternalContextResults', () => {
     expect(block.split('\n')).toHaveLength(3);
   });
 
-  it('truncates an oversized result and marks it', () => {
+  it('truncates an oversized result, keeping the notice inside the entry cap', () => {
     const block = renderExternalContextResults([entry('mcp__a__get', 'x'.repeat(4_000))]);
     expect(block).toContain('… (result truncated)');
-    expect(block.length).toBeLessThan(2_000);
+    // 1,500-char entry cap + the `- tool(args) → ` prefix + both wrapper tags.
+    const [, line] = block.split('\n');
+    expect(line!.length).toBe(1_500 + '- mcp__a__get(id=1) → '.length);
   });
 
   it('caps the whole block at 6k characters, keeping the most recent results', () => {
@@ -140,7 +142,7 @@ describe('renderExternalContextResults', () => {
       entry(`mcp__a__get${index}`, `${index} `.repeat(400)),
     );
     const block = renderExternalContextResults(entries);
-    expect(block.length).toBeLessThan(7_000);
+    expect(block.length).toBeLessThanOrEqual(6_000);
     expect(block).toContain('mcp__a__get19');
     expect(block).not.toContain('mcp__a__get0(');
     expect(block).toMatch(/older result\(s\) omitted/);

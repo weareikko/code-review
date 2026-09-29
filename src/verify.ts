@@ -54,12 +54,22 @@ const MAX_EXTERNAL_CONTEXT_CHARS = 6_000;
 /** Per-entry cap, so one huge result cannot evict every other one. */
 const MAX_EXTERNAL_CONTEXT_ENTRY_CHARS = 1_500;
 
-/** Flatten a tool result to one line and cap it, marking any truncation. */
+const OPEN_TAG = '<external-context-results>';
+const CLOSE_TAG = '</external-context-results>';
+const TRUNCATION_NOTICE = '… (result truncated)';
+
+const omissionNotice = (count: number) => `(${count} older result(s) omitted — budget exceeded)`;
+
+/**
+ * Flatten a tool result to one line and cap it, marking any truncation. The
+ * notice lives inside {@link MAX_EXTERNAL_CONTEXT_ENTRY_CHARS}, so a truncated
+ * result never exceeds the per-entry cap.
+ */
 function renderEntry(entry: McpResultEntry): string {
   const flat = entry.text.replace(/\s+/g, ' ').trim();
   const text =
     flat.length > MAX_EXTERNAL_CONTEXT_ENTRY_CHARS
-      ? `${flat.slice(0, MAX_EXTERNAL_CONTEXT_ENTRY_CHARS)}… (result truncated)`
+      ? `${flat.slice(0, MAX_EXTERNAL_CONTEXT_ENTRY_CHARS - TRUNCATION_NOTICE.length)}${TRUNCATION_NOTICE}`
       : flat;
   return `- ${entry.tool}(${entry.argsSummary}) → ${text}`;
 }
@@ -74,18 +84,22 @@ function renderEntry(entry: McpResultEntry): string {
  */
 export function renderExternalContextResults(entries: McpResultEntry[]): string {
   if (entries.length === 0) return '';
+  // Seed the budget with everything the block costs beyond the kept lines: both
+  // wrapper tags, the worst-case omission notice, and the newline that joins
+  // each of them — so the rendered block really stays within the cap.
+  const reserved = OPEN_TAG.length + CLOSE_TAG.length + omissionNotice(entries.length).length + 2;
   const kept: string[] = [];
-  let used = 0;
+  let used = reserved;
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const line = renderEntry(entries[index]!);
-    if (used + line.length > MAX_EXTERNAL_CONTEXT_CHARS && kept.length > 0) break;
+    if (used + line.length + 1 > MAX_EXTERNAL_CONTEXT_CHARS && kept.length > 0) break;
     kept.unshift(line);
-    used += line.length;
+    used += line.length + 1;
   }
   const omitted = entries.length - kept.length;
-  const lines = ['<external-context-results>'];
-  if (omitted > 0) lines.push(`(${omitted} older result(s) omitted — budget exceeded)`);
-  lines.push(...kept, '</external-context-results>');
+  const lines = [OPEN_TAG];
+  if (omitted > 0) lines.push(omissionNotice(omitted));
+  lines.push(...kept, CLOSE_TAG);
   return lines.join('\n');
 }
 
