@@ -144,6 +144,21 @@ function stringMap(value: unknown): Record<string, string> {
   return out;
 }
 
+/**
+ * Drop headers whose value is empty or whitespace-only.
+ *
+ * A header value is routinely a `${VAR}` or `${VAR:-}` reference to a
+ * credential that is simply absent — an optional API key, or a token only set
+ * in CI. Sending `Authorization:` with no value is worse than not sending it:
+ * some servers reject the malformed header outright where they would have
+ * served the request anonymously. So an empty expansion means "no header",
+ * not "empty header". `env` for stdio servers is deliberately left alone: an
+ * empty environment variable is a meaningful, distinct value there.
+ */
+export function dropEmptyHeaders(headers: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(headers).filter(([, value]) => value.trim() !== ''));
+}
+
 /** Read the MCP disable lists from a parsed `.claude/settings.json` document. */
 export function parseMcpDisableFilters(raw: unknown): McpDisableFilters {
   if (!isRecord(raw)) return { disabledMcpjsonServers: [], disabledMcpServers: [] };
@@ -272,7 +287,7 @@ export function normalizeMcpServer(
     config.env = expandMap(stringMap(raw.env));
   } else {
     config.url = expander.expand(raw.url as string);
-    config.headers = expandMap(stringMap(raw.headers));
+    config.headers = dropEmptyHeaders(expandMap(stringMap(raw.headers)));
   }
   if (typeof raw.timeout === 'number' && Number.isFinite(raw.timeout) && raw.timeout > 0) {
     config.timeoutMs = Math.min(raw.timeout, MAX_MCP_TIMEOUT_MS);

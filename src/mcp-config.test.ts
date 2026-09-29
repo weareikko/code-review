@@ -18,6 +18,7 @@ vi.mock('./marketplaces.js', async (importOriginal) => {
 import { buildMarketplaceRegistry } from './marketplaces.js';
 import {
   applyMcpDisableFilters,
+  dropEmptyHeaders,
   expandMcpTemplate,
   extractMcpServerMap,
   loadAutoDiscoveredMcpServers,
@@ -183,6 +184,34 @@ describe('normalizeMcpServer', () => {
       url: 'https://x.test//home/me',
       headers: { Authorization: 'Bearer secret-value' },
     });
+  });
+
+  it('drops headers that expand to empty or whitespace', () => {
+    const server = normalizeMcpServer(
+      'c7',
+      {
+        type: 'http',
+        url: 'https://mcp.context7.com/mcp',
+        headers: {
+          Authorization: '${MISSING_KEY:-}',
+          'X-Blank': '   ',
+          'X-Kept': 'Bearer ${TOKEN}',
+        },
+      },
+      source,
+      { vars },
+    );
+    expect(server?.headers).toEqual({ 'X-Kept': 'Bearer secret-value' });
+  });
+
+  it('keeps stdio env values that expand to empty', () => {
+    const server = normalizeMcpServer(
+      'e',
+      { command: 'node', env: { OPTIONAL: '${MISSING_KEY:-}' } },
+      source,
+      { vars },
+    );
+    expect(server?.env).toEqual({ OPTIONAL: '' });
   });
 
   it('expands ${CLAUDE_PLUGIN_ROOT} from pluginRoot', () => {
@@ -687,5 +716,15 @@ describe('resolveMcpServers', () => {
       { vars },
     );
     expect(servers.map((s) => s.name)).toEqual(['a']);
+  });
+});
+
+describe('dropEmptyHeaders', () => {
+  it('keeps only headers with a non-blank value', () => {
+    expect(dropEmptyHeaders({ A: 'a', B: '', C: ' \t ', D: ' d ' })).toEqual({ A: 'a', D: ' d ' });
+  });
+
+  it('returns an empty object for an empty map', () => {
+    expect(dropEmptyHeaders({})).toEqual({});
   });
 });

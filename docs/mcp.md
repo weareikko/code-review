@@ -57,6 +57,8 @@ A server declared with `type: ws`, or with an `oauth` or `headersHelper` field, 
 
 `${VAR}` and `${VAR:-default}` are expanded in `command`, `args`, `env` values, `url`, and `headers` values. `${VAR:-default}` uses the default when `VAR` is unset **or** empty, as in POSIX. `${CLAUDE_PLUGIN_ROOT}` additionally expands to the plugin's own directory for marketplace-sourced servers, the same as it does for skills.
 
+A header whose value expands to an empty or whitespace-only string is **dropped**, not sent: `"Authorization": "${API_KEY:-}"` with no key set means no `Authorization` header at all, rather than a malformed empty one some servers reject. `env` values for stdio servers are kept as-is — an empty environment variable is a meaningful, distinct value there.
+
 ### The variable allowlist
 
 A server definition is not always operator-authored — it can come from the repository under review, or from a marketplace plugin whose upstream ref moves — and expansion writes values into argv, headers, and URL query strings. So expansion reads **only** the variables you name with `--mcp-env` / `CODE_REVIEW_MCP_ENV`; the reviewer's own secrets (`CODE_REVIEW_GITLAB_TOKEN`, `ANTHROPIC_API_KEY`, …) are never readable unless you list them.
@@ -119,6 +121,27 @@ code-review --marketplace 'ikko=git+ssh://git@gitlab.studiometa.dev/ikko/ikko-to
 # or a single server from the same plugin:
 code-review --marketplace 'ikko=git+ssh://git@gitlab.studiometa.dev/ikko/ikko-tools.git#main' --mcp ikko:dev/context7
 ```
+
+### From a public marketplace
+
+Anthropic publishes a plugin marketplace with ready-made servers. This repository's own self-review loads `github` from it:
+
+```yml
+env:
+  CODE_REVIEW_MARKETPLACES: 'anthropic=https://github.com/anthropics/claude-plugins-official.git#fbe07fb6ce7d51d8e86ca6efdf050059894cdb80'
+  CODE_REVIEW_MCP: 'anthropic:github'
+  CODE_REVIEW_MCP_DISCOVERY: 'true'
+  GITHUB_PERSONAL_ACCESS_TOKEN: ${{ github.token }}
+  CODE_REVIEW_MCP_ENV: GITHUB_PERSONAL_ACCESS_TOKEN
+```
+
+**Pin the ref.** A marketplace declared with no `#<ref>` fragment resolves the remote's default branch on every run, so each review clones whatever is on that third-party branch at that moment and connects to the URL it names, carrying whatever credentials the allowlist exposes. Anyone who can land a commit on that branch can then repoint the server. Pin a tag or a commit SHA, as above.
+
+**Read the plugin's `.mcp.json` before you rely on it.** The header names, the URL, and the variables a plugin expects are upstream facts. At the pinned commit, the `github` plugin reads `${GITHUB_PERSONAL_ACCESS_TOKEN}`, so the workflow maps the job token to that name and allowlists it. The same marketplace's `context7` plugin points at `https://mcp.context7.com/mcp?client=claude-code-plugin`, and that endpoint requires an API key even though the plain `https://mcp.context7.com/mcp` URL is anonymous; its `${CONTEXT7_API_KEY:-}` header expands to nothing and is dropped by the empty-header rule above, and the server then answers "Authentication required". This repository therefore keeps `context7` in `.mcp.json` with the anonymous URL and does not load it from the marketplace.
+
+The marketplace `github` definition carries only an `Authorization` header, with no `X-MCP-Readonly: true`, so the connection is write-capable server side; the read-only gate on tool annotations is what keeps the reviewer to read-only tools. When you control the definition, add the server-side guard as well, as the repo's `.mcp.json` entry does for local sessions.
+
+A marketplace server overrides an auto-discovered `.mcp.json` server of the same name, so a repository can keep an entry in `.mcp.json` for local editor sessions and still have CI connect to the marketplace copy. That is why `github` appears in both places here.
 
 ## Prompt context
 
