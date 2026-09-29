@@ -1768,9 +1768,15 @@ export interface McpResultCollector {
  * the same external evidence without calling any tool itself. Only `mcp__*`
  * tools are captured (repo/file reads are already reproducible from the diff),
  * and failed calls are skipped — an error string is not evidence.
+ *
+ * Identical calls are captured once: at full depth the angle finders share one
+ * collector and each resolves the same identifiers from the same intent block,
+ * so the same lookup arrives up to one time per angle. Keeping every copy would
+ * spend the Verify render budget on duplicates and evict distinct lookups.
  */
 export function createMcpResultCollector(): McpResultCollector {
   const pendingArgs = new Map<string, string>();
+  const seen = new Set<string>();
   const entries: McpResultEntry[] = [];
   return {
     entries,
@@ -1784,6 +1790,9 @@ export function createMcpResultCollector(): McpResultCollector {
       if (!toolName.startsWith(MCP_TOOL_PREFIX) || isError) return;
       const text = extractToolResultText(result);
       if (!text) return;
+      const key = `${toolName}\u0000${argsSummary}`;
+      if (seen.has(key)) return;
+      seen.add(key);
       entries.push({ tool: toolName, argsSummary, text });
     },
   };

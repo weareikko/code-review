@@ -11,6 +11,7 @@ import {
   buildEffectivePool,
   buildJSONSystemPrompt,
   buildUserPrompt,
+  createMcpResultCollector,
   createReviewStreamFn,
   filterDiff,
   loadReviewContext,
@@ -2671,5 +2672,43 @@ describe('createReviewStreamFn', () => {
       if (prev === undefined) delete process.env.CODE_REVIEW_BASE_URL_VAR;
       else process.env.CODE_REVIEW_BASE_URL_VAR = prev;
     }
+  });
+});
+
+describe('createMcpResultCollector', () => {
+  const text = (value: string) => ({ content: [{ type: 'text', text: value }] });
+
+  it('captures mcp results with their argument summary', () => {
+    const collector = createMcpResultCollector();
+    collector.start('mcp__tracker__get_issue', { id: 7 }, 'c1');
+    collector.end('mcp__tracker__get_issue', text('raise to 60'), false, 'c1');
+    expect(collector.entries).toEqual([
+      { tool: 'mcp__tracker__get_issue', argsSummary: 'id=7', text: 'raise to 60' },
+    ]);
+  });
+
+  it('ignores non-mcp tools, failed calls, and empty results', () => {
+    const collector = createMcpResultCollector();
+    collector.start('read_file', { path: 'a.ts' }, 'c1');
+    collector.end('read_file', text('contents'), false, 'c1');
+    collector.start('mcp__tracker__get_issue', { id: 7 }, 'c2');
+    collector.end('mcp__tracker__get_issue', text('boom'), true, 'c2');
+    collector.start('mcp__tracker__get_issue', { id: 8 }, 'c3');
+    collector.end('mcp__tracker__get_issue', text('   '), false, 'c3');
+    expect(collector.entries).toEqual([]);
+  });
+
+  it('keeps only the first of identical calls so duplicates do not spend the Verify budget', () => {
+    const collector = createMcpResultCollector();
+    for (const id of ['c1', 'c2', 'c3']) {
+      collector.start('mcp__tracker__get_issue', { id: 7 }, id);
+      collector.end('mcp__tracker__get_issue', text(`body from ${id}`), false, id);
+    }
+    collector.start('mcp__tracker__get_issue', { id: 8 }, 'c4');
+    collector.end('mcp__tracker__get_issue', text('other issue'), false, 'c4');
+    expect(collector.entries).toEqual([
+      { tool: 'mcp__tracker__get_issue', argsSummary: 'id=7', text: 'body from c1' },
+      { tool: 'mcp__tracker__get_issue', argsSummary: 'id=8', text: 'other issue' },
+    ]);
   });
 });
