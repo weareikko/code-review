@@ -18,6 +18,7 @@ import {
   runReview,
   type AgentLike,
   type CreateAgent,
+  type CreateAgentParams,
 } from './gitlab-review.js';
 import { noopLogger, type Logger } from './logger.js';
 import type { Skill } from './skills.js';
@@ -1189,6 +1190,170 @@ describe('runReview pipeline', () => {
     expect(parsed.comments).toHaveLength(1);
     expect(parsed.comments[0].severity).toBe('critical');
     expect(parsed.summary).toMatch(/^\*\*Risk: High\*\*/);
+  });
+
+  const mcpTool = {
+    name: 'mcp__tracker__get_issue',
+    label: 'tracker: get_issue',
+    description: 'Fetch an issue',
+    parameters: { type: 'object', properties: {} },
+    execute: async () => ({ content: [], details: undefined }),
+  } as unknown as AgentTool;
+
+  const connectFakeMcp = async () => ({
+    tools: [mcpTool],
+    servers: [
+      {
+        name: 'tracker',
+        source: { kind: 'file' as const, path: 'mcp.json' },
+        status: 'connected' as const,
+        tools: ['get_issue'],
+        calls: 0,
+      },
+    ],
+    close: async () => {},
+  });
+
+  /** A find agent that calls one MCP tool before returning its review JSON. */
+  function findAgentWithMcpCall(text: string, result: unknown, isError = false): AgentLike {
+    let listener: ((event: AgentEvent) => void | Promise<void>) | undefined;
+    return {
+      subscribe(fn) {
+        listener = fn;
+        return () => {
+          listener = undefined;
+        };
+      },
+      async prompt() {
+        if (!listener) return;
+        await listener({
+          type: 'tool_execution_start',
+          toolCallId: 'tc-1',
+          toolName: 'mcp__tracker__get_issue',
+          args: { id: '153' },
+        });
+        await listener({
+          type: 'tool_execution_end',
+          toolCallId: 'tc-1',
+          toolName: 'mcp__tracker__get_issue',
+          result,
+          isError,
+        });
+        const message = makeAssistant(text);
+        await listener({ type: 'message_end', message });
+        await listener({ type: 'agent_end', messages: [message] });
+      },
+    };
+  }
+
+  it('verify depth gives the verifier the intent block and the MCP results Find fetched, without MCP tools', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    let verifyParams: CreateAgentParams | undefined;
+    const createAgent: CreateAgent = (params) => {
+      if (params.systemPrompt.includes('adversarial verifier')) {
+        verifyParams = params;
+        return fakeAgent([makeAssistant('{"decision":"keep","reason":"ok"}')]);
+      }
+      return findAgentWithMcpCall(findJson, {
+        content: [{ type: 'text', text: 'Issue 153: raise the cap to 60.' }],
+      });
+    };
+
+    await runReview(
+      { ...minimalConfig, cwd, reviewDepth: 'verify' },
+      {
+        cwd,
+        diff: sampleDiff,
+        createAgent,
+        connectMcp: connectFakeMcp,
+        intent: { title: 'Raise the cap', description: 'Raise the cap to 60.' },
+      },
+    );
+
+    expect(verifyParams).toBeDefined();
+    expect(verifyParams!.systemPrompt).toContain('<intent>');
+    expect(verifyParams!.systemPrompt).toContain('Raise the cap');
+    expect(verifyParams!.systemPrompt).toContain('<external-context-results>');
+    expect(verifyParams!.systemPrompt).toContain(
+      '- mcp__tracker__get_issue(id=153) → Issue 153: raise the cap to 60.',
+    );
+    expect(verifyParams!.tools.some((tool) => tool.name.startsWith('mcp__'))).toBe(false);
+  });
+
+  it('full depth passes the same intent and MCP results to its verifiers', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    let verifyParams: CreateAgentParams | undefined;
+    const angleJson = poolAngleJson([
+      {
+        file: 'src/x.ts',
+        line: 10,
+        side: 'RIGHT',
+        severity: 'critical',
+        confidence: 'high',
+        body: 'issue (blocking): Bug A\n\nboom',
+      },
+    ]);
+    const createAgent: CreateAgent = (params) => {
+      if (params.systemPrompt.includes('adversarial verifier')) {
+        verifyParams = params;
+        return fakeAgent([makeAssistant('{"decision":"keep","reason":"ok"}')]);
+      }
+      return findAgentWithMcpCall(angleJson, {
+        content: [{ type: 'text', text: 'Issue 153: raise the cap to 60.' }],
+      });
+    };
+
+    await runReview(
+      { ...minimalConfig, cwd, reviewDepth: 'full' },
+      {
+        cwd,
+        diff: sampleDiff,
+        createAgent,
+        connectMcp: connectFakeMcp,
+        intent: { title: 'Raise the cap' },
+      },
+    );
+
+    expect(verifyParams!.systemPrompt).toContain('Raise the cap');
+    expect(verifyParams!.systemPrompt).toContain('mcp__tracker__get_issue');
+    expect(verifyParams!.tools.some((tool) => tool.name.startsWith('mcp__'))).toBe(false);
+  });
+
+  it('leaves the results block out when Find called no MCP tool, and skips failed calls', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    const capture = (find: () => AgentLike) => {
+      let verifyParams: CreateAgentParams | undefined;
+      const createAgent: CreateAgent = (params) => {
+        if (params.systemPrompt.includes('adversarial verifier')) {
+          verifyParams = params;
+          return fakeAgent([makeAssistant('{"decision":"keep","reason":"ok"}')]);
+        }
+        return find();
+      };
+      return { createAgent, read: () => verifyParams };
+    };
+
+    const noMcp = capture(() => fakeAgent([makeAssistant(findJson)]));
+    await runReview(
+      { ...minimalConfig, cwd, reviewDepth: 'verify' },
+      { cwd, diff: sampleDiff, createAgent: noMcp.createAgent },
+    );
+    expect(noMcp.read()!.systemPrompt).not.toContain('<external-context-results>');
+    expect(noMcp.read()!.systemPrompt).not.toContain('<intent>');
+
+    const failed = capture(() =>
+      findAgentWithMcpCall(findJson, { content: [{ type: 'text', text: 'boom' }] }, true),
+    );
+    await runReview(
+      { ...minimalConfig, cwd, reviewDepth: 'verify' },
+      {
+        cwd,
+        diff: sampleDiff,
+        createAgent: failed.createAgent,
+        connectMcp: connectFakeMcp,
+      },
+    );
+    expect(failed.read()!.systemPrompt).not.toContain('<external-context-results>');
   });
 
   it('full depth runs angle finders, triages duplicates, then verifies', async () => {
