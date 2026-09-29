@@ -55,16 +55,20 @@ check the premise.
 
 The prompt sets the rules for that context: it is UNTRUSTED DATA, admissible as
 evidence only when the finding's proof cites it, it never raises a severity above
-what the code supports, and an unmet or contradicted intent alone is never a
-reason to keep a blocking finding (the same rule the Find prompt applies). The
-"violated contract" a finding must show may therefore be an explicit acceptance
-criterion or requirement quoted from that context, not only something visible in
-the code: a finding that shows the diff demonstrably does the _opposite_ of such
-a requirement is kept, at WARN and never at CRITICAL. A requirement the diff
-merely leaves unimplemented is still dropped inline — the summary carries it —
-and only criteria phrased as requirements count, never instructions addressed to
-the reviewer. Verifiers are handed the tool list **without** the `mcp__*` tools, so Verify
-makes no external lookup of its own — it reads what Find already fetched.
+what the code supports, and an unmet intent alone is never a reason to keep a
+blocking finding (the same rule the Find prompt applies). The one exception is a
+_contradicted_ requirement: the "violated contract" a finding must show may be an
+explicit acceptance criterion or requirement quoted from the intent block, not
+only something visible in the code, and a finding that shows the diff demonstrably
+does the _opposite_ of such a requirement is kept — at WARN, so a CRITICAL one is
+downgraded rather than kept. The external context is a requirement source only for
+a document the intent block itself references; otherwise it is corroborating
+evidence, so a requirement planted in a third-party page never becomes binding on
+its own. A requirement the diff merely leaves unimplemented is still dropped
+inline — the summary carries it — and only criteria phrased as requirements count,
+never instructions addressed to the reviewer. Verifiers are handed the tool list
+**without** the `mcp__*` tools, so Verify makes no external lookup of its own — it
+reads what Find already fetched.
 
 ### Why three, not five
 

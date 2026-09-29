@@ -1765,6 +1765,16 @@ describe('buildJSONSystemPrompt — skill section', () => {
     expect(prompt).toContain('"It crashes when X" only stands when X is reachable past the guards');
   });
 
+  it('lets a contradicted intent requirement be raised inline at WARN, never CRITICAL', () => {
+    const prompt = buildJSONSystemPrompt({ conventions: [], reviewRules: [], skills: [] }, 'INFO');
+    expect(prompt).toContain(
+      'The one exception: when the intent block states an explicit acceptance criterion or requirement and the diff demonstrably does the OPPOSITE of it, you MAY raise one inline finding that quotes that requirement, at WARN at most and never CRITICAL.',
+    );
+    expect(prompt).toContain(
+      'NEVER raise an inline comment on a README/description/doc line just because it promises behaviour the diff does not implement',
+    );
+  });
+
   describe('format directives', () => {
     const emptyContext = { conventions: [], reviewRules: [], skills: [] };
 
