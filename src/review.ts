@@ -32,12 +32,12 @@ export type {
   FilteredDiff,
   McpServerUsage,
   ModelUsage,
-  ReviewIntent,
   ReviewSizeNotice,
   ReviewUsage,
   RunReviewOptions,
   UsageBreakdown,
 } from './gitlab-review.js';
+export type { ReviewIntent } from './intent.js';
 export type { McpServerConfig, McpServerSource } from './mcp-config.js';
 export type { ConnectMcpServersOptions, McpConnection, McpServerStatus } from './mcp.js';
 export { connectMcpServers } from './mcp.js';
