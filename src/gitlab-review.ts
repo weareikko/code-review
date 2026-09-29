@@ -1572,6 +1572,7 @@ async function runReviewStages(params: ReviewStagesParams): Promise<ReviewUsage>
       let toolCallCount = 0;
       let finalText: string;
       try {
+        const mcpScope = mcpResults.scope();
         finalText = await runAgentToCompletion(findAgent, userPrompt, {
           timeoutMs,
           onAssistantMessage: (message) => accumulateUsage(aggregated, message, primary.id),
@@ -1582,11 +1583,11 @@ async function runReviewStages(params: ReviewStagesParams): Promise<ReviewUsage>
           onToolStart: (toolName, args, toolCallId) => {
             toolCallCount += 1;
             skillReads.record(toolName, args);
-            mcpResults.start(toolName, args, toolCallId);
+            mcpScope.start(toolName, args, toolCallId);
             logger.debug(`  → ${toolName}${formatToolArgs(toolName, args)}`);
           },
           onToolEnd: (toolName, result, isError, toolCallId) =>
-            mcpResults.end(toolName, result, isError, toolCallId),
+            mcpScope.end(toolName, result, isError, toolCallId),
         });
       } finally {
         detachTelemetry?.();
@@ -1756,11 +1757,22 @@ function extractToolResultText(result: unknown): string {
     .trim();
 }
 
+/** Per-agent capture handles. Tool-call ids are only unique within one agent. */
+export interface McpResultScope {
+  start(toolName: string, args: unknown, toolCallId: string): void;
+  end(toolName: string, result: unknown, isError: boolean, toolCallId: string): void;
+}
+
 export interface McpResultCollector {
   /** Results captured so far, oldest first. Read by the Verify stage. */
   entries: McpResultEntry[];
-  start(toolName: string, args: unknown, toolCallId: string): void;
-  end(toolName: string, result: unknown, isError: boolean, toolCallId: string): void;
+  /**
+   * Open a capture scope for one agent. Concurrent agents share the collector
+   * but each gets its own pending-call namespace, so two agents that happen to
+   * mint the same tool-call id cannot overwrite or delete each other's pending
+   * argument summary.
+   */
+  scope(): McpResultScope;
 }
 
 /**
@@ -1775,25 +1787,31 @@ export interface McpResultCollector {
  * spend the Verify render budget on duplicates and evict distinct lookups.
  */
 export function createMcpResultCollector(): McpResultCollector {
-  const pendingArgs = new Map<string, string>();
   const seen = new Set<string>();
   const entries: McpResultEntry[] = [];
   return {
     entries,
-    start(toolName, args, toolCallId) {
-      if (!toolName.startsWith(MCP_TOOL_PREFIX)) return;
-      pendingArgs.set(toolCallId, formatToolArgs(toolName, args).trim());
-    },
-    end(toolName, result, isError, toolCallId) {
-      const argsSummary = pendingArgs.get(toolCallId) ?? '';
-      pendingArgs.delete(toolCallId);
-      if (!toolName.startsWith(MCP_TOOL_PREFIX) || isError) return;
-      const text = extractToolResultText(result);
-      if (!text) return;
-      const key = `${toolName}\u0000${argsSummary}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      entries.push({ tool: toolName, argsSummary, text });
+    scope() {
+      // Private to this agent: tool-call ids are session-scoped, so one shared
+      // map would let concurrent angle finders clobber each other's entry.
+      const pendingArgs = new Map<string, string>();
+      return {
+        start(toolName, args, toolCallId) {
+          if (!toolName.startsWith(MCP_TOOL_PREFIX)) return;
+          pendingArgs.set(toolCallId, formatToolArgs(toolName, args).trim());
+        },
+        end(toolName, result, isError, toolCallId) {
+          const argsSummary = pendingArgs.get(toolCallId) ?? '';
+          pendingArgs.delete(toolCallId);
+          if (!toolName.startsWith(MCP_TOOL_PREFIX) || isError) return;
+          const text = extractToolResultText(result);
+          if (!text) return;
+          const key = `${toolName}\u0000${argsSummary}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          entries.push({ tool: toolName, argsSummary, text });
+        },
+      };
     },
   };
 }
@@ -1888,17 +1906,20 @@ async function runMultiAngleFind(
       getApiKey: member.getApiKey,
     });
     const detachTelemetry = deps.attachTelemetry?.(agent);
+    // One capture scope per angle: the finders run concurrently and their
+    // tool-call ids are only unique inside their own agent session.
+    const mcpScope = deps.mcpResults.scope();
     try {
       const text = await runAgentToCompletion(agent, userPrompt, {
         timeoutMs: deps.timeoutMs,
         onAssistantMessage: (message) => accumulateUsage(deps.aggregated, message, member.id),
         onToolStart: (toolName, args, toolCallId) => {
           deps.skillReads.record(toolName, args);
-          deps.mcpResults.start(toolName, args, toolCallId);
+          mcpScope.start(toolName, args, toolCallId);
           deps.logger.debug(`  [${angle.key}] → ${toolName}${formatToolArgs(toolName, args)}`);
         },
         onToolEnd: (toolName, result, isError, toolCallId) =>
-          deps.mcpResults.end(toolName, result, isError, toolCallId),
+          mcpScope.end(toolName, result, isError, toolCallId),
       });
       const parsed = parseReviewMarkdownWithWarnings(text);
       // Annotate each finding with the model that authored it. This is internal

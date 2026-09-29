@@ -2680,8 +2680,9 @@ describe('createMcpResultCollector', () => {
 
   it('captures mcp results with their argument summary', () => {
     const collector = createMcpResultCollector();
-    collector.start('mcp__tracker__get_issue', { id: 7 }, 'c1');
-    collector.end('mcp__tracker__get_issue', text('raise to 60'), false, 'c1');
+    const agent = collector.scope();
+    agent.start('mcp__tracker__get_issue', { id: 7 }, 'c1');
+    agent.end('mcp__tracker__get_issue', text('raise to 60'), false, 'c1');
     expect(collector.entries).toEqual([
       { tool: 'mcp__tracker__get_issue', argsSummary: 'id=7', text: 'raise to 60' },
     ]);
@@ -2689,26 +2690,43 @@ describe('createMcpResultCollector', () => {
 
   it('ignores non-mcp tools, failed calls, and empty results', () => {
     const collector = createMcpResultCollector();
-    collector.start('read_file', { path: 'a.ts' }, 'c1');
-    collector.end('read_file', text('contents'), false, 'c1');
-    collector.start('mcp__tracker__get_issue', { id: 7 }, 'c2');
-    collector.end('mcp__tracker__get_issue', text('boom'), true, 'c2');
-    collector.start('mcp__tracker__get_issue', { id: 8 }, 'c3');
-    collector.end('mcp__tracker__get_issue', text('   '), false, 'c3');
+    const agent = collector.scope();
+    agent.start('read_file', { path: 'a.ts' }, 'c1');
+    agent.end('read_file', text('contents'), false, 'c1');
+    agent.start('mcp__tracker__get_issue', { id: 7 }, 'c2');
+    agent.end('mcp__tracker__get_issue', text('boom'), true, 'c2');
+    agent.start('mcp__tracker__get_issue', { id: 8 }, 'c3');
+    agent.end('mcp__tracker__get_issue', text('   '), false, 'c3');
     expect(collector.entries).toEqual([]);
   });
 
   it('keeps only the first of identical calls so duplicates do not spend the Verify budget', () => {
     const collector = createMcpResultCollector();
+    const agent = collector.scope();
     for (const id of ['c1', 'c2', 'c3']) {
-      collector.start('mcp__tracker__get_issue', { id: 7 }, id);
-      collector.end('mcp__tracker__get_issue', text(`body from ${id}`), false, id);
+      agent.start('mcp__tracker__get_issue', { id: 7 }, id);
+      agent.end('mcp__tracker__get_issue', text(`body from ${id}`), false, id);
     }
-    collector.start('mcp__tracker__get_issue', { id: 8 }, 'c4');
-    collector.end('mcp__tracker__get_issue', text('other issue'), false, 'c4');
+    agent.start('mcp__tracker__get_issue', { id: 8 }, 'c4');
+    agent.end('mcp__tracker__get_issue', text('other issue'), false, 'c4');
     expect(collector.entries).toEqual([
       { tool: 'mcp__tracker__get_issue', argsSummary: 'id=7', text: 'body from c1' },
       { tool: 'mcp__tracker__get_issue', argsSummary: 'id=8', text: 'other issue' },
+    ]);
+  });
+
+  it('keeps concurrent agents that reuse a tool-call id from clobbering each other', () => {
+    const collector = createMcpResultCollector();
+    const a = collector.scope();
+    const b = collector.scope();
+    // Both agents mint `tc-1`, and their calls interleave.
+    a.start('mcp__tracker__get_issue', { id: 7 }, 'tc-1');
+    b.start('mcp__tracker__get_issue', { id: 8 }, 'tc-1');
+    b.end('mcp__tracker__get_issue', text('issue eight'), false, 'tc-1');
+    a.end('mcp__tracker__get_issue', text('issue seven'), false, 'tc-1');
+    expect(collector.entries).toEqual([
+      { tool: 'mcp__tracker__get_issue', argsSummary: 'id=8', text: 'issue eight' },
+      { tool: 'mcp__tracker__get_issue', argsSummary: 'id=7', text: 'issue seven' },
     ]);
   });
 });
