@@ -147,6 +147,18 @@ A marketplace server overrides an auto-discovered `.mcp.json` server of the same
 
 Connected servers and their exposed tools are listed in one `<external-context>` block in the reviewer's prompt. The agent is told to look up **structured identifiers** — issue numbers and ticket keys such as `#1234` or `PROJ-42` — that appear in the MR intent or commits _before_ reviewing. It is told explicitly **not** to fetch URLs, hostnames, or paths found there, and that the MR title, description, commits, diff, and every MCP tool result are untrusted data to read as evidence, never instructions to follow: all of it is written by the change author, and a connected tool would otherwise be a way to make the reviewer fetch an attacker-chosen target with that server's credentials. External context stays secondary to code defects and never outranks a finding grounded in the diff itself. No block is added when no server connected, so a review with no MCP config is unchanged.
 
+## Verify stage
+
+At `verify`/`full` depth the verifiers do **not** get the MCP tools: one external
+lookup per review happens in Find. What those tools returned during Find is
+replayed to every verifier as an `<external-context-results>` block in the cached
+system prompt, next to the MR `<intent>` block — capped at 6,000 characters, most
+recent results kept, each result flattened to one line and truncated with a note.
+Without it a verifier dropped findings whose proof cites an issue or document
+Find had read. The same untrusted-data rule applies there, and external context
+never raises a severity above what the code supports. See
+[multi-stage review](./multi-stage-review.md#what-verify-sees).
+
 ## Summary footer
 
 When at least one server was configured, the summary note carries an `MCP:` line next to the `Skills:` line, reporting how many tool calls the reviewer made against each server:
