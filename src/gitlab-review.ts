@@ -12,6 +12,7 @@ import type { Config } from './config.js';
 import { resolveProviderApiKey } from './config.js';
 import { formatError, isQuotaExceededMessage, ReviewerError } from './errors.js';
 import { createGitTools } from './git-tool.js';
+import { renderIntentBlock, type ReviewIntent } from './intent.js';
 import type { Logger } from './logger.js';
 import { noopLogger } from './logger.js';
 import type { MarketplaceRef } from './marketplaces.js';
@@ -51,6 +52,7 @@ import {
   buildVerifyUserPrompt,
   parseVerdict,
   synthesizeReviewJson,
+  type McpResultEntry,
   type Verdict,
 } from './verify.js';
 
@@ -798,42 +800,6 @@ export function buildJSONSystemPrompt(
 }
 
 /**
- * Author-declared intent for the change, sourced from the GitLab MR.
- * Both fields are optional and may be empty/whitespace — the renderer degrades
- * gracefully and emits no intent block when there is nothing meaningful to show.
- */
-export interface ReviewIntent {
-  title?: string;
-  description?: string | null;
-}
-
-/** Max characters of MR description injected into the prompt to bound token cost. */
-const MAX_INTENT_DESCRIPTION_CHARS = 4_000;
-
-/**
- * Renders the author-declared intent (MR title + description) as a clearly
- * delimited `<intent>` block. Returns an empty string when neither field has
- * meaningful content, so a missing/empty description degrades gracefully.
- * The description is trimmed and length-capped to bound token cost.
- */
-function renderIntentBlock(intent: ReviewIntent | undefined): string {
-  if (!intent) return '';
-  const title = intent.title?.trim() ?? '';
-  let description = intent.description?.trim() ?? '';
-  if (!title && !description) return '';
-
-  if (description.length > MAX_INTENT_DESCRIPTION_CHARS) {
-    description = `${description.slice(0, MAX_INTENT_DESCRIPTION_CHARS)}\n… (description truncated)`;
-  }
-
-  const lines = ['<intent>'];
-  if (title) lines.push(`<title>${title}</title>`);
-  if (description) lines.push(`<description>\n${description}\n</description>`);
-  lines.push('</intent>');
-  return lines.join('\n');
-}
-
-/**
  * Renders the connected MCP servers and their exposed (read-only) tools as an
  * `<external-context>` block. Returns an empty string when no server connected,
  * so a review with no MCP config or every server unavailable is byte-identical
@@ -1538,6 +1504,8 @@ async function runReviewStages(params: ReviewStagesParams): Promise<ReviewUsage>
   // Shared by every stage: Find and Verify run different agents over the same
   // tool list, so a skill read in either stage counts towards the same skill.
   const skillReads = createSkillReadCounter(context.skills, cwd);
+  // Filled by the Find stage(s), read by the Verify stage.
+  const mcpResults = createMcpResultCollector();
   const deps: StageDeps = {
     createAgent,
     pool,
@@ -1550,6 +1518,8 @@ async function runReviewStages(params: ReviewStagesParams): Promise<ReviewUsage>
     attachTelemetry: options.attachTelemetry,
     verifyStaged: diskMode ? retrievableSkipped : undefined,
     skillReads,
+    intentBlock: renderIntentBlock(options.intent),
+    mcpResults,
   };
 
   // Snapshot builder for the accumulated usage. Used for the normal return and,
@@ -1602,6 +1572,7 @@ async function runReviewStages(params: ReviewStagesParams): Promise<ReviewUsage>
       let toolCallCount = 0;
       let finalText: string;
       try {
+        const mcpScope = mcpResults.scope();
         finalText = await runAgentToCompletion(findAgent, userPrompt, {
           timeoutMs,
           onAssistantMessage: (message) => accumulateUsage(aggregated, message, primary.id),
@@ -1609,11 +1580,14 @@ async function runReviewStages(params: ReviewStagesParams): Promise<ReviewUsage>
             turnCount = turn;
             logger.debug(`Turn ${turn} started`);
           },
-          onToolStart: (toolName, args) => {
+          onToolStart: (toolName, args, toolCallId) => {
             toolCallCount += 1;
             skillReads.record(toolName, args);
+            mcpScope.start(toolName, args, toolCallId);
             logger.debug(`  → ${toolName}${formatToolArgs(toolName, args)}`);
           },
+          onToolEnd: (toolName, result, isError, toolCallId) =>
+            mcpScope.end(toolName, result, isError, toolCallId),
         });
       } finally {
         detachTelemetry?.();
@@ -1660,7 +1634,8 @@ interface RunAgentCallbacks {
   timeoutMs: number;
   onAssistantMessage?: (message: AssistantMessage) => void;
   onTurnStart?: (turn: number) => void;
-  onToolStart?: (toolName: string, args: unknown) => void;
+  onToolStart?: (toolName: string, args: unknown, toolCallId: string) => void;
+  onToolEnd?: (toolName: string, result: unknown, isError: boolean, toolCallId: string) => void;
 }
 
 /**
@@ -1686,7 +1661,10 @@ async function runAgentToCompletion(
           callbacks.onTurnStart?.(turnCount);
         }
         if (event.type === 'tool_execution_start') {
-          callbacks.onToolStart?.(event.toolName, event.args);
+          callbacks.onToolStart?.(event.toolName, event.args, event.toolCallId);
+        }
+        if (event.type === 'tool_execution_end') {
+          callbacks.onToolEnd?.(event.toolName, event.result, event.isError, event.toolCallId);
         }
         if (event.type === 'message_end' && event.message.role === 'assistant') {
           const assistant = event.message as AssistantMessage;
@@ -1759,6 +1737,85 @@ async function runBounded(tasks: Array<() => Promise<void>>, limit: number): Pro
 const VERIFY_CONCURRENCY = Number(process.env.CODE_REVIEW_VERIFY_CONCURRENCY) || 4;
 const FIND_CONCURRENCY = 3;
 
+/** Bridged MCP tools are named `mcp__<server>__<tool>` (see `src/mcp.ts`). */
+const MCP_TOOL_PREFIX = 'mcp__';
+
+/** Pull the text content out of an agent tool result, ignoring images. */
+function extractToolResultText(result: unknown): string {
+  if (typeof result === 'string') return result.trim();
+  if (!result || typeof result !== 'object') return '';
+  const content = (result as { content?: unknown }).content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part) =>
+      part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string'
+        ? (part as { text: string }).text
+        : '',
+    )
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+}
+
+/** Per-agent capture handles. Tool-call ids are only unique within one agent. */
+export interface McpResultScope {
+  start(toolName: string, args: unknown, toolCallId: string): void;
+  end(toolName: string, result: unknown, isError: boolean, toolCallId: string): void;
+}
+
+export interface McpResultCollector {
+  /** Results captured so far, oldest first. Read by the Verify stage. */
+  entries: McpResultEntry[];
+  /**
+   * Open a capture scope for one agent. Concurrent agents share the collector
+   * but each gets its own pending-call namespace, so two agents that happen to
+   * mint the same tool-call id cannot overwrite or delete each other's pending
+   * argument summary.
+   */
+  scope(): McpResultScope;
+}
+
+/**
+ * Collect what the MCP tools returned during Find so the Verify stage can read
+ * the same external evidence without calling any tool itself. Only `mcp__*`
+ * tools are captured (repo/file reads are already reproducible from the diff),
+ * and failed calls are skipped — an error string is not evidence.
+ *
+ * Identical calls are captured once: at full depth the angle finders share one
+ * collector and each resolves the same identifiers from the same intent block,
+ * so the same lookup arrives up to one time per angle. Keeping every copy would
+ * spend the Verify render budget on duplicates and evict distinct lookups.
+ */
+export function createMcpResultCollector(): McpResultCollector {
+  const seen = new Set<string>();
+  const entries: McpResultEntry[] = [];
+  return {
+    entries,
+    scope() {
+      // Private to this agent: tool-call ids are session-scoped, so one shared
+      // map would let concurrent angle finders clobber each other's entry.
+      const pendingArgs = new Map<string, string>();
+      return {
+        start(toolName, args, toolCallId) {
+          if (!toolName.startsWith(MCP_TOOL_PREFIX)) return;
+          pendingArgs.set(toolCallId, formatToolArgs(toolName, args).trim());
+        },
+        end(toolName, result, isError, toolCallId) {
+          const argsSummary = pendingArgs.get(toolCallId) ?? '';
+          pendingArgs.delete(toolCallId);
+          if (!toolName.startsWith(MCP_TOOL_PREFIX) || isError) return;
+          const text = extractToolResultText(result);
+          if (!text) return;
+          const key = `${toolName}\u0000${argsSummary}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          entries.push({ tool: toolName, argsSummary, text });
+        },
+      };
+    },
+  };
+}
+
 interface StageDeps {
   createAgent: CreateAgent;
   /**
@@ -1796,6 +1853,17 @@ interface StageDeps {
    * profile wouldn't transfer past `single`).
    */
   verifyStaged?: SkippedDiffFile[];
+  /**
+   * Pre-rendered `<intent>` block for the MR. Shared by every verifier's system
+   * prompt (identical per run, so it stays inside the cached prefix) — without
+   * it the Verify stage drops findings that cite the change's stated purpose.
+   */
+  intentBlock?: string;
+  /**
+   * MCP results captured during Find and replayed to the verifiers. The Verify
+   * stage never calls MCP tools itself; it reads what Find already fetched.
+   */
+  mcpResults: McpResultCollector;
 }
 
 /**
@@ -1838,14 +1906,20 @@ async function runMultiAngleFind(
       getApiKey: member.getApiKey,
     });
     const detachTelemetry = deps.attachTelemetry?.(agent);
+    // One capture scope per angle: the finders run concurrently and their
+    // tool-call ids are only unique inside their own agent session.
+    const mcpScope = deps.mcpResults.scope();
     try {
       const text = await runAgentToCompletion(agent, userPrompt, {
         timeoutMs: deps.timeoutMs,
         onAssistantMessage: (message) => accumulateUsage(deps.aggregated, message, member.id),
-        onToolStart: (toolName, args) => {
+        onToolStart: (toolName, args, toolCallId) => {
           deps.skillReads.record(toolName, args);
+          mcpScope.start(toolName, args, toolCallId);
           deps.logger.debug(`  [${angle.key}] → ${toolName}${formatToolArgs(toolName, args)}`);
         },
+        onToolEnd: (toolName, result, isError, toolCallId) =>
+          mcpScope.end(toolName, result, isError, toolCallId),
       });
       const parsed = parseReviewMarkdownWithWarnings(text);
       // Annotate each finding with the model that authored it. This is internal
@@ -1896,7 +1970,13 @@ async function verifyAndSynthesize(
   const verdicts = new Map<number, Verdict>();
   if (severe.length > 0) {
     // Disk input mode: verifiers read the staged files instead of an inline diff.
-    const verifySystemPrompt = buildVerifySystemPrompt(diff, commitLog, deps.verifyStaged);
+    const verifySystemPrompt = buildVerifySystemPrompt(diff, commitLog, deps.verifyStaged, {
+      intentBlock: deps.intentBlock,
+      externalContext: deps.mcpResults.entries,
+    });
+    // Verifiers read the MCP results Find already fetched; they never call an
+    // MCP tool themselves (one lookup per run, and no per-finding fan-out).
+    const verifyTools = deps.tools.filter((tool) => !tool.name.startsWith(MCP_TOOL_PREFIX));
     const tasks = severe.map(({ finding, index }) => async () => {
       const comment = finding.comment;
       // Explicit --verify-model wins; otherwise a cross-family verifier: a pool
@@ -1906,7 +1986,7 @@ async function verifyAndSynthesize(
       const verifier = deps.createAgent({
         systemPrompt: verifySystemPrompt,
         model: verifierMember.model,
-        tools: deps.tools,
+        tools: verifyTools,
         thinkingLevel: deps.thinkingLevel,
         getApiKey: verifierMember.getApiKey,
       });

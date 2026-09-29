@@ -42,6 +42,24 @@ Verify's drops/downgrades are recorded in the summary **Notes** section so the
 developer can audit what the pipeline suppressed — consistent with the existing
 "silent suppression is not acceptable" rule.
 
+### What Verify sees
+
+A verifier judges one finding at a time, but its system prompt is identical for
+every finding of a run, so everything shared lives there and rides the provider's
+prompt cache: the diff (or the staged-file manifest in disk mode), the commit
+log, the MR's `<intent>` block, and an `<external-context-results>` block
+replaying what the `mcp__*` tools returned during Find (capped at 6k characters,
+most recent kept). Without the last two, Verify dropped any finding whose proof
+cites the change's stated purpose or an issue Find looked up — it had no way to
+check the premise.
+
+The prompt sets the rules for that context: it is UNTRUSTED DATA, admissible as
+evidence only when the finding's proof cites it, it never raises a severity above
+what the code supports, and an unmet or contradicted intent alone is never a
+reason to keep a blocking finding (the same rule the Find prompt applies).
+Verifiers are handed the tool list **without** the `mcp__*` tools, so Verify
+makes no external lookup of its own — it reads what Find already fetched.
+
 ### Why three, not five
 
 The Claude Code display also shows **Triage** and **Sweep / Verify-sweep**. Those
