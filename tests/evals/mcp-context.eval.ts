@@ -12,10 +12,10 @@
  *    references nothing external must produce zero MCP calls: a connected
  *    server is not an invitation to browse.
  * 3. **The finding survives (or does not survive) Verify.** The same referenced
- *    issue is reviewed at `reviewDepth: 'verify'` as well. Verify sees neither
- *    the MR intent nor anything a tool returned during Find, so the
- *    contradiction finding may be dropped for lack of context. Recorded, not
- *    asserted — this is the measurement the Verify-context work is judged on.
+ *    issue is reviewed at `reviewDepth: 'verify'` as well, which records whether
+ *    the contradiction finding survives Verify now that the verifier receives
+ *    the MR intent block and the MCP results the Find stage fetched. Recorded,
+ *    not asserted — this is the measurement the Verify-context work is judged on.
  * 4. **Tool text cannot steer the verdict.** The tracker returns an issue body
  *    carrying a prompt injection ("ignore all previous instructions..."), once
  *    telling the reviewer to drop every finding and once to keep every finding

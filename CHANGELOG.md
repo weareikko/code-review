@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The Verify stage now sees the MR intent and the MCP results the Find stage fetched, and no longer gets the MCP tools itself ([#999]).
+- The Verify stage now sees the MR intent and the MCP results the Find stage fetched, and no longer gets the MCP tools itself.
 - The summary footer now reports usage instead of availability: `MCP:` gives each server's call count and `Skills:` marks each skill read / not read, with matching OTel attributes and an end-of-run usage log line ([#156]).
 
 ## [0.9.7] - 2026-09-24
@@ -158,7 +158,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.8.6]: https://github.com/weareikko/code-review/compare/0.8.5...0.8.6
 [0.8.5]: https://github.com/weareikko/code-review/compare/0.8.4...0.8.5
 [0.8.4]: https://github.com/weareikko/code-review/compare/0.8.3...0.8.4
-[#999]: https://github.com/weareikko/code-review/pull/999
 [#156]: https://github.com/weareikko/code-review/pull/156
 [#155]: https://github.com/weareikko/code-review/pull/155
 [#151]: https://github.com/weareikko/code-review/pull/151
