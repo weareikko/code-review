@@ -207,6 +207,10 @@ await runReview(config, {
 
 The hook receives the configs resolved from the CLI/repo sources and the options `runReview` would have passed (logger, run id). Return any `McpConnection`: the read-only gate, the call budget, the result cap, and the summary footer all work the same on what it exposes. `createTransport` is the seam for a transport the bridge would not build itself — any `McpTransport` from `@earendil-works/pi-mcp`, such as the in-memory pair from `@earendil-works/pi-mcp/testing`; omit it and `connectMcpServers` builds the real stdio or streamable HTTP transport for each config.
 
+### Codemode exposure (experimental)
+
+By default each read-only tool is declared to the model as `mcp__<server>__<tool>`. Pass `mcpExposure: 'codemode'` to `runReview` to declare one `codemode` tool instead: the model writes a JavaScript script that calls the bridged tools as `await tools.<name>(args)` in a QuickJS sandbox (`@earendil-works/pi-codemode`) that has no network, timers, or modules. Only what the script returns or prints reaches the model. Every nested call goes through the bridged tool, so the read-only gate, the call budget, the per-call result cap, and the `mcp.call` trace apply unchanged; the script output is capped with the same result cap. A script has a 60 s deadline and a 64 MiB heap. Verifiers get no `codemode` tool and read the nested results Find collected, as in direct mode. There is no CLI flag or environment variable for this option yet.
+
 ## Diagnostics and OpenTelemetry
 
 Connect, list-tools, and call-tool operations are traced on `diagnostics_channel` and, with `CODE_REVIEW_OTEL=1`, rendered as span events and per-server / aggregate call-count attributes. See [Observability](./observability.md) for the channel names, payload shapes, and OTel attribute names.

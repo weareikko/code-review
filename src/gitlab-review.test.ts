@@ -787,6 +787,52 @@ describe('runReview pipeline', () => {
     expect(closeSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('with mcpExposure codemode: declares one codemode tool instead of the bridged MCP tools', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    const captured = vi.fn();
+    const messages = [makeAssistant('ok', { input: 1, output: 1 })];
+    const mcpTool = {
+      name: 'mcp__jira__get_issue',
+      label: 'jira: get_issue',
+      description: 'Fetch a Jira issue',
+      parameters: { type: 'object', properties: {} },
+      execute: async () => ({ content: [], details: undefined }),
+    } as unknown as AgentTool;
+
+    await runReview(
+      { ...minimalConfig, cwd },
+      {
+        cwd,
+        diff: sampleDiff,
+        mcpExposure: 'codemode',
+        createAgent: (params) => {
+          captured(params);
+          return fakeAgent(messages);
+        },
+        connectMcp: async () => ({
+          tools: [mcpTool],
+          servers: [
+            {
+              name: 'jira',
+              source: { kind: 'file', path: 'mcp.json' },
+              status: 'connected',
+              tools: ['get_issue'],
+              calls: 0,
+            },
+          ],
+          close: async () => {},
+        }),
+      },
+    );
+
+    const params = captured.mock.calls[0][0];
+    const names = params.tools.map((tool: AgentTool) => tool.name);
+    expect(names).toContain('codemode');
+    expect(names.some((name: string) => name.startsWith('mcp__'))).toBe(false);
+    const codemode = params.tools.find((tool: AgentTool) => tool.name === 'codemode');
+    expect(codemode.description).toContain('mcp__jira__get_issue');
+  });
+
   it('closes the MCP connection even when the run throws', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
     const messages = [makeAssistant('', { input: 1, output: 0 })]; // empty text -> ReviewerError
@@ -1318,6 +1364,31 @@ describe('runReview pipeline', () => {
     expect(verifyParams!.systemPrompt).toContain('Raise the cap');
     expect(verifyParams!.systemPrompt).toContain('mcp__tracker__get_issue');
     expect(verifyParams!.tools.some((tool) => tool.name.startsWith('mcp__'))).toBe(false);
+  });
+
+  it('verify depth with mcpExposure codemode: Find gets the codemode tool, verifiers do not', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    let findParams: CreateAgentParams | undefined;
+    let verifyParams: CreateAgentParams | undefined;
+    const createAgent: CreateAgent = (params) => {
+      if (params.systemPrompt.includes('adversarial verifier')) {
+        verifyParams = params;
+        return fakeAgent([makeAssistant('{"decision":"keep","reason":"ok"}')]);
+      }
+      findParams = params;
+      return fakeAgent([makeAssistant(findJson)]);
+    };
+
+    await runReview(
+      { ...minimalConfig, cwd, reviewDepth: 'verify' },
+      { cwd, diff: sampleDiff, createAgent, connectMcp: connectFakeMcp, mcpExposure: 'codemode' },
+    );
+
+    expect(findParams!.tools.map((tool) => tool.name)).toContain('codemode');
+    expect(verifyParams).toBeDefined();
+    expect(
+      verifyParams!.tools.some((tool) => tool.name === 'codemode' || tool.name.startsWith('mcp__')),
+    ).toBe(false);
   });
 
   it('leaves the results block out when Find called no MCP tool, and skips failed calls', async () => {
@@ -2253,6 +2324,34 @@ describe('buildUserPrompt', () => {
     expect(prompt).toContain('do NOT fetch arbitrary URLs');
     expect(prompt).toContain('UNTRUSTED DATA');
     expect(prompt).not.toContain('doc links');
+    expect(prompt).not.toContain('codemode');
+  });
+
+  it('with mcpExposure codemode: points the agent at the codemode tool and lists bridged names', () => {
+    const prompt = buildUserPrompt(
+      diff,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      [
+        {
+          name: 'jira',
+          source: { kind: 'file', path: 'mcp.json' },
+          status: 'connected',
+          tools: ['get_issue'],
+          calls: 0,
+        },
+      ],
+      'codemode',
+    );
+    expect(prompt).toContain('reach them through the `codemode` tool');
+    expect(prompt).toContain('- jira: mcp__jira__get_issue');
+    expect(prompt).toContain('UNTRUSTED DATA');
   });
 });
 

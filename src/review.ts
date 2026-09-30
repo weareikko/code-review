@@ -39,6 +39,7 @@ export type {
 } from './gitlab-review.js';
 export type { ReviewIntent } from './intent.js';
 export type { McpServerConfig, McpServerSource } from './mcp-config.js';
+export type { McpExposure } from './mcp-codemode.js';
 export type { ConnectMcpServersOptions, McpConnection, McpServerStatus } from './mcp.js';
 export { connectMcpServers } from './mcp.js';
 export { filterDiff } from './gitlab-review.js';
