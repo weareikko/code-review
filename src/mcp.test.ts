@@ -232,6 +232,49 @@ describe('formatMcpToolResult', () => {
     ]);
   });
 
+  it('turns malformed blocks into short notes instead of throwing', () => {
+    const huge = 'y'.repeat(1_000_000);
+    const content = formatMcpToolResult(
+      {
+        content: [
+          null,
+          'z',
+          { type: 'text', text: [huge] },
+          { type: 'resource', resource: huge },
+          { type: 'resource', resource: null },
+          { type: 'resource_link', uri: 'https://x', description: {} },
+        ] as unknown as CallToolResult['content'],
+      },
+      1000,
+    );
+    expect(textOf({ content })).toBe(
+      [
+        '[invalid content omitted]',
+        '[invalid content omitted]',
+        '[invalid text content omitted]',
+        '[invalid resource content omitted]',
+        '[invalid resource content omitted]',
+        '[resource link] https://x',
+      ].join('\n'),
+    );
+  });
+
+  it('keeps the error message capped when an error result holds a malformed resource', () => {
+    let message = '';
+    try {
+      formatMcpToolResult(
+        {
+          isError: true,
+          content: [{ type: 'resource', resource: 'y'.repeat(1_000_000) }],
+        } as unknown as CallToolResult,
+        50,
+      );
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toBe('[invalid resource content omitted]');
+  });
+
   it('counts the image mimeType against the budget', () => {
     const content = formatMcpToolResult(
       { content: [{ type: 'image', data: 'A', mimeType: 'x'.repeat(1_000_000) }] },
