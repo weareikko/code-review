@@ -181,6 +181,29 @@ describe('createMcpCodemodeTool', () => {
     expect(text).toContain('[truncated: result was 5000 characters, limit is 100]');
   });
 
+  it('ends a script whose output passes the cap while it runs', async () => {
+    const { conn } = await connect();
+    const tool = createMcpCodemodeTool(conn.tools, { maxResultChars: 1000 });
+
+    const started = Date.now();
+    await expect(run(tool, `for (;;) text('x'.repeat(300));`)).rejects.toThrow(
+      /codemode sandbox error: script output exceeds 1000 characters/,
+    );
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it('keeps output under the cap and the return value', async () => {
+    const { conn } = await connect();
+    const tool = createMcpCodemodeTool(conn.tools, { maxResultChars: 1000 });
+
+    const result = await run(
+      tool,
+      `text('a'.repeat(400)); console.log('b'.repeat(400)); return 'done';`,
+    );
+
+    expect(textOf(result)).toBe(`${'a'.repeat(400)}\n${'b'.repeat(400)}\ndone`);
+  });
+
   it('rejects a nested call whose argument is not an object', async () => {
     const { fake, conn } = await connect();
     const tool = createMcpCodemodeTool(conn.tools);

@@ -9,7 +9,8 @@
  *
  * Every nested call goes through the bridged tool's own `execute`, so the
  * read-only gate, the per-review call budget, the `mcp.call` diagnostics trace
- * and the per-call result cap apply unchanged. The script output the model
+ * and the per-call result cap apply unchanged. The script output is bounded
+ * while the script runs (`codemodeWorkerUrl`), and the output the model
  * receives is capped with the same rule as a direct call (`formatMcpToolResult`).
  */
 
@@ -32,6 +33,42 @@ export const CODEMODE_TOOL_NAME = 'codemode';
 export const DEFAULT_CODEMODE_TIMEOUT_MS = 60_000;
 /** Heap cap for the QuickJS VM of one script. */
 export const DEFAULT_CODEMODE_MEMORY_LIMIT_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Worker entry that runs pi-codemode's own worker behind a running output cap.
+ * pi-codemode's host keeps every `text()` / `console.*` / `image()` item in
+ * memory until the script settles, and has no output limit: a looping script
+ * could exhaust the reviewer's heap before `formatMcpToolResult` ever caps it.
+ * This entry wraps the worker's `parentPort.postMessage`: once the text and
+ * image data sent exceed `maxOutputChars`, it drops every later message and
+ * reports a `crash`, so the host ends the run as a `sandbox` error and keeps
+ * only the output up to the cap. A `data:` URL carries the cap without an extra
+ * build entry.
+ */
+export function codemodeWorkerUrl(maxOutputChars: number): URL {
+  const workerModule = import.meta.resolve('@earendil-works/pi-codemode/worker');
+  const source = `import { parentPort } from 'node:worker_threads';
+const limit = ${JSON.stringify(maxOutputChars)};
+const post = parentPort.postMessage.bind(parentPort);
+let used = 0;
+let stopped = false;
+parentPort.postMessage = (message) => {
+  if (stopped) return;
+  if (message && message.type === 'output') {
+    const item = message.item;
+    used += item.type === 'image' ? item.data.length : item.text.length;
+    if (used > limit) {
+      stopped = true;
+      post({ type: 'crash', message: 'script output exceeds ' + limit + ' characters' });
+      return;
+    }
+  }
+  post(message);
+};
+await import(${JSON.stringify(workerModule)});
+`;
+  return new URL(`data:text/javascript,${encodeURIComponent(source)}`);
+}
 
 /** Receives every nested call, e.g. the collector that replays MCP results to Verify. */
 export interface CodemodeCallObserver {
@@ -139,6 +176,8 @@ export function createMcpCodemodeTool(
   let sequence = 0;
   const nextId = () => `codemode-${++sequence}`;
   const sandboxTools = mcpTools.map((tool) => toSandboxTool(tool, nextId, observer));
+  // Output past the result cap would be truncated anyway; stop the script there.
+  const workerUrl = codemodeWorkerUrl(maxResultChars);
 
   const tool: AgentTool<typeof parameters, undefined> = {
     name: CODEMODE_TOOL_NAME,
@@ -146,7 +185,12 @@ export function createMcpCodemodeTool(
     description: `${USAGE}\n\n${renderDeclarations({ tools: sandboxTools })}`,
     parameters,
     async execute(_id, { code }: Static<typeof parameters>, signal) {
-      const sandbox = new CodemodeSandbox({ tools: sandboxTools, timeoutMs, memoryLimitBytes });
+      const sandbox = new CodemodeSandbox({
+        tools: sandboxTools,
+        timeoutMs,
+        memoryLimitBytes,
+        workerUrl,
+      });
       try {
         const result = await sandbox.execute(code, { signal });
         // Same cap as a direct call; with `isError` it throws the capped text.
