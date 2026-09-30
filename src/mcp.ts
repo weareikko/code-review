@@ -209,14 +209,21 @@ export function formatMcpToolResult(
 ): (TextContent | ImageContent)[] {
   const texts: string[] = [];
   const images: ImageContent[] = [];
-  for (const block of result.content) {
+  // pi-mcp checks only that `content` is an array, so every block is untrusted
+  // JSON: check each shape before use. A malformed block becomes a short note —
+  // never an exception, whose message could carry the raw server value uncapped.
+  for (const block of result.content as unknown[]) {
+    if (!isRecord(block)) {
+      texts.push('[invalid content omitted]');
+      continue;
+    }
     switch (block.type) {
       case 'text':
-        texts.push(block.text);
+        texts.push(typeof block.text === 'string' ? block.text : '[invalid text content omitted]');
         break;
       case 'image':
-        // pi-mcp does not validate content blocks, so a non-string `data` would
-        // slip past the size check below (an array has length 1).
+        // A non-string `data` would slip past the size check below (an array
+        // has length 1).
         if (typeof block.data === 'string' && typeof block.mimeType === 'string') {
           images.push({ type: 'image', data: block.data, mimeType: block.mimeType });
         } else {
@@ -224,19 +231,21 @@ export function formatMcpToolResult(
         }
         break;
       case 'resource':
-        if ('text' in block.resource) {
+        if (!isRecord(block.resource)) {
+          texts.push('[invalid resource content omitted]');
+        } else if (typeof block.resource.text === 'string') {
           texts.push(block.resource.text);
         } else {
-          texts.push(`[binary resource ${block.resource.uri} omitted]`);
+          texts.push(`[binary resource ${String(block.resource.uri)} omitted]`);
         }
         break;
       case 'resource_link':
         texts.push(
-          `[resource link] ${block.uri}${block.description ? ` — ${block.description}` : ''}`,
+          `[resource link] ${String(block.uri)}${typeof block.description === 'string' && block.description ? ` — ${block.description}` : ''}`,
         );
         break;
       default:
-        texts.push(`[${(block as { type: string }).type} content omitted]`);
+        texts.push(`[${String(block.type)} content omitted]`);
     }
   }
   if (texts.length === 0 && result.structuredContent !== undefined) {
@@ -280,6 +289,10 @@ export function formatMcpToolResult(
   if (text.length > 0 || kept.length === 0) content.push({ type: 'text', text });
   content.push(...kept);
   return content;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function toParameters(tool: McpTool): TSchema {
