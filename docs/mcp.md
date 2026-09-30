@@ -41,17 +41,19 @@ Two document shapes are accepted, detected by the presence of a top-level `mcpSe
 
 ### Server fields
 
-| Field     | Notes                                                                                                                                                         |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `type`    | `stdio`, `http`, or `sse`. Defaults to `stdio` when `command` is present, `http` when `url` is present.                                                       |
-| `command` | stdio only. The executable to spawn.                                                                                                                          |
-| `args`    | stdio only. Arguments passed to `command`.                                                                                                                    |
-| `env`     | stdio only. Extra environment variables for the child process.                                                                                                |
-| `url`     | http / sse only. The server endpoint.                                                                                                                         |
-| `headers` | http / sse only. Request headers (e.g. an auth token).                                                                                                        |
-| `timeout` | Per-call timeout in milliseconds. Falls back to the bridge default (30s) when unset, and is clamped to 120s. Connect and `tools/list` always use a fixed 30s. |
+| Field     | Notes                                                                                                                                                                   |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`    | `stdio`, `http`, or `sse`. Defaults to `stdio` when `command` is present, `http` when `url` is present. An `sse` server is parsed but reported unavailable — see below. |
+| `command` | stdio only. The executable to spawn.                                                                                                                                    |
+| `args`    | stdio only. Arguments passed to `command`.                                                                                                                              |
+| `env`     | stdio only. Extra environment variables for the child process. The child inherits only `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, and `USER` from the reviewer.        |
+| `url`     | http / sse only. The server endpoint.                                                                                                                                   |
+| `headers` | http / sse only. Request headers (e.g. an auth token).                                                                                                                  |
+| `timeout` | Per-call timeout in milliseconds. Falls back to the bridge default (30s) when unset, and is clamped to 120s. Connect and `tools/list` always use a fixed 30s.           |
 
 A server declared with `type: ws`, or with an `oauth` or `headersHelper` field, is skipped with a warning — those transports and auth flows aren't supported.
+
+A server declared with `type: sse` resolves, but the MCP client ([`@earendil-works/pi-mcp`](https://www.npmjs.com/package/@earendil-works/pi-mcp)) implements only streamable HTTP, so the server shows as `(unavailable)` with the warning `legacy SSE transport is not supported; use the server's streamable HTTP endpoint`. Point `url` at the server's streamable HTTP endpoint and set `type: http`.
 
 ## Env expansion
 
@@ -203,7 +205,7 @@ await runReview(config, {
 });
 ```
 
-The hook receives the configs resolved from the CLI/repo sources and the options `runReview` would have passed (logger, run id). Return any `McpConnection`: the read-only gate, the call budget, the result cap, and the summary footer all work the same on what it exposes. `createTransport` is the seam for a transport the bridge would not build itself; omit it and `connectMcpServers` builds the real stdio/http/sse transport for each config.
+The hook receives the configs resolved from the CLI/repo sources and the options `runReview` would have passed (logger, run id). Return any `McpConnection`: the read-only gate, the call budget, the result cap, and the summary footer all work the same on what it exposes. `createTransport` is the seam for a transport the bridge would not build itself — any `McpTransport` from `@earendil-works/pi-mcp`, such as the in-memory pair from `@earendil-works/pi-mcp/testing`; omit it and `connectMcpServers` builds the real stdio or streamable HTTP transport for each config.
 
 ## Diagnostics and OpenTelemetry
 
