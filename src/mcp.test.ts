@@ -1,17 +1,11 @@
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-// The low-level `Server` accepts raw JSON-schema tool definitions, which is what
-// the bridge consumes; `McpServer` would need zod schemas.
-// oxlint-disable-next-line typescript/no-deprecated
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
+  StdioTransport,
+  StreamableHttpTransport,
   type CallToolResult,
   type Tool as McpTool,
-} from '@modelcontextprotocol/sdk/types.js';
+} from '@earendil-works/pi-mcp';
 import { describe, expect, it, vi } from 'vitest';
+import { startFakeMcpServer, type FakeMcpServer } from '../tests/mcp-fake-server.js';
 import { mcpDiagnosticChannels, type McpDiagnosticContext } from './diagnostics.js';
 import type { Logger } from './logger.js';
 import type { McpServerConfig } from './mcp-config.js';
@@ -19,6 +13,7 @@ import {
   connectMcpServers,
   createMcpTransport,
   formatMcpToolResult,
+  inheritedMcpEnvironment,
   isReadOnlyMcpTool,
   MAX_MCP_IMAGE_BLOCKS,
   mcpToolName,
@@ -52,29 +47,11 @@ const TOOLS: McpTool[] = [
   },
 ];
 
-interface FakeServer {
-  // oxlint-disable-next-line typescript/no-deprecated
-  server: Server;
-  calls: { name: string; args: unknown }[];
-  transport: () => InMemoryTransport;
-}
-
-async function startFakeServer(
-  respond: (name: string, args: unknown) => CallToolResult = (name, args) => ({
-    content: [{ type: 'text', text: `${name}:${JSON.stringify(args)}` }],
-  }),
-): Promise<FakeServer> {
-  // oxlint-disable-next-line typescript/no-deprecated
-  const server = new Server({ name: 'fake', version: '1.0.0' }, { capabilities: { tools: {} } });
-  const calls: { name: string; args: unknown }[] = [];
-  server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: TOOLS }));
-  server.setRequestHandler(CallToolRequestSchema, (request) => {
-    calls.push({ name: request.params.name, args: request.params.arguments });
-    return respond(request.params.name, request.params.arguments);
-  });
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await server.connect(serverTransport);
-  return { server, calls, transport: () => clientTransport };
+function startFakeServer(
+  respond?: (name: string, args: unknown) => CallToolResult | Promise<CallToolResult>,
+  pageSize?: number,
+): Promise<FakeMcpServer> {
+  return startFakeMcpServer({ tools: TOOLS, onCall: respond, pageSize });
 }
 
 function config(name: string, overrides: Partial<McpServerConfig> = {}): McpServerConfig {
@@ -253,7 +230,33 @@ describe('formatMcpToolResult', () => {
   });
 });
 
+describe('inheritedMcpEnvironment', () => {
+  it('keeps only the safe subset and skips exported shell functions', () => {
+    expect(
+      inheritedMcpEnvironment({
+        PATH: '/usr/bin',
+        HOME: '/home/ci',
+        SHELL: '() { :; }',
+        CODE_REVIEW_GITLAB_TOKEN: 'secret',
+        ANTHROPIC_API_KEY: 'secret',
+      }),
+    ).toEqual(
+      process.platform === 'win32' ? { PATH: '/usr/bin' } : { PATH: '/usr/bin', HOME: '/home/ci' },
+    );
+  });
+});
+
 describe('createMcpTransport', () => {
+  it('builds a stdio transport that does not inherit the parent environment', () => {
+    const transport = createMcpTransport(config('docs', { args: ['--x'], env: { A: '1' } }));
+    expect(transport).toBeInstanceOf(StdioTransport);
+    const { options } = transport as StdioTransport;
+    expect(options.command).toBe('fake-server');
+    expect(options.args).toEqual(['--x']);
+    expect(options.inheritEnv).toBe(false);
+    expect(options.env).toEqual({ ...inheritedMcpEnvironment(), A: '1' });
+  });
+
   it('builds a streamable HTTP transport with the configured headers', () => {
     const transport = createMcpTransport(
       config('docs', {
@@ -263,32 +266,19 @@ describe('createMcpTransport', () => {
         headers: { Authorization: 'Bearer t' },
       }),
     );
-    expect(transport).toBeInstanceOf(StreamableHTTPClientTransport);
-    const built = transport as unknown as {
-      _url: URL;
-      _requestInit?: { headers?: Record<string, string> };
-    };
-    expect(built._url.href).toBe('https://docs.test/mcp');
-    expect(built._requestInit?.headers).toEqual({ Authorization: 'Bearer t' });
+    expect(transport).toBeInstanceOf(StreamableHttpTransport);
+    const built = transport as StreamableHttpTransport;
+    expect(built.url.href).toBe('https://docs.test/mcp');
+    expect(built.options.headers).toEqual({ Authorization: 'Bearer t' });
+    expect(built.options.openGetStream).toBe(false);
   });
 
-  it('builds an SSE transport with the configured headers', () => {
-    const transport = createMcpTransport(
-      config('docs', {
-        type: 'sse',
-        command: undefined,
-        url: 'https://docs.test/sse',
-        headers: { 'X-Key': 'k' },
-      }),
-    );
-    // oxlint-disable-next-line typescript/no-deprecated
-    expect(transport).toBeInstanceOf(SSEClientTransport);
-    const built = transport as unknown as {
-      _url: URL;
-      _requestInit?: { headers?: Record<string, string> };
-    };
-    expect(built._url.href).toBe('https://docs.test/sse');
-    expect(built._requestInit?.headers).toEqual({ 'X-Key': 'k' });
+  it('refuses a legacy SSE server with a hint to use streamable HTTP', () => {
+    expect(() =>
+      createMcpTransport(
+        config('docs', { type: 'sse', command: undefined, url: 'https://docs.test/sse' }),
+      ),
+    ).toThrow("legacy SSE transport is not supported; use the server's streamable HTTP endpoint");
   });
 
   it('rejects a transport type the bridge cannot build', () => {
@@ -308,7 +298,7 @@ describe('connectMcpServers', () => {
     const logger = captureLogger();
     const conn = await connectMcpServers([config('tracker')], {
       logger,
-      createTransport: fake.transport,
+      createTransport: () => fake.transport,
     });
     try {
       expect(conn.tools.map((t) => t.name)).toEqual(['mcp__tracker__get_issue']);
@@ -336,9 +326,40 @@ describe('connectMcpServers', () => {
     }
   });
 
+  it('lists every page of a paginated tools/list', async () => {
+    const fake = await startFakeServer(undefined, 1);
+    const conn = await connectMcpServers([config('tracker')], {
+      createTransport: () => fake.transport,
+    });
+    try {
+      expect(fake.listRequests).toBe(TOOLS.length);
+      expect(conn.tools.map((t) => t.name)).toEqual(['mcp__tracker__get_issue']);
+    } finally {
+      await conn.close();
+    }
+  });
+
+  it('reports a legacy SSE server as unavailable with a hint', async () => {
+    const logger = captureLogger();
+    const conn = await connectMcpServers(
+      [config('legacy', { type: 'sse', command: undefined, url: 'https://docs.test/sse' })],
+      { logger },
+    );
+    try {
+      expect(conn.servers[0]?.status).toBe('unavailable');
+      expect(logger.lines.warn).toEqual([
+        'MCP server "legacy" unavailable: legacy SSE transport is not supported; use the server\'s streamable HTTP endpoint',
+      ]);
+    } finally {
+      await conn.close();
+    }
+  });
+
   it('execute calls the server and returns text content', async () => {
     const fake = await startFakeServer();
-    const conn = await connectMcpServers([config('tracker')], { createTransport: fake.transport });
+    const conn = await connectMcpServers([config('tracker')], {
+      createTransport: () => fake.transport,
+    });
     try {
       const tool = conn.tools[0]!;
       const result = await tool.execute('call-1', { id: '42' });
@@ -355,7 +376,7 @@ describe('connectMcpServers', () => {
       content: [{ type: 'text', text: 'y'.repeat(500) }],
     }));
     const conn = await connectMcpServers([config('tracker')], {
-      createTransport: fake.transport,
+      createTransport: () => fake.transport,
       maxResultChars: 100,
     });
     try {
@@ -373,7 +394,9 @@ describe('connectMcpServers', () => {
       isError: true,
       content: [{ type: 'text', text: 'not found' }],
     }));
-    const conn = await connectMcpServers([config('tracker')], { createTransport: fake.transport });
+    const conn = await connectMcpServers([config('tracker')], {
+      createTransport: () => fake.transport,
+    });
     try {
       await expect(conn.tools[0]!.execute('call-1', { id: '1' })).rejects.toThrow('not found');
     } finally {
@@ -384,7 +407,7 @@ describe('connectMcpServers', () => {
   it('shares the call budget across tools and stops calling the server once exhausted', async () => {
     const fake = await startFakeServer();
     const conn = await connectMcpServers([config('tracker')], {
-      createTransport: fake.transport,
+      createTransport: () => fake.transport,
       callBudget: 2,
     });
     try {
@@ -402,7 +425,9 @@ describe('connectMcpServers', () => {
 
   it('close() is idempotent', async () => {
     const fake = await startFakeServer();
-    const conn = await connectMcpServers([config('tracker')], { createTransport: fake.transport });
+    const conn = await connectMcpServers([config('tracker')], {
+      createTransport: () => fake.transport,
+    });
     await conn.close();
     await expect(conn.close()).resolves.toBeUndefined();
   });
@@ -439,7 +464,7 @@ describe('connectMcpServers', () => {
     const conn = await connectMcpServers([config('broken'), config('tracker')], {
       createTransport: (cfg) => {
         if (cfg.name === 'broken') throw new Error('nope');
-        return fake.transport();
+        return fake.transport;
       },
     });
     try {
@@ -473,10 +498,10 @@ describe('connectMcpServers', () => {
       () =>
         new Promise<CallToolResult>((resolve) => {
           setTimeout(() => resolve({ content: [{ type: 'text', text: 'late' }] }), 200);
-        }) as unknown as CallToolResult,
+        }),
     );
     const conn = await connectMcpServers([config('slow', { timeoutMs: 20 })], {
-      createTransport: fake.transport,
+      createTransport: () => fake.transport,
     });
     try {
       await expect(conn.tools[0]!.execute('c1', { id: '1' })).rejects.toThrow(/timed out/i);
@@ -501,7 +526,7 @@ describe('connectMcpServers', () => {
     mcpDiagnosticChannels.call.asyncEnd.subscribe(onCall);
 
     const conn = await connectMcpServers([config('tracker')], {
-      createTransport: fake.transport,
+      createTransport: () => fake.transport,
       runId: 'run-diag-1',
     });
     try {
@@ -538,7 +563,9 @@ describe('connectMcpServers', () => {
     const onAsyncEnd = (ctx: McpDiagnosticContext) => seen.push(ctx);
     mcpDiagnosticChannels.call.asyncEnd.subscribe(onAsyncEnd);
 
-    const conn = await connectMcpServers([config('tracker')], { createTransport: fake.transport });
+    const conn = await connectMcpServers([config('tracker')], {
+      createTransport: () => fake.transport,
+    });
     try {
       await conn.tools[0]!.execute('call-1', { id: '42' });
     } finally {
@@ -570,8 +597,7 @@ describe('connectMcpServers', () => {
     const logger = captureLogger();
     const conn = await connectMcpServers([config('jira.internal'), config('jira_internal')], {
       logger,
-      createTransport: (cfg) =>
-        cfg.name === 'jira.internal' ? first.transport() : second.transport(),
+      createTransport: (cfg) => (cfg.name === 'jira.internal' ? first.transport : second.transport),
     });
     try {
       expect(conn.tools.map((t) => t.name)).toEqual(['mcp__jira_internal__get_issue']);
