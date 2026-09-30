@@ -215,7 +215,13 @@ export function formatMcpToolResult(
         texts.push(block.text);
         break;
       case 'image':
-        images.push({ type: 'image', data: block.data, mimeType: block.mimeType });
+        // pi-mcp does not validate content blocks, so a non-string `data` would
+        // slip past the size check below (an array has length 1).
+        if (typeof block.data === 'string' && typeof block.mimeType === 'string') {
+          images.push({ type: 'image', data: block.data, mimeType: block.mimeType });
+        } else {
+          texts.push('[invalid image content omitted]');
+        }
         break;
       case 'resource':
         if ('text' in block.resource) {
@@ -254,11 +260,13 @@ export function formatMcpToolResult(
   const kept: ImageContent[] = [];
   const notes: string[] = [];
   for (const image of images) {
-    if (kept.length >= MAX_MCP_IMAGE_BLOCKS || image.data.length > remaining) {
+    // The mime type reaches the provider too (`data:<mimeType>;base64,...`).
+    const size = image.data.length + image.mimeType.length;
+    if (kept.length >= MAX_MCP_IMAGE_BLOCKS || size > remaining) {
       notes.push(`[image omitted: ${image.data.length} bytes]`);
       continue;
     }
-    remaining -= image.data.length;
+    remaining -= size;
     kept.push(image);
   }
   if (notes.length > 0) {
