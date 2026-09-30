@@ -211,6 +211,35 @@ describe('formatMcpToolResult', () => {
     ]);
   });
 
+  it('drops image blocks whose data or mimeType is not a string', () => {
+    const content = formatMcpToolResult(
+      {
+        content: [
+          { type: 'image', data: ['A'.repeat(1_000_000)], mimeType: 'image/png' },
+          { type: 'image', data: {}, mimeType: 'image/png' },
+          { type: 'image', data: 'AAAA', mimeType: 42 },
+          { type: 'image', data: 'BBBB', mimeType: 'image/png' },
+        ] as unknown as CallToolResult['content'],
+      },
+      200,
+    );
+    expect(content).toEqual([
+      {
+        type: 'text',
+        text: '[invalid image content omitted]\n[invalid image content omitted]\n[invalid image content omitted]',
+      },
+      { type: 'image', data: 'BBBB', mimeType: 'image/png' },
+    ]);
+  });
+
+  it('counts the image mimeType against the budget', () => {
+    const content = formatMcpToolResult(
+      { content: [{ type: 'image', data: 'A', mimeType: 'x'.repeat(1_000_000) }] },
+      100,
+    );
+    expect(content).toEqual([{ type: 'text', text: '[image omitted: 1 bytes]' }]);
+  });
+
   it('keeps at most MAX_MCP_IMAGE_BLOCKS images however small they are', () => {
     const content = formatMcpToolResult(
       {
