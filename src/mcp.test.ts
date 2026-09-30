@@ -105,8 +105,12 @@ describe('mcpToolName', () => {
     expect(mcpToolName('gitlab', 'get_issue')).toBe('mcp__gitlab__get_issue');
   });
 
-  it('replaces characters outside [A-Za-z0-9_-]', () => {
+  it('replaces characters outside [A-Za-z0-9_]', () => {
     expect(mcpToolName('my server.v2', 'do:it')).toBe('mcp__my_server_v2__do_it');
+  });
+
+  it('replaces `-`, so the bridged name is the codemode identifier', () => {
+    expect(mcpToolName('productive-mcp', 'get-task')).toBe('mcp__productive_mcp__get_task');
   });
 });
 

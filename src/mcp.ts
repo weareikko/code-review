@@ -96,11 +96,15 @@ export function isReadOnlyMcpTool(tool: Pick<McpTool, 'annotations'>): boolean {
   return tool.annotations?.readOnlyHint === true && tool.annotations?.destructiveHint !== true;
 }
 
+// `-` is replaced too: codemode calls a tool as `tools.<identifier>`, where
+// pi-codemode maps every non-identifier character to `_` and the first tool
+// wins. Keeping bridged names valid JS identifiers makes the collision drop in
+// `connectMcpServers` cover both exposures.
 function safeSegment(value: string): string {
-  return value.replace(/[^A-Za-z0-9_-]/g, '_');
+  return value.replace(/[^A-Za-z0-9_]/g, '_');
 }
 
-/** `mcp__<server>__<tool>`, with characters outside `[A-Za-z0-9_-]` replaced. */
+/** `mcp__<server>__<tool>`, with characters outside `[A-Za-z0-9_]` replaced. */
 export function mcpToolName(server: string, tool: string): string {
   return `mcp__${safeSegment(server)}__${safeSegment(tool)}`;
 }
@@ -452,7 +456,7 @@ export async function connectMcpServers(
   };
   const connected = await Promise.all(configs.map((config) => connectOne(config, resolved)));
 
-  // `mcpToolName` sanitises both segments, so two distinct servers (`jira.internal`
+  // `mcpToolName` sanitises both segments, so two distinct servers (`jira-internal`
   // and `jira_internal`, say) can produce the same bridged name — which would let
   // a lower-trust server shadow a trusted one in the agent's tool dispatch. First
   // one wins; a later collision is dropped with a warning and removed from the

@@ -194,6 +194,37 @@ describe('createMcpCodemodeTool', () => {
     expect(fake.calls).toHaveLength(0);
   });
 
+  it('keeps servers named `a-b` and `a_b` from sharing one script identifier', async () => {
+    // pi-codemode calls `tools.<identifier>` and the first tool wins an
+    // identifier; the bridged names map `-` to `_`, so the collision drop in
+    // connectMcpServers keeps only the first server's tool.
+    const first = await startFakeMcpServer({
+      tools: [TOOLS[0]!],
+      onCall: () => ({ content: [{ type: 'text', text: 'FROM a-b' }] }),
+    });
+    const second = await startFakeMcpServer({
+      tools: [TOOLS[0]!],
+      onCall: () => ({ content: [{ type: 'text', text: 'FROM a_b' }] }),
+    });
+    const conn = await connectMcpServers(
+      [
+        { ...CONFIG, name: 'a-b' },
+        { ...CONFIG, name: 'a_b' },
+      ],
+      { createTransport: (cfg) => (cfg.name === 'a-b' ? first.transport : second.transport) },
+    );
+    open.push(conn);
+
+    expect(conn.tools.map((t) => t.name)).toEqual(['mcp__a_b__get_issue']);
+    expect(conn.servers.map((s) => s.tools)).toEqual([['get_issue'], []]);
+    const tool = createMcpCodemodeTool(conn.tools);
+    expect(tool.description.match(/mcp__a_b__get_issue\(/g)).toHaveLength(1);
+    expect(textOf(await run(tool, `return tools.mcp__a_b__get_issue({ id: '1' });`))).toBe(
+      'FROM a-b',
+    );
+    expect(second.calls).toHaveLength(0);
+  });
+
   it('reports each nested call to the observer', async () => {
     const { conn } = await connect((name) =>
       name === 'get_doc'
