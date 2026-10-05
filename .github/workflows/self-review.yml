@@ -50,6 +50,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           CODE_REVIEW_SKILLS: code-review
+          # Dogfood the review-outcome labels: every self-reviewed PR ends with
+          # one of these labels, and the other one is removed.
+          CODE_REVIEW_LABELS_ON_FINDINGS: 'review: changes requested'
+          CODE_REVIEW_LABELS_ON_CLEAN: 'review: clean'
           # Dogfood one marketplace-sourced MCP server: `github` comes from
           # Anthropic's public plugin marketplace, pinned to a commit so the
           # definition CI connects to cannot change under us. It overrides the
