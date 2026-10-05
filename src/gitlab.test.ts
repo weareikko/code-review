@@ -391,3 +391,52 @@ describe('GitLab merge request notes endpoints', () => {
     expect(init.body).toBe(JSON.stringify({ body: 'updated' }));
   });
 });
+
+describe('GitLab merge request labels endpoint', () => {
+  it('PUTs add_labels and remove_labels as comma-separated strings on the MR', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ iid: 12 })));
+    const client = new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+    });
+
+    await expect(
+      client.updateMergeRequestLabels(
+        'group/repo',
+        '12',
+        ['mr::needs-review'],
+        ['mr::change-requested', 'bot::fix'],
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'https://gitlab.example.com/api/v4/projects/group%2Frepo/merge_requests/12',
+    );
+    const init = fetchImpl.mock.calls[0][1];
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body)).toEqual({
+      add_labels: 'mr::needs-review',
+      remove_labels: 'mr::change-requested,bot::fix',
+    });
+    expect(init.headers).toMatchObject({
+      'Content-Type': 'application/json',
+      'PRIVATE-TOKEN': 't',
+    });
+  });
+
+  it('omits an empty label list from the body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({ iid: 12 })));
+    const client = new GitLabClient({
+      gitlabUrl: 'https://gitlab.example.com',
+      token: 't',
+      fetchImpl,
+    });
+
+    await client.updateMergeRequestLabels('group/repo', '12', [], ['mr::change-requested']);
+
+    expect(JSON.parse(fetchImpl.mock.calls[0][1].body)).toEqual({
+      remove_labels: 'mr::change-requested',
+    });
+  });
+});

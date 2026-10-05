@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   countPostedBySeverity,
+  formatLabelChange,
   formatMcpFooter,
   formatPerModelUsage,
   formatSkillsFooter,
   formatUsageLine,
+  resolveLabelChange,
   withHttpStamping,
 } from './cli.js';
 import type { DiagnosticContext } from './diagnostics.js';
@@ -365,5 +367,50 @@ describe('formatMcpFooter', () => {
       },
     ];
     expect(formatMcpFooter(servers)).toBe('MCP: local (1 call), inrepo (2 calls)');
+  });
+});
+
+describe('resolveLabelChange', () => {
+  const config = {
+    labelsOnFindings: ['mr::change-requested'],
+    labelsOnClean: ['mr::needs-review'],
+  };
+
+  it('adds the findings set and removes the clean set when fresh comments were posted', () => {
+    expect(resolveLabelChange(config, true)).toEqual({
+      outcome: 'findings',
+      add: ['mr::change-requested'],
+      remove: ['mr::needs-review'],
+    });
+  });
+
+  it('adds the clean set and removes the findings set when nothing new was posted', () => {
+    expect(resolveLabelChange(config, false)).toEqual({
+      outcome: 'clean',
+      add: ['mr::needs-review'],
+      remove: ['mr::change-requested'],
+    });
+  });
+
+  it('still removes the other set when only one set is configured', () => {
+    expect(
+      resolveLabelChange({ labelsOnFindings: ['bot::fix'], labelsOnClean: [] }, false),
+    ).toEqual({ outcome: 'clean', add: [], remove: ['bot::fix'] });
+  });
+
+  it('returns null when neither set is configured', () => {
+    expect(resolveLabelChange({ labelsOnFindings: [], labelsOnClean: [] }, true)).toBeNull();
+  });
+});
+
+describe('formatLabelChange', () => {
+  it('lists the added and removed labels', () => {
+    expect(formatLabelChange({ outcome: 'findings', add: ['a', 'b'], remove: ['c'] })).toBe(
+      'add [a, b]; remove [c]',
+    );
+  });
+
+  it('omits an empty side', () => {
+    expect(formatLabelChange({ outcome: 'clean', add: [], remove: ['c'] })).toBe('remove [c]');
   });
 });

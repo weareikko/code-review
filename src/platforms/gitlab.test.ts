@@ -57,6 +57,9 @@ function routedFetch(): { fetchImpl: ReturnType<typeof vi.fn>; calls: Request[] 
     if (method === 'GET' && url.includes('/discussions')) {
       return new Response(JSON.stringify([]), { headers: { 'x-next-page': '' } });
     }
+    if (method === 'PUT' && url.endsWith('/merge_requests/7')) {
+      return new Response(JSON.stringify({ iid: 7 }));
+    }
     if (method === 'POST' && url.includes('/discussions')) {
       return new Response(JSON.stringify({ id: 100 }));
     }
@@ -193,5 +196,22 @@ describe('GitLabPlatform', () => {
     expect(post?.url).toBe(
       'https://gitlab.example.com/api/v4/projects/group%2Frepo/merge_requests/7/notes',
     );
+  });
+
+  it('updateLabels adds and removes labels in one MR update', async () => {
+    const { fetchImpl } = routedFetch();
+    vi.stubGlobal('fetch', fetchImpl);
+    const platform = new GitLabPlatform(makeConfig());
+
+    await platform.updateLabels(['mr::change-requested'], ['mr::needs-review']);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://gitlab.example.com/api/v4/projects/group%2Frepo/merge_requests/7');
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body as string)).toEqual({
+      add_labels: 'mr::change-requested',
+      remove_labels: 'mr::needs-review',
+    });
   });
 });

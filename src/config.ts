@@ -58,6 +58,8 @@ export const RESERVED_ENV_SUFFIXES = [
   'DISABLE_MCP',
   'MCP_ENV',
   'MCP_DISCOVERY',
+  'LABELS_ON_FINDINGS',
+  'LABELS_ON_CLEAN',
 ] as const;
 
 const CODE_REVIEW_PREFIX = 'CODE_REVIEW_';
@@ -249,6 +251,20 @@ export interface Config {
    * contributors you trust.
    */
   mcpDiscovery: boolean;
+  /**
+   * Labels added to the MR/PR when the review published at least one fresh
+   * (non-duplicate) comment; the {@link Config.labelsOnClean} set is removed at
+   * the same time. Sourced from `--labels-on-findings` /
+   * `CODE_REVIEW_LABELS_ON_FINDINGS` (comma-separated). Empty by default.
+   */
+  labelsOnFindings: string[];
+  /**
+   * Labels added to the MR/PR when the review published no fresh comment; the
+   * {@link Config.labelsOnFindings} set is removed at the same time. Sourced from
+   * `--labels-on-clean` / `CODE_REVIEW_LABELS_ON_CLEAN` (comma-separated). Empty
+   * by default. With both sets empty, labels are never touched.
+   */
+  labelsOnClean: string[];
 }
 
 export type ParsedArgs = Record<string, string | boolean | string[]>;
@@ -511,6 +527,18 @@ function resolveModelPool(args: ParsedArgs, env: NodeJS.ProcessEnv): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Resolve a comma-separated label list from its flag (preferred) or env var.
+ * Entries are trimmed and empty entries dropped; `[]` when unset.
+ */
+function resolveLabels(flag: unknown, envValue: string | undefined): string[] {
+  const raw = (typeof flag === 'string' && flag.length > 0 ? flag : envValue) ?? '';
+  return raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
 function resolveGitLabToken(
   args: ParsedArgs,
   env: NodeJS.ProcessEnv,
@@ -758,6 +786,8 @@ export function resolveConfig(argv = process.argv.slice(2), env = process.env): 
     disableMcp: resolveDisableMcp(args, env),
     mcpEnv: resolveMcpEnv(args, env),
     mcpDiscovery: resolveMcpDiscovery(args, env),
+    labelsOnFindings: resolveLabels(args.labelsOnFindings, env.CODE_REVIEW_LABELS_ON_FINDINGS),
+    labelsOnClean: resolveLabels(args.labelsOnClean, env.CODE_REVIEW_LABELS_ON_CLEAN),
   };
 }
 
@@ -849,6 +879,17 @@ export function validateConfig(config: Config): void {
 
   if (!POSTING_MODES.includes(config.postingMode)) {
     throw new ConfigError(`--posting-mode must be one of: ${POSTING_MODES.join(', ')}`);
+  }
+
+  const clean = new Set(config.labelsOnClean ?? []);
+  const overlap = (config.labelsOnFindings ?? []).filter((label) => clean.has(label));
+  if (overlap.length > 0) {
+    throw new ConfigError(
+      `--labels-on-findings and --labels-on-clean share label(s): ${overlap.join(', ')}.`,
+      {
+        hint: 'Each review outcome adds its own labels and removes the other set, so a label cannot belong to both.',
+      },
+    );
   }
 }
 

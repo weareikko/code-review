@@ -72,6 +72,11 @@ export interface ReviewPlatform {
     options: UpsertSummaryOptions,
   ): Promise<SummaryResult>;
   /**
+   * Add `add` and remove `remove` on the MR/PR labels. Removing a label that is
+   * not present is not an error.
+   */
+  updateLabels(add: string[], remove: string[]): Promise<void>;
+  /**
    * The most recent HTTP response this platform issued, for telemetry stamping.
    * Returns `undefined` until the first request completes. Each request reports
    * a fresh object so a phase can compare identity and stamp only its own call.

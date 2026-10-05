@@ -73,6 +73,10 @@ export class GitLabPlatform implements ReviewPlatform {
     return postGeneratedComments(this.client, this.project, this.mr, generated, mode);
   }
 
+  updateLabels(add: string[], remove: string[]): Promise<void> {
+    return this.client.updateMergeRequestLabels(this.project, this.mr, add, remove);
+  }
+
   upsertSummary(
     summary: string,
     discussions: Discussion[],

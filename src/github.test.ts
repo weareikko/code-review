@@ -185,6 +185,53 @@ describe('GitHub write endpoints', () => {
   });
 });
 
+describe('GitHub issue labels endpoints', () => {
+  it('POSTs labels to the issue labels endpoint', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify([])));
+    const client = new GitHubClient({ token: 't', fetchImpl });
+
+    await expect(
+      client.addIssueLabels('o', 'r', 12, ['mr::change-requested', 'bot']),
+    ).resolves.toBeUndefined();
+
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://api.github.com/repos/o/r/issues/12/labels');
+    const init = fetchImpl.mock.calls[0][1];
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe(JSON.stringify({ labels: ['mr::change-requested', 'bot'] }));
+  });
+
+  it('DELETEs one label with its name URL-encoded', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify([])));
+    const client = new GitHubClient({ token: 't', fetchImpl });
+
+    await client.removeIssueLabel('o', 'r', 12, 'needs review/bot');
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      'https://api.github.com/repos/o/r/issues/12/labels/needs%20review%2Fbot',
+    );
+    expect(fetchImpl.mock.calls[0][1].method).toBe('DELETE');
+  });
+
+  it('ignores a 404 when the label is not on the issue', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValue(new Response('{"message":"Label does not exist"}', { status: 404 }));
+    const client = new GitHubClient({ token: 't', fetchImpl });
+
+    await expect(client.removeIssueLabel('o', 'r', 12, 'absent')).resolves.toBeUndefined();
+  });
+
+  it('rethrows any other label removal failure', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('forbidden', { status: 403 }));
+    const client = new GitHubClient({ token: 't', fetchImpl });
+
+    await expect(client.removeIssueLabel('o', 'r', 12, 'x')).rejects.toMatchObject({
+      name: 'GitHubApiError',
+      status: 403,
+    });
+  });
+});
+
 function graphqlThreadsResponse(
   nodes: { isResolved: boolean; isOutdated?: boolean; ids: number[] }[],
   pageInfo: { hasNextPage: boolean; endCursor: string | null } = {

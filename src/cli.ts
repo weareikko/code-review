@@ -111,6 +111,14 @@ Options:
                           (env: CODE_REVIEW_VERIFY_MODEL)
   --posting-mode <mode>   direct (sequential discussions) or draft (atomic bulk publish)
                           (default: direct)
+  --labels-on-findings <labels>
+                          Comma-separated labels added to the MR/PR when the review posts at
+                          least one new comment; the --labels-on-clean set is removed.
+                          (env: CODE_REVIEW_LABELS_ON_FINDINGS)
+  --labels-on-clean <labels>
+                          Comma-separated labels added to the MR/PR when the review posts no
+                          new comment; the --labels-on-findings set is removed.
+                          (env: CODE_REVIEW_LABELS_ON_CLEAN)
   --review-file <path>    Raw code-review output file (default: code-review.md)
   --output <path>         Generated payload artifact (default: review-comments.json)
   --cwd <path>            Working directory (default: process.cwd())
@@ -413,6 +421,12 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
       if (config.postSummary && parsed.summary) {
         console.log('Summary note generated but not posted (posting disabled).');
       }
+      const dryRunLabels = resolveLabelChange(config, newCount > 0);
+      if (dryRunLabels) {
+        console.log(
+          `Would set ${dryRunLabels.outcome} labels: ${formatLabelChange(dryRunLabels)} (posting disabled).`,
+        );
+      }
       runContext.posted = 0;
       return { generated, posted: 0, usage, summary: null };
     }
@@ -511,8 +525,60 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
     runContext.draftsPublishFailed = draftsPublishFailed;
     if (posted > 0) runContext.postedBySeverity = countPostedBySeverity(generated);
 
+    // Labels reflect the outcome only once the review succeeded and its comments
+    // are published; any earlier failure has already thrown, so a failed review
+    // never looks clean. A label failure (e.g. a token without label permission)
+    // warns instead of failing a review that is already on the MR.
+    const labelChange = resolveLabelChange(config, posted > 0);
+    if (labelChange) {
+      try {
+        await platform.updateLabels(labelChange.add, labelChange.remove);
+        runContext.labelsOutcome = labelChange.outcome;
+        console.log(`Set ${labelChange.outcome} labels: ${formatLabelChange(labelChange)}.`);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        console.warn(
+          `[code-review] Could not set ${labelChange.outcome} labels (${formatLabelChange(labelChange)}) — not failing the review. (${detail})`,
+        );
+      }
+    }
+
     return { generated, posted, usage, summary };
   });
+}
+
+/** The labels a review outcome adds and the opposite set it removes. */
+export interface LabelChange {
+  outcome: 'findings' | 'clean';
+  add: string[];
+  remove: string[];
+}
+
+/**
+ * Pick the label change for a review outcome: `findings` when the review
+ * published at least one fresh comment, `clean` otherwise. The outcome's labels
+ * are added and the other outcome's labels removed, since GitLab CE does not
+ * enforce scoped-label exclusivity. Returns `null` when neither label set is
+ * configured, so the feature makes no API call unless opted in.
+ */
+export function resolveLabelChange(
+  config: Pick<Config, 'labelsOnFindings' | 'labelsOnClean'>,
+  hasFreshComments: boolean,
+): LabelChange | null {
+  const onFindings = config.labelsOnFindings ?? [];
+  const onClean = config.labelsOnClean ?? [];
+  if (onFindings.length === 0 && onClean.length === 0) return null;
+  return hasFreshComments
+    ? { outcome: 'findings', add: onFindings, remove: onClean }
+    : { outcome: 'clean', add: onClean, remove: onFindings };
+}
+
+/** Render a label change for logs, e.g. `add [mr::needs-review]; remove [mr::change-requested]`. */
+export function formatLabelChange(change: LabelChange): string {
+  const parts: string[] = [];
+  if (change.add.length > 0) parts.push(`add [${change.add.join(', ')}]`);
+  if (change.remove.length > 0) parts.push(`remove [${change.remove.join(', ')}]`);
+  return parts.join('; ');
 }
 
 function zeroReviewUsage(model: string, thinkingLevel: ThinkingLevel): ReviewUsage {

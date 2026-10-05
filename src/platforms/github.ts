@@ -376,6 +376,15 @@ export class GitHubPlatform implements ReviewPlatform {
     }
   }
 
+  // GitHub has no atomic add+remove call: remove the other outcome's labels
+  // first, then add this outcome's, so no intermediate state carries both sets.
+  async updateLabels(add: string[], remove: string[]): Promise<void> {
+    for (const label of remove) {
+      await this.client.removeIssueLabel(this.owner, this.repo, this.pull, label);
+    }
+    if (add.length > 0) await this.client.addIssueLabels(this.owner, this.repo, this.pull, add);
+  }
+
   async upsertSummary(
     summary: string,
     discussions: Discussion[],

@@ -109,6 +109,11 @@ function makeGitHubBackend() {
   // Ids of review comments whose thread is resolved. REST omits resolution, so
   // tests seed this to model GitHub's GraphQL `reviewThreads.isResolved`.
   const resolvedCommentIds = new Set<number>();
+  // PR labels, plus every label write in arrival order. `failLabels` makes each
+  // label write answer 403 to model a token without label permission.
+  const labels = new Set<string>();
+  const labelRequests: string[] = [];
+  const labelState = { failLabels: false };
   let nextId = 1000;
   const jsonResponse = (value: unknown): Response =>
     new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
@@ -166,6 +171,19 @@ function makeGitHubBackend() {
       issueComments.push(comment);
       return jsonResponse(comment);
     }
+    if (path.includes('/issues/1/labels')) {
+      labelRequests.push(`${method} ${decodeURIComponent(path)}`);
+      if (labelState.failLabels) return new Response('forbidden', { status: 403 });
+      if (method === 'POST') {
+        for (const label of bodyJson.labels as string[]) labels.add(label);
+        return jsonResponse([...labels].map((name) => ({ name })));
+      }
+      if (method === 'DELETE') {
+        const name = decodeURIComponent(path.slice(path.lastIndexOf('/') + 1));
+        if (!labels.delete(name)) return new Response('Label does not exist', { status: 404 });
+        return jsonResponse([...labels].map((label) => ({ name: label })));
+      }
+    }
     if (method === 'PATCH' && path.includes('/issues/comments/')) {
       const id = Number(path.slice(path.lastIndexOf('/') + 1));
       const found = issueComments.find((c) => c.id === id);
@@ -175,7 +193,16 @@ function makeGitHubBackend() {
     return new Response('not found', { status: 404 });
   });
 
-  return { fetchImpl, reviewComments, issueComments, reviewsPosted, resolvedCommentIds };
+  return {
+    fetchImpl,
+    reviewComments,
+    issueComments,
+    reviewsPosted,
+    resolvedCommentIds,
+    labels,
+    labelRequests,
+    labelState,
+  };
 }
 
 function makeConfig(cwd: string, overrides: Partial<Config> = {}): Config {
@@ -442,5 +469,81 @@ describe('run() over GitHub with an unresolved prior finding', () => {
     // The resolved finding is gone — no stale "Still open" reference to it.
     expect(backend.issueComments[0].body).not.toContain('Still open from earlier reviews');
     expect(backend.issueComments[0].body).not.toContain('addressed');
+  });
+});
+
+describe('run() over GitHub with review-outcome labels', () => {
+  const labelConfig = {
+    forceReview: true,
+    labelsOnFindings: ['mr::change-requested'],
+    labelsOnClean: ['mr::needs-review'],
+  };
+
+  it('sets the findings labels after posting, then the clean labels when nothing new posts', async () => {
+    const backend = makeGitHubBackend();
+    backend.labels.add('mr::needs-review');
+    vi.stubGlobal('fetch', backend.fetchImpl);
+
+    // Run 1: one fresh comment posts, so the findings set replaces the clean set.
+    const first = await run(makeConfig(cwd, labelConfig));
+    expect(first.posted).toBe(1);
+    expect([...backend.labels]).toEqual(['mr::change-requested']);
+    expect(backend.labelRequests).toEqual([
+      'DELETE /repos/octo/repo/issues/1/labels/mr::needs-review',
+      'POST /repos/octo/repo/issues/1/labels',
+    ]);
+
+    // Run 2: the same finding is a duplicate and is not reposted, so the review
+    // counts as clean and the findings label is removed.
+    const second = await run(makeConfig(cwd, labelConfig));
+    expect(second.posted).toBe(0);
+    expect([...backend.labels]).toEqual(['mr::needs-review']);
+  });
+
+  it('makes no label call when neither label set is configured', async () => {
+    const backend = makeGitHubBackend();
+    vi.stubGlobal('fetch', backend.fetchImpl);
+
+    await run(makeConfig(cwd, { forceReview: true }));
+
+    expect(backend.labelRequests).toEqual([]);
+  });
+
+  it('logs the label change but makes no label call in dry-run', async () => {
+    const backend = makeGitHubBackend();
+    vi.stubGlobal('fetch', backend.fetchImpl);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await run(makeConfig(cwd, { ...labelConfig, dryRun: true }));
+
+    expect(backend.labelRequests).toEqual([]);
+    expect(log).toHaveBeenCalledWith(
+      'Would set findings labels: add [mr::change-requested]; remove [mr::needs-review] (posting disabled).',
+    );
+  });
+
+  it('warns without failing the review when the label update fails', async () => {
+    const backend = makeGitHubBackend();
+    backend.labelState.failLabels = true;
+    vi.stubGlobal('fetch', backend.fetchImpl);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await run(makeConfig(cwd, labelConfig));
+
+    expect(result.posted).toBe(1);
+    expect(backend.labelRequests).toHaveLength(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Could not set findings labels (add [mr::change-requested]'),
+    );
+  });
+
+  it('leaves labels untouched when the review fails', async () => {
+    const backend = makeGitHubBackend();
+    vi.stubGlobal('fetch', backend.fetchImpl);
+    runReviewMock.mockRejectedValueOnce(new Error('provider exploded'));
+
+    await expect(run(makeConfig(cwd, labelConfig))).rejects.toThrow('provider exploded');
+
+    expect(backend.labelRequests).toEqual([]);
   });
 });

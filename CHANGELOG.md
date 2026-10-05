@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Review-outcome labels: `--labels-on-findings` / `CODE_REVIEW_LABELS_ON_FINDINGS` and `--labels-on-clean` / `CODE_REVIEW_LABELS_ON_CLEAN` set MR/PR labels after a successful review, depending on whether it posted new comments, and remove the other set ([#161]).
+
 ## [0.9.8] - 2026-09-29
 
 ### Added
@@ -161,6 +165,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [0.8.6]: https://github.com/weareikko/code-review/compare/0.8.5...0.8.6
 [0.8.5]: https://github.com/weareikko/code-review/compare/0.8.4...0.8.5
 [0.8.4]: https://github.com/weareikko/code-review/compare/0.8.3...0.8.4
+[#161]: https://github.com/weareikko/code-review/pull/161
 [#157]: https://github.com/weareikko/code-review/pull/157
 [#156]: https://github.com/weareikko/code-review/pull/156
 [#155]: https://github.com/weareikko/code-review/pull/155
