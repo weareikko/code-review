@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-10-05
+
 ### Added
 
 - Review-outcome labels: `--labels-on-findings` / `CODE_REVIEW_LABELS_ON_FINDINGS` and `--labels-on-clean` / `CODE_REVIEW_LABELS_ON_CLEAN` set MR/PR labels after a successful review, depending on whether it posted new comments, and remove the other set ([#161]).
@@ -152,7 +154,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING**: renamed the product identity from `gitlab-review` to `code-review` to reflect dual-platform support — the npm package (`@weareikko/code-review`), the CLI command (`code-review`, run via `bin/code-review.js`), the review footer name, the `diagnostics_channel`/OpenTelemetry name prefix (`@weareikko/code-review:*`), and the hidden dedup/summary/fingerprint marker prefixes (`code-review:`) all change; readers stay backward-compatible (summary notes and fingerprints posted under the old identity are still matched and deduplicated, so the first post-upgrade run upserts rather than duplicating); the GitHub repository moved `ikko-dev/gitlab-review → weareikko/code-review` (org `ikko-dev → weareikko` and repository name `gitlab-review → code-review`), and the reviewed-commit footer reader still matches footers written under the former org and repository/product name ([#121]).
 - **BREAKING**: renamed the product-scoped environment-variable prefix `GITLAB_REVIEW_* → CODE_REVIEW_*` (e.g. `GITLAB_REVIEW_MODEL → CODE_REVIEW_MODEL`, and the namespacing shim that de-prefixes provider/infra vars in shared CI) with no backward compatibility — the old names are no longer read, so existing CI configs must rename their variables. Unprefixed GitLab tokens (`GITLAB_TOKEN`, `CI_JOB_TOKEN`, …) are unchanged ([#121]).
 
-[Unreleased]: https://github.com/weareikko/code-review/compare/0.9.8...HEAD
+[Unreleased]: https://github.com/weareikko/code-review/compare/0.9.9...HEAD
+[0.9.9]: https://github.com/weareikko/code-review/compare/0.9.8...0.9.9
 [0.9.8]: https://github.com/weareikko/code-review/compare/0.9.7...0.9.8
 [0.9.7]: https://github.com/weareikko/code-review/compare/0.9.6...0.9.7
 [0.9.6]: https://github.com/weareikko/code-review/compare/0.9.5...0.9.6
