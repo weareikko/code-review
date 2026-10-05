@@ -35,7 +35,7 @@ The MCP bridge (`src/mcp.ts`) traces its connect / list-tools / call-tool operat
 
 When `--posting-mode draft` is used, the `scm.post_comments` payload also exposes `draftsAbandoned`, `draftsCreated`, `draftsDeletedPrePublish`, and `draftsPublished` counters describing the draft lifecycle within the run.
 
-The `git.get_merge_diff` payload exposes `diffFilesChanged`, `diffLinesAdded`, and `diffLinesRemoved`; the source-control (`scm.*`) read phases expose `httpRequestMethod`, `httpUrl`, `httpStatusCode`, `httpResponseBodySize`, and `serverAddress` (no secrets — the token is sent in a request header, not the URL); and the top-level `run` payload exposes `postedBySeverity`, a per-severity breakdown of posted comments.
+The `git.get_merge_diff` payload exposes `diffFilesChanged`, `diffLinesAdded`, and `diffLinesRemoved`; the source-control (`scm.*`) read phases expose `httpRequestMethod`, `httpUrl`, `httpStatusCode`, `httpResponseBodySize`, and `serverAddress` (no secrets — the token is sent in a request header, not the URL); and the top-level `run` payload exposes `postedBySeverity`, a per-severity breakdown of posted comments, and `labelsOutcome` (`findings` or `clean`, the OTel `code_review.labels.outcome` attribute) when [review-outcome labels](./configuration.md#review-outcome-labels) were applied.
 
 The `reviewer.run` payload exposes a `usage` field (`{ model, tokens, cost, mcp, skills }`, `mcp` being a per-server `{ name, status, calls }` list and `skills` a per-skill `{ name, reads }` list) once the agent has returned. The same `usage` is forwarded onto the top-level `run` payload so a subscriber on `run:asyncEnd` sees the final token, cost, and MCP call totals for the review.
 

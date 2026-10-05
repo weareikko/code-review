@@ -1380,6 +1380,7 @@ const NUMERIC_RESULT_ATTRIBUTES = [
 // semantic conventions (http.request.method, url.full, server.address).
 const STRING_RESULT_ATTRIBUTES = [
   ['summaryAction', 'code_review.summary.action'],
+  ['labelsOutcome', 'code_review.labels.outcome'],
   ['httpRequestMethod', 'http.request.method'],
   ['httpUrl', 'url.full'],
   ['serverAddress', 'server.address'],

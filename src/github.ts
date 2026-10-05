@@ -361,6 +361,35 @@ export class GitHubClient {
     );
   }
 
+  /** Add labels to an issue or pull request (`POST /issues/{n}/labels`). */
+  async addIssueLabels(
+    owner: string,
+    repo: string,
+    issue: number,
+    labels: string[],
+  ): Promise<void> {
+    await this.request(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${issue}/labels`,
+      { method: 'POST', body: JSON.stringify({ labels }) },
+    );
+  }
+
+  /**
+   * Remove one label from an issue or pull request. GitHub answers 404 when the
+   * label is not on it; that is the desired end state, so it is not an error.
+   */
+  async removeIssueLabel(owner: string, repo: string, issue: number, label: string): Promise<void> {
+    try {
+      await this.request(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${issue}/labels/${encodeURIComponent(label)}`,
+        { method: 'DELETE' },
+      );
+    } catch (error) {
+      if (error instanceof GitHubApiError && error.status === 404) return;
+      throw error;
+    }
+  }
+
   getCurrentUser(): Promise<GitHubUser> {
     return this.request('/user');
   }

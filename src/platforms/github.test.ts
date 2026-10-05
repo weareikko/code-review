@@ -308,6 +308,12 @@ function routedFetch(
     if (method === 'PATCH' && url.includes('/issues/comments/')) {
       return new Response(JSON.stringify({ id: 99, body: 'x' }));
     }
+    if (method === 'POST' && url.endsWith('/issues/7/labels')) {
+      return new Response(JSON.stringify([]));
+    }
+    if (method === 'DELETE' && url.endsWith('/issues/7/labels/present')) {
+      return new Response(JSON.stringify([]));
+    }
     return new Response('not found', { status: 404 });
   });
   return { fetchImpl, calls };
@@ -510,6 +516,22 @@ describe('GitHubPlatform', () => {
     expect(result).toEqual({ action: 'updated', noteId: 99 });
     const patch = calls.find((c) => c.method === 'PATCH');
     expect(patch?.url).toBe('https://api.github.com/repos/octo/repo/issues/comments/99');
+  });
+
+  it('updateLabels removes the other set (ignoring absent labels) before adding', async () => {
+    const { fetchImpl, calls } = routedFetch();
+    await makePlatform(fetchImpl).updateLabels(['mr::change-requested'], ['present', 'absent']);
+    expect(calls.map((c) => `${c.method} ${new URL(c.url).pathname}`)).toEqual([
+      'DELETE /repos/octo/repo/issues/7/labels/present',
+      'DELETE /repos/octo/repo/issues/7/labels/absent',
+      'POST /repos/octo/repo/issues/7/labels',
+    ]);
+  });
+
+  it('updateLabels makes no add call when there is nothing to add', async () => {
+    const { fetchImpl, calls } = routedFetch();
+    await makePlatform(fetchImpl).updateLabels([], ['present']);
+    expect(calls.map((c) => c.method)).toEqual(['DELETE']);
   });
 });
 

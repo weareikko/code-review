@@ -311,6 +311,29 @@ export class GitLabClient {
     );
   }
 
+  /**
+   * Add and remove MR labels in one `PUT`. GitLab applies `add_labels` and
+   * `remove_labels` against the current set, ignores removing an absent label,
+   * and creates a missing project label on add. An empty list is omitted.
+   */
+  async updateMergeRequestLabels(
+    project: string,
+    mr: string,
+    add: string[],
+    remove: string[],
+  ): Promise<void> {
+    await this.request(
+      `/projects/${encodeURIComponent(project)}/merge_requests/${encodeURIComponent(mr)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({
+          ...(add.length > 0 ? { add_labels: add.join(',') } : {}),
+          ...(remove.length > 0 ? { remove_labels: remove.join(',') } : {}),
+        }),
+      },
+    );
+  }
+
   getCurrentUser(): Promise<CurrentUser> {
     return this.request('/user');
   }

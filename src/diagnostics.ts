@@ -189,6 +189,12 @@ export interface DiagnosticContext {
   draftsPublishFailed?: number;
   summaryAction?: 'created' | 'updated' | 'skipped';
   summaryNoteId?: number;
+  /**
+   * Review outcome whose labels were applied to the MR/PR (`--labels-on-findings`
+   * / `--labels-on-clean`), on the `run` context. Absent when labels are not
+   * configured, posting is disabled, or the label update failed.
+   */
+  labelsOutcome?: 'findings' | 'clean';
   usage?: DiagnosticUsage;
   errorInfo?: DiagnosticError;
 }

@@ -612,6 +612,7 @@ describe('OpenTelemetry bridge', () => {
       ctx.draftsAbandoned = 2;
       ctx.draftsDeletedPrePublish = 3;
       ctx.draftsPublishFailed = 1;
+      ctx.labelsOutcome = 'findings';
     });
     const reviewer = spans.find((s) => s.name === 'invoke_agent code-review');
     const attrs = Object.fromEntries(reviewer!.attributes.map((a) => [a.key, a.value]));
@@ -629,6 +630,7 @@ describe('OpenTelemetry bridge', () => {
       'code_review.drafts.abandoned': 2,
       'code_review.drafts.deleted_pre_publish': 3,
       'code_review.drafts.publish_failed': 1,
+      'code_review.labels.outcome': 'findings',
     });
   });
 

@@ -121,6 +121,49 @@ describe('config env defaults', () => {
     expect(cfg.modelPool).toEqual(['anthropic/claude-sonnet-4-5', 'google/gemini-2.5-pro']);
   });
 
+  it('defaults both label sets to empty lists when unset', () => {
+    const cfg = resolveConfig([], {
+      CI_PROJECT_ID: '1',
+      CI_MERGE_REQUEST_IID: '2',
+      CI_SERVER_URL: 'https://gitlab.example.com',
+      GITLAB_TOKEN: 'tok',
+      CODE_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
+    });
+    expect(cfg.labelsOnFindings).toEqual([]);
+    expect(cfg.labelsOnClean).toEqual([]);
+  });
+
+  it('parses the label env vars as comma-separated, trimmed lists', () => {
+    const cfg = resolveConfig([], {
+      CI_PROJECT_ID: '1',
+      CI_MERGE_REQUEST_IID: '2',
+      CI_SERVER_URL: 'https://gitlab.example.com',
+      GITLAB_TOKEN: 'tok',
+      CODE_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
+      CODE_REVIEW_LABELS_ON_FINDINGS: ' mr::change-requested , bot::fix ,',
+      CODE_REVIEW_LABELS_ON_CLEAN: 'mr::needs-review',
+    });
+    expect(cfg.labelsOnFindings).toEqual(['mr::change-requested', 'bot::fix']);
+    expect(cfg.labelsOnClean).toEqual(['mr::needs-review']);
+  });
+
+  it('prefers the label flags over the env vars', () => {
+    const cfg = resolveConfig(
+      ['--labels-on-findings', 'flag-findings', '--labels-on-clean=flag-clean,other'],
+      {
+        CI_PROJECT_ID: '1',
+        CI_MERGE_REQUEST_IID: '2',
+        CI_SERVER_URL: 'https://gitlab.example.com',
+        GITLAB_TOKEN: 'tok',
+        CODE_REVIEW_MODEL: 'anthropic/claude-sonnet-4-5',
+        CODE_REVIEW_LABELS_ON_FINDINGS: 'env-findings',
+        CODE_REVIEW_LABELS_ON_CLEAN: 'env-clean',
+      },
+    );
+    expect(cfg.labelsOnFindings).toEqual(['flag-findings']);
+    expect(cfg.labelsOnClean).toEqual(['flag-clean', 'other']);
+  });
+
   it('prefers --model-pool over CODE_REVIEW_MODEL_POOL', () => {
     const cfg = resolveConfig(['--model-pool', 'anthropic/claude-opus-4-1,openai/gpt-5'], {
       CI_PROJECT_ID: '1',
@@ -674,6 +717,31 @@ describe('validateConfig', () => {
         thinkingLevel: 'bogus' as ThinkingLevel,
       }),
     ).toThrow('--thinking must be one of: off, minimal, low, medium, high, xhigh');
+  });
+
+  it('throws when a label belongs to both label sets', () => {
+    let caught: unknown;
+    try {
+      validateConfig({
+        ...minimalConfig,
+        labelsOnFindings: ['mr::change-requested', 'shared'],
+        labelsOnClean: ['shared', 'mr::needs-review'],
+      });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(ConfigError);
+    expect((caught as ConfigError).message).toContain('share label(s): shared');
+  });
+
+  it('accepts disjoint label sets', () => {
+    expect(() =>
+      validateConfig({
+        ...minimalConfig,
+        labelsOnFindings: ['mr::change-requested'],
+        labelsOnClean: ['mr::needs-review'],
+      }),
+    ).not.toThrow();
   });
 
   it('accepts every documented thinking level', () => {
@@ -1356,6 +1424,8 @@ describe('applyCodeReviewEnvPrefix', () => {
         'DECOMPOSE_HINT_LINES',
         'DISABLE_MCP',
         'FORCE_REVIEW',
+        'LABELS_ON_CLEAN',
+        'LABELS_ON_FINDINGS',
         'MAX_DIFF_CHARS',
         'MARKETPLACES',
         'MAX_TOKENS',

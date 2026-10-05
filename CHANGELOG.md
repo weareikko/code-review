@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Review-outcome labels: `--labels-on-findings` / `CODE_REVIEW_LABELS_ON_FINDINGS` and `--labels-on-clean` / `CODE_REVIEW_LABELS_ON_CLEAN` set MR/PR labels after a successful review, depending on whether it posted new comments, and remove the other set ([#PR]).
+
 ## [0.9.8] - 2026-09-29
 
 ### Added
