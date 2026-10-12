@@ -15,15 +15,14 @@
 
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { ImageContent, TextContent } from '@earendil-works/pi-ai';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import {
-  getDefaultEnvironment,
-  StdioClientTransport,
-} from '@modelcontextprotocol/sdk/client/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import type { CallToolResult, Tool as McpTool } from '@modelcontextprotocol/sdk/types.js';
+  McpClient,
+  StdioTransport,
+  StreamableHttpTransport,
+  type CallToolResult,
+  type McpTransport,
+  type Tool as McpTool,
+} from '@earendil-works/pi-mcp';
 import type { TSchema } from 'typebox';
 import {
   traceMcpDiagnostic,
@@ -73,9 +72,9 @@ export interface ConnectMcpServersOptions {
   maxResultChars?: number;
   /**
    * Supported library extension point (also the test seam): build the transport
-   * for a config instead of the real stdio/http/sse one. See `docs/mcp.md`.
+   * for a config instead of the real stdio/http one. See `docs/mcp.md`.
    */
-  createTransport?: (config: McpServerConfig) => Transport;
+  createTransport?: (config: McpServerConfig) => McpTransport;
   /**
    * The enclosing review's diagnostic run id. When set, connect/list-tools/call
    * are traced on the `mcp.connect` / `mcp.tools` / `mcp.call` diagnostics
@@ -106,28 +105,62 @@ export function mcpToolName(server: string, tool: string): string {
   return `mcp__${safeSegment(server)}__${safeSegment(tool)}`;
 }
 
+/**
+ * Parent environment variables a stdio server inherits: the sudo-style safe
+ * subset the official MCP SDK used. pi-mcp inherits the whole `process.env` by
+ * default, which would hand CI secrets (GitLab token, provider API keys) to a
+ * server the repository under review may have declared.
+ */
+const INHERITED_ENV_VARS =
+  process.platform === 'win32'
+    ? [
+        'APPDATA',
+        'HOMEDRIVE',
+        'HOMEPATH',
+        'LOCALAPPDATA',
+        'PATH',
+        'PROCESSOR_ARCHITECTURE',
+        'SYSTEMDRIVE',
+        'SYSTEMROOT',
+        'TEMP',
+        'USERNAME',
+        'USERPROFILE',
+        'PROGRAMFILES',
+      ]
+    : ['HOME', 'LOGNAME', 'PATH', 'SHELL', 'TERM', 'USER'];
+
+/** The safe subset of `env`, skipping exported shell functions (`() { …`). */
+export function inheritedMcpEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const inherited: Record<string, string> = {};
+  for (const key of INHERITED_ENV_VARS) {
+    const value = env[key];
+    if (value === undefined || value.startsWith('()')) continue;
+    inherited[key] = value;
+  }
+  return inherited;
+}
+
 /** Build the real transport for a server config. */
-export function createMcpTransport(config: McpServerConfig): Transport {
+export function createMcpTransport(config: McpServerConfig): McpTransport {
   switch (config.type) {
     case 'stdio':
-      return new StdioClientTransport({
+      return new StdioTransport({
         command: config.command as string,
         args: config.args,
-        // Only the SDK's safe subset of the parent environment is inherited;
-        // anything a server needs must be passed explicitly through `env`.
-        env: { ...getDefaultEnvironment(), ...config.env },
-        stderr: 'ignore',
+        // Only the safe subset of the parent environment is inherited; anything
+        // a server needs must be passed explicitly through `env`.
+        env: { ...inheritedMcpEnvironment(), ...config.env },
+        inheritEnv: false,
       });
     case 'http':
-      return new StreamableHTTPClientTransport(new URL(config.url as string), {
-        requestInit: { headers: config.headers },
-      });
-    case 'sse':
-      // Deprecated upstream in favour of streamable HTTP, but still what many
-      // hosted servers speak; the config layer maps `type: sse` here on purpose.
-      // oxlint-disable-next-line typescript/no-deprecated
-      return new SSEClientTransport(new URL(config.url as string), {
-        requestInit: { headers: config.headers },
+      return new StreamableHttpTransport({
+        url: config.url as string,
+        headers: config.headers,
+        // The bridge only sends requests; it needs no server-initiated stream,
+        // and skipping it avoids a background reconnect loop per server.
+        openGetStream: false,
       });
     default:
       throw new Error(`Unsupported MCP transport: ${String(config.type)}`);
@@ -170,28 +203,43 @@ export function formatMcpToolResult(
 ): (TextContent | ImageContent)[] {
   const texts: string[] = [];
   const images: ImageContent[] = [];
-  for (const block of result.content) {
+  // pi-mcp checks only that `content` is an array, so every block is untrusted
+  // JSON: check each shape before use. A malformed block becomes a short note —
+  // never an exception, whose message could carry the raw server value uncapped.
+  for (const block of result.content as unknown[]) {
+    if (!isRecord(block)) {
+      texts.push('[invalid content omitted]');
+      continue;
+    }
     switch (block.type) {
       case 'text':
-        texts.push(block.text);
+        texts.push(typeof block.text === 'string' ? block.text : '[invalid text content omitted]');
         break;
       case 'image':
-        images.push({ type: 'image', data: block.data, mimeType: block.mimeType });
+        // A non-string `data` would slip past the size check below (an array
+        // has length 1).
+        if (typeof block.data === 'string' && typeof block.mimeType === 'string') {
+          images.push({ type: 'image', data: block.data, mimeType: block.mimeType });
+        } else {
+          texts.push('[invalid image content omitted]');
+        }
         break;
       case 'resource':
-        if ('text' in block.resource) {
+        if (!isRecord(block.resource)) {
+          texts.push('[invalid resource content omitted]');
+        } else if (typeof block.resource.text === 'string') {
           texts.push(block.resource.text);
         } else {
-          texts.push(`[binary resource ${block.resource.uri} omitted]`);
+          texts.push(`[binary resource ${String(block.resource.uri)} omitted]`);
         }
         break;
       case 'resource_link':
         texts.push(
-          `[resource link] ${block.uri}${block.description ? ` — ${block.description}` : ''}`,
+          `[resource link] ${String(block.uri)}${typeof block.description === 'string' && block.description ? ` — ${block.description}` : ''}`,
         );
         break;
       default:
-        texts.push(`[${block.type} content omitted]`);
+        texts.push(`[${String(block.type)} content omitted]`);
     }
   }
   if (texts.length === 0 && result.structuredContent !== undefined) {
@@ -215,11 +263,13 @@ export function formatMcpToolResult(
   const kept: ImageContent[] = [];
   const notes: string[] = [];
   for (const image of images) {
-    if (kept.length >= MAX_MCP_IMAGE_BLOCKS || image.data.length > remaining) {
+    // The mime type reaches the provider too (`data:<mimeType>;base64,...`).
+    const size = image.data.length + image.mimeType.length;
+    if (kept.length >= MAX_MCP_IMAGE_BLOCKS || size > remaining) {
       notes.push(`[image omitted: ${image.data.length} bytes]`);
       continue;
     }
-    remaining -= image.data.length;
+    remaining -= size;
     kept.push(image);
   }
   if (notes.length > 0) {
@@ -235,6 +285,10 @@ export function formatMcpToolResult(
   return content;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function toParameters(tool: McpTool): TSchema {
   const schema = { ...tool.inputSchema } as Record<string, unknown>;
   if (schema.type !== 'object') schema.type = 'object';
@@ -248,7 +302,7 @@ interface Budget {
 }
 
 interface BridgeDeps {
-  client: Client;
+  client: McpClient;
   status: McpServerStatus;
   budget: Budget;
   timeoutMs: number;
@@ -279,12 +333,11 @@ function bridgeTool(tool: McpTool, deps: BridgeDeps): AgentTool {
       status.calls += 1;
       return withMcpTrace(runId, 'mcp.call', status.name, async (context) => {
         if (context) context.tool = tool.name;
-        const result = await client.callTool(
-          { name: tool.name, arguments: params as Record<string, unknown> },
-          undefined,
-          { timeout: timeoutMs, signal },
-        );
-        const content = formatMcpToolResult(result as CallToolResult, maxResultChars);
+        const result = await client.callTool(tool.name, params as Record<string, unknown>, {
+          timeoutMs,
+          signal,
+        });
+        const content = formatMcpToolResult(result, maxResultChars);
         if (context) {
           context.resultChars = content.reduce(
             (chars, block) => chars + (block.type === 'text' ? block.text.length : 0),
@@ -298,37 +351,8 @@ function bridgeTool(tool: McpTool, deps: BridgeDeps): AgentTool {
   return bridged as AgentTool;
 }
 
-/**
- * `Client.listTools` caches each tool's output-schema validator and task-support
- * flags, and clears that cache at the start of every call — so after paginating,
- * the client only holds metadata for the last page and `callTool` silently skips
- * output validation for every tool listed before it. The SDK exposes no public
- * re-prime, so re-seed the cache with the full set through its (typed-private,
- * runtime-public) `cacheToolMetadata`, guarded so a future SDK that drops it
- * degrades to today's single-page behaviour instead of throwing.
- */
-function recacheToolMetadata(client: Client, tools: readonly McpTool[]): void {
-  const recache = (client as unknown as { cacheToolMetadata?: (tools: readonly McpTool[]) => void })
-    .cacheToolMetadata;
-  if (typeof recache === 'function') recache.call(client, tools);
-}
-
-async function listAllTools(client: Client, timeoutMs: number): Promise<McpTool[]> {
-  const tools: McpTool[] = [];
-  let cursor: string | undefined;
-  let pages = 0;
-  do {
-    const page = await client.listTools(cursor ? { cursor } : undefined, { timeout: timeoutMs });
-    tools.push(...page.tools);
-    cursor = page.nextCursor;
-    pages += 1;
-  } while (cursor);
-  if (pages > 1) recacheToolMetadata(client, tools);
-  return tools;
-}
-
 interface ConnectedServer {
-  client: Client;
+  client: McpClient;
   status: McpServerStatus;
   tools: AgentTool[];
 }
@@ -336,7 +360,7 @@ interface ConnectedServer {
 async function connectOne(
   config: McpServerConfig,
   options: Required<Omit<ConnectMcpServersOptions, 'createTransport' | 'runId'>> & {
-    createTransport: (config: McpServerConfig) => Transport;
+    createTransport: (config: McpServerConfig) => McpTransport;
     budget: Budget;
     runId?: string;
   },
@@ -353,17 +377,24 @@ async function connectOne(
     tools: [],
     calls: 0,
   };
-  const client = new Client({ name: PRODUCT_NAME, version: __PKG_VERSION__ });
+  // `requestTimeoutMs` bounds the `initialize` handshake; `tools/list` and
+  // `tools/call` pass their own timeout per request.
+  const client = new McpClient({
+    name: PRODUCT_NAME,
+    version: __PKG_VERSION__,
+    requestTimeoutMs: MCP_CONNECT_TIMEOUT_MS,
+  });
   try {
     await withMcpTrace(runId, 'mcp.connect', config.name, () =>
-      client.connect(options.createTransport(config), { timeout: MCP_CONNECT_TIMEOUT_MS }),
+      client.connect(options.createTransport(config)),
     );
     const { exposed, dropped } = await withMcpTrace(
       runId,
       'mcp.tools',
       config.name,
       async (context) => {
-        const listed = await listAllTools(client, MCP_CONNECT_TIMEOUT_MS);
+        // pi-mcp follows `nextCursor` itself; the timeout applies per page.
+        const listed = await client.listTools({ timeoutMs: MCP_CONNECT_TIMEOUT_MS });
         const readOnly = listed.filter(isReadOnlyMcpTool);
         const notReadOnly = listed.filter((tool) => !isReadOnlyMcpTool(tool));
         if (context) context.toolCount = readOnly.length;

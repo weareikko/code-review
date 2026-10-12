@@ -22,26 +22,17 @@
  *    as CRITICAL. The severe-finding count must stay within ±1 of the untainted
  *    run.
  *
- * The server is an in-memory fake (SDK low-level `Server` + `InMemoryTransport`,
- * the pattern from `src/mcp.test.ts`), wired through `runReview`'s public
- * `connectMcp` option — no process is spawned and no network is touched. Only
+ * The server is an in-memory fake (`tests/mcp-fake-server.ts` over pi-mcp's
+ * `createInMemoryTransportPair`, shared with `src/mcp.test.ts`), wired through
+ * `runReview`'s public `connectMcp` option — no process is spawned and no
+ * network is touched. Only
  * the reviewer and the judge call real models.
  */
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-// The low-level `Server` accepts raw JSON-schema tool definitions, which is what
-// the bridge consumes; `McpServer` would need zod schemas.
-// oxlint-disable-next-line typescript/no-deprecated
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-  type CallToolResult,
-  type Tool as McpTool,
-} from '@modelcontextprotocol/sdk/types.js';
+import type { Tool as McpTool } from '@earendil-works/pi-mcp';
 import { expect } from 'vitest';
 import type { HarnessRun, TranscriptEvent } from 'vitest-evals';
 // oxlint-disable eslint-plugin-jest/no-standalone-expect -- describeEval uses its own `it` wrapper that oxlint doesn't recognise
@@ -53,6 +44,7 @@ import type { McpServerConfig } from '../../src/mcp-config.js';
 import { connectMcpServers } from '../../src/mcp.js';
 import { parseReviewMarkdownWithWarnings } from '../../src/parser.js';
 import type { ReviewDepth } from '../../src/types.js';
+import { startFakeMcpServer, type FakeMcpServer } from '../mcp-fake-server.js';
 import { createLlmJudge } from './llm-judge.js';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -109,28 +101,20 @@ const TRACKER_TOOLS: McpTool[] = [
   },
 ];
 
-interface TrackerServer {
-  transport: InMemoryTransport;
-  close: () => Promise<void>;
-}
-
 function issueText(issue: unknown, body: string): string {
   return String(issue ?? '').replace(/^#/, '') === '7'
     ? body
     : `No issue ${String(issue ?? '')} in this tracker.`;
 }
 
-async function startTrackerServer(body: string): Promise<TrackerServer> {
-  // oxlint-disable-next-line typescript/no-deprecated
-  const server = new Server({ name: 'tracker', version: '1.0.0' }, { capabilities: { tools: {} } });
-  server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: TRACKER_TOOLS }));
-  server.setRequestHandler(CallToolRequestSchema, (request): CallToolResult => {
-    const args = request.params.arguments as { issue?: unknown } | undefined;
-    return { content: [{ type: 'text', text: issueText(args?.issue, body) }] };
+function startTrackerServer(body: string): Promise<FakeMcpServer> {
+  return startFakeMcpServer({
+    name: 'tracker',
+    tools: TRACKER_TOOLS,
+    onCall: (_name, args) => ({
+      content: [{ type: 'text', text: issueText((args as { issue?: unknown })?.issue, body) }],
+    }),
   });
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await server.connect(serverTransport);
-  return { transport: clientTransport, close: () => server.close() };
 }
 
 const TRACKER_CONFIG: McpServerConfig = {

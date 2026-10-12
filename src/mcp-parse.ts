@@ -24,8 +24,8 @@ export type McpServerSource =
     }
   | { kind: 'file'; path: string };
 
-/** Transports we can connect to. `ws` is recognised in files but skipped. */
-export type McpTransportType = 'stdio' | 'http' | 'sse';
+/** Transports we can connect to. `sse` and `ws` are recognised in files but skipped. */
+export type McpTransportType = 'stdio' | 'http';
 
 /** A normalised, env-expanded MCP server definition ready to connect. */
 export interface McpServerConfig {
@@ -37,9 +37,9 @@ export interface McpServerConfig {
   args: string[];
   /** stdio only — extra environment for the child process. */
   env: Record<string, string>;
-  /** http / sse only. */
+  /** http only. */
   url?: string;
-  /** http / sse only. */
+  /** http only. */
   headers: Record<string, string>;
   /** Per-call timeout; `undefined` means the bridge default. */
   timeoutMs?: number;
@@ -206,9 +206,9 @@ function describeSource(source: McpServerSource): string {
  * Normalise one raw server entry. Returns `null` (after warning) when the
  * server is unsupported or incomplete:
  *
- * - `type: ws`, or any `oauth` / `headersHelper` field — unsupported transports
- *   and auth flows
- * - no `command` for stdio, no `url` for http/sse, before or after expansion
+ * - `type: sse` or `ws`, or any `oauth` / `headersHelper` field — unsupported
+ *   transports and auth flows
+ * - no `command` for stdio, no `url` for http, before or after expansion
  * - a `${VAR}` reference with no value and no default (the warning names the
  *   variable, never a value)
  *
@@ -250,9 +250,9 @@ export function normalizeMcpServer(
     warn(`MCP server "${name}" in ${where} has neither "command" nor "url" — skipped.`);
     return null;
   }
-  if (type === 'ws') {
+  if (type === 'sse' || type === 'ws') {
     warn(
-      `MCP server "${name}" in ${where} uses the ws transport, which is not supported — skipped.`,
+      `MCP server "${name}" in ${where} uses the ${type} transport, which is not supported — skipped.`,
     );
     return null;
   }

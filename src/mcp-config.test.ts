@@ -155,13 +155,6 @@ describe('normalizeMcpServer', () => {
     expect(server?.timeoutMs).toBeUndefined();
   });
 
-  it('honours an explicit sse type', () => {
-    const server = normalizeMcpServer('s', { type: 'sse', url: 'https://x.test/sse' }, source, {
-      vars,
-    });
-    expect(server?.type).toBe('sse');
-  });
-
   it('expands ${VAR} in command, args, env, url and headers', () => {
     const stdio = normalizeMcpServer(
       'a',
@@ -255,6 +248,7 @@ describe('normalizeMcpServer', () => {
   });
 
   it.each([
+    ['sse', { type: 'sse', url: 'https://x.test/sse' }, 'sse transport'],
     ['ws', { type: 'ws', url: 'wss://x.test' }, 'ws transport'],
     ['oauth', { url: 'https://x.test', oauth: {} }, '"oauth"'],
     ['headersHelper', { url: 'https://x.test', headersHelper: 'cmd' }, '"headersHelper"'],
