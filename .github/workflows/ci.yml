@@ -115,11 +115,13 @@ jobs:
       - name: Generate coverage summary
         if: ${{ !cancelled() }}
         run: |
-          echo "## Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          cat coverage/coverage-summary.json | jq -r '.total | "Statements: \(.statements.pct)%\nBranches: \(.branches.pct)%\nFunctions: \(.functions.pct)%\nLines: \(.lines.pct)%"' >> $GITHUB_STEP_SUMMARY || echo "Coverage summary not available" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Test Coverage Summary"
+            echo ""
+            echo "\`\`\`"
+            jq -r '.total | "Statements: \(.statements.pct)%\nBranches: \(.branches.pct)%\nFunctions: \(.functions.pct)%\nLines: \(.lines.pct)%"' coverage/coverage-summary.json || echo "Coverage summary not available"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload coverage artifacts
         uses: actions/upload-artifact@v7
@@ -142,11 +144,16 @@ jobs:
     needs: [lint, build, typecheck, test]
     steps:
       - name: Check all jobs
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          TYPECHECK_RESULT: ${{ needs.typecheck.result }}
+          TEST_RESULT: ${{ needs.test.result }}
         run: |
-          if [[ "${{ needs.lint.result }}" != "success" ]] ||
-             [[ "${{ needs.build.result }}" != "success" ]] ||
-             [[ "${{ needs.typecheck.result }}" != "success" ]] ||
-             [[ "${{ needs.test.result }}" != "success" ]]; then
+          if [[ "$LINT_RESULT" != "success" ]] ||
+             [[ "$BUILD_RESULT" != "success" ]] ||
+             [[ "$TYPECHECK_RESULT" != "success" ]] ||
+             [[ "$TEST_RESULT" != "success" ]]; then
             echo "One or more jobs failed"
             exit 1
           fi
