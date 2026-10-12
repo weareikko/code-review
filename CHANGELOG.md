@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file. Each pull r
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.10.0 - 2026-10-12
+
+### Changed
+
+- **BREAKING**: Remove the `sse` MCP transport; use `http` (Streamable HTTP). ([#169])
+
+### Security
+
+- Reusable workflow: pass the `version` and `args` inputs to the review step through environment variables instead of `${{ }}` expressions in `run:`, so a crafted input can no longer inject shell code. ([#163])
+
+### Dependencies
+
+- Updated `@earendil-works/pi-*` to 1.1.0. ([#168])
+- Replaced `@modelcontextprotocol/sdk` with `@earendil-works/pi-mcp` 1.1.0 as the MCP client. ([#169])
+
+[#163]: https://github.com/weareikko/code-review/pull/163
+[#168]: https://github.com/weareikko/code-review/pull/168
+[#169]: https://github.com/weareikko/code-review/pull/169
+
 ## [0.9.9] - 2026-10-05
 
 ### Added
