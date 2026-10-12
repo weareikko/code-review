@@ -69,6 +69,8 @@
 - Entries are terse — ideally one line per change. Don't restate rationale, internals, or edge cases that the PR already covers.
 - The `Changelog` check fails when a PR changes `src/**`, `bin/**`, `skills/**`, `action.yml` or `.github/workflows/code-review.yml` without a fragment; set the `no-changelog` label for changes users do not see (tests, refactors, tooling). Format: [`weareikko/changelog`](https://github.com/weareikko/changelog).
 - Release with the `Publish` workflow: `gh workflow run publish.yml -f bump=patch` (or `minor` / `major`). It tests, bumps `package.json`, folds `.changelog/` into `CHANGELOG.md`, commits `chore: release <version>`, tags, publishes to npm, creates the GitHub release and moves the `0` / `0.x` tags. Do not tag or publish by hand.
+- Prereleases: `gh workflow run publish.yml -f bump=prerelease -f preid=beta` (or `prepatch` / `preminor` / `premajor`, `preid` `alpha` / `beta` / `rc`). A version with a `-` goes to the `next` npm dist-tag, is a GitHub prerelease and does not move the `0` / `0.x` tags. The stable release of a prerelease can have no new fragment.
+- npm publishing uses trusted publishing (OIDC, no npm token), bound to `publish.yml`: keep the publish job in that file. It skips a version that npm already has, so "Re-run failed jobs" on a failed `Publish to npm` job is safe.
 - Release tags are plain semver (`0.3.1`), not `v0.3.1`; the pre-push hook rejects `v*` tags.
 - Published package files are limited by `package.json#files`; remember `dist/`, `bin/`, `skills/`, `LICENSE`, and `README.md`.
 - Do not edit generated `dist/`, `coverage/`, `node_modules/`, or test result artifacts.

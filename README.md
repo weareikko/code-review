@@ -247,7 +247,10 @@ Do not edit `CHANGELOG.md`: each pull request adds a fragment in `.changelog/` (
 
 ```bash
 gh workflow run publish.yml -f bump=patch   # or minor / major
+gh workflow run publish.yml -f bump=prerelease -f preid=beta   # or prepatch / preminor / premajor, preid alpha / beta / rc
 ```
+
+A prerelease (a version with a `-`, e.g. `0.10.0-beta.0`) is published on the `next` npm dist-tag, is a GitHub prerelease and does not move the `@0` / `@0.x` tags; any other version goes to `latest`. The stable release of a prerelease (e.g. `0.10.0` after `0.10.0-rc.1`) can have no new fragment. Publishing uses npm trusted publishing (no npm token) and skips a version that npm already has: if the `Publish to npm` job fails, use "Re-run failed jobs".
 
 Eval tests call the real LLM and require `ANTHROPIC_API_KEY` (or `CODE_REVIEW_API_KEY`) in a local `.env` file:
 
