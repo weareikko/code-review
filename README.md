@@ -243,14 +243,25 @@ npm run build
 npm pack --dry-run
 ```
 
-Do not edit `CHANGELOG.md`: each pull request adds a fragment in `.changelog/` (format: [`weareikko/changelog`](https://github.com/weareikko/changelog)), or gets the `no-changelog` label when users do not see the change. Maintainers release with the `Publish` workflow, which tests, bumps the version, folds the fragments into `CHANGELOG.md`, tags, publishes to npm and creates the GitHub release:
+Do not edit `CHANGELOG.md`: each pull request adds a fragment in `.changelog/` (format: [`weareikko/changelog`](https://github.com/weareikko/changelog)), or gets the `no-changelog` label when users do not see the change.
+
+Each merge into `main` releases: the `Publish` workflow tests, folds the fragments into `CHANGELOG.md`, bumps the version, tags, publishes to npm and creates the GitHub release. A merge without a fragment (and without a dependency pull request from Renovate) releases nothing. The fragments give the version ([automatic version](https://github.com/weareikko/changelog#automatic-version)):
+
+| Entries                                    | From 1.0.0 | On 0.x |
+| ------------------------------------------ | ---------- | ------ |
+| A breaking entry (`**BREAKING**: …`)       | major      | minor  |
+| An entry under `Added`, no breaking entry  | minor      | patch  |
+| Other entries only (fixes, `Dependencies`) | patch      | patch  |
+
+Prereleases follow the file `.changelog/prerelease` ([prereleases](https://github.com/weareikko/changelog#prereleases)): a pull request that adds it with `beta` makes the next merges with fragments release prereleases (from `0.10.0`, a fix gives `0.10.1-beta.0`, then `0.10.1-beta.1`…); a pull request that deletes it releases the stable version, also without a new fragment. A prerelease (a version with a `-`) is published on the `next` npm dist-tag, is a GitHub prerelease and does not move the `@0` / `@0.x` tags; any other version goes to `latest`.
+
+A manual run forces a bump, for example a major version without a breaking entry:
 
 ```bash
-gh workflow run publish.yml -f bump=patch   # or minor / major
-gh workflow run publish.yml -f bump=prerelease -f preid=beta   # or prepatch / preminor / premajor, preid alpha / beta / rc
+gh workflow run publish.yml -f bump=major   # or patch / minor, or prepatch / preminor / premajor / prerelease with -f preid=beta
 ```
 
-A prerelease (a version with a `-`, e.g. `0.10.0-beta.0`) is published on the `next` npm dist-tag, is a GitHub prerelease and does not move the `@0` / `@0.x` tags; any other version goes to `latest`. The stable release of a prerelease (e.g. `0.10.0` after `0.10.0-rc.1`) can have no new fragment. Publishing uses npm trusted publishing (no npm token) and skips a version that npm already has: if the `Publish to npm` job fails, use "Re-run failed jobs".
+Publishing uses npm trusted publishing (no npm token) and skips a version that npm already has: if the `Publish to npm` job fails, use "Re-run failed jobs".
 
 Eval tests call the real LLM and require `ANTHROPIC_API_KEY` (or `CODE_REVIEW_API_KEY`) in a local `.env` file:
 
