@@ -14,12 +14,12 @@ jobs:
     name: Changelog
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       # Every change to what ships (the package, the composite action and the
       # reusable workflow) needs a fragment in .changelog/, unless the pull
       # request has the `no-changelog` label (tests, refactors, tooling).
-      - uses: weareikko/changelog@600f4225cfd2778967eaffa693e86666c5a2d4bd # 1.0.2
+      - uses: weareikko/changelog@c25888e03ad7c8bbaee897b84e778ebce9e9301c # 1.0.3
         with:
           command: check
           require-paths: |
