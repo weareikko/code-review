@@ -1,9 +1,20 @@
 name: Publish
 
+# Run from the Actions tab or with `gh workflow run publish.yml -f bump=patch`.
+# npm trusted publishing is bound to this file name: keep `npm publish` here.
 on:
-  push:
-    tags:
-      - '*.*.*'
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump (on 0.x, a minor bump marks a breaking change)'
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+concurrency: release
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -33,15 +44,73 @@ jobs:
       - name: Test
         run: npm test
 
+  release:
+    name: Bump version and changelog
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      body: ${{ steps.changelog.outputs.body }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The changelog action reads the commit that added each fragment.
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Bump version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          npm version "$BUMP" --no-git-tag-version
+          echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+
+      - name: Fold changelog fragments
+        id: changelog
+        uses: weareikko/changelog@600f4225cfd2778967eaffa693e86666c5a2d4bd # 1.0.2
+        with:
+          command: release
+          version: ${{ steps.version.outputs.version }}
+
+      - name: Fail when there is nothing to release
+        if: steps.changelog.outputs.changed != 'true'
+        run: |
+          echo "::error::No fragment in .changelog/: nothing to release."
+          exit 1
+
+      - name: Commit, tag and push
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md .changelog package.json package-lock.json
+          git commit -m "chore: release $VERSION"
+          git tag "$VERSION"
+          git push origin HEAD:main "$VERSION"
+
+  # A tag pushed with GITHUB_TOKEN does not start other workflows, so the
+  # publish job runs in this workflow, on the tag the release job pushed.
   publish:
     name: Publish to npm
-    needs: test
+    needs: release
     runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release.outputs.version }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -56,34 +125,16 @@ jobs:
       - name: Build package
         run: npm run build
 
-      - name: Determine npm tag and version
-        run: |
-          VERSION=${GITHUB_REF_NAME}
-          NPM_TAG='latest'
-          IS_PRERELEASE=false
-
-          if [[ $VERSION =~ (alpha|beta|rc) ]]; then
-            NPM_TAG='next'
-            IS_PRERELEASE=true
-          fi
-
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "NPM_TAG=$NPM_TAG" >> $GITHUB_ENV
-          echo "IS_PRERELEASE=$IS_PRERELEASE" >> $GITHUB_ENV
-
       - name: Publish package
         # Auth is OIDC trusted publishing (id-token: write + --provenance); no npm token needed.
-        run: npm publish --provenance --access public --tag ${{ env.NPM_TAG }}
+        run: npm publish --provenance --access public
 
       - name: Create GitHub Release
         uses: ncipollo/release-action@v1
         with:
-          tag: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          body: |
-            Please refer to [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/CHANGELOG.md) for details.
-          draft: false
-          prerelease: ${{ env.IS_PRERELEASE }}
+          tag: ${{ needs.release.outputs.version }}
+          name: ${{ needs.release.outputs.version }}
+          body: ${{ needs.release.outputs.body }}
 
       - name: Update moving version tags
         # Re-point the MAJOR (e.g. 0) and MAJOR.MINOR (e.g. 0.8) tags at this release
@@ -92,9 +143,8 @@ jobs:
         # a breaking change, so `@0` tracks the latest stable release INCLUDING breaking
         # changes, whereas `@0.8` is the non-breaking patch channel (see the README pin
         # note). At 1.0, `@1` becomes a proper semver compatibility boundary.
-        # Skipped for prereleases. Both tags have fewer than two dots, so they never
-        # match the `*.*.*` publish trigger and cannot cause a re-run loop.
-        if: env.IS_PRERELEASE == 'false'
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
           MAJOR_TAG=${VERSION%%.*}
           MINOR_TAG=${VERSION%.*}
