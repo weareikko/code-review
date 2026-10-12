@@ -94,4 +94,10 @@ jobs:
           node-version: ${{ inputs.node-version }}
       - name: Run code-review
         working-directory: ${{ inputs.working-directory }}
-        run: npx --yes "@weareikko/code-review@${{ inputs.version }}" ${{ inputs.args }}
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_ARGS: ${{ inputs.args }}
+        run: |
+          # INPUT_ARGS stays unquoted: it holds several flags, split on whitespace.
+          # shellcheck disable=SC2086
+          npx --yes "@weareikko/code-review@${INPUT_VERSION}" ${INPUT_ARGS}
