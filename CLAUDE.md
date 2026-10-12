@@ -63,7 +63,12 @@
 ## Release and repository notes
 
 - Commit messages in history use Conventional Commits (`feat:`, `fix:`, `chore:`).
-- Keep `CHANGELOG.md` in Keep a Changelog style under `[Unreleased]`. Entries are terse — ideally one line per change — and end with a reference to the PR/issue/commit (`([#NN])`) where the detail lives; add the matching link-reference definition at the bottom of the file. Don't restate rationale, internals, or edge cases that the linked PR already covers.
+- **Never edit `CHANGELOG.md` directly.** Each PR adds a fragment `.changelog/<slug>.md` (slug = branch name without its prefix, e.g. `feat/review-labels` → `review-labels.md`).
+- A fragment only contains `### Added|Changed|Deprecated|Removed|Fixed|Security|Dependencies` headings, each followed by its entries — no `#`/`##` heading. Mark breaking changes with a `**BREAKING**:` prefix under `### Changed`.
+- **Do not write the PR number**: the release appends `[[#N]]` and its link definition from the merged PR that added the fragment. Other references (`[abc1234]` commits) need their link definition in the fragment.
+- Entries are terse — ideally one line per change. Don't restate rationale, internals, or edge cases that the PR already covers.
+- The `Changelog` check fails when a PR changes `src/**`, `bin/**`, `skills/**`, `action.yml` or `.github/workflows/code-review.yml` without a fragment; set the `no-changelog` label for changes users do not see (tests, refactors, tooling). Format: [`weareikko/changelog`](https://github.com/weareikko/changelog).
+- Release with the `Publish` workflow: `gh workflow run publish.yml -f bump=patch` (or `minor` / `major`). It tests, bumps `package.json`, folds `.changelog/` into `CHANGELOG.md`, commits `chore: release <version>`, tags, publishes to npm, creates the GitHub release and moves the `0` / `0.x` tags. Do not tag or publish by hand.
 - Release tags are plain semver (`0.3.1`), not `v0.3.1`; the pre-push hook rejects `v*` tags.
 - Published package files are limited by `package.json#files`; remember `dist/`, `bin/`, `skills/`, `LICENSE`, and `README.md`.
 - Do not edit generated `dist/`, `coverage/`, `node_modules/`, or test result artifacts.

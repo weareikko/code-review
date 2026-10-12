@@ -243,6 +243,12 @@ npm run build
 npm pack --dry-run
 ```
 
+Do not edit `CHANGELOG.md`: each pull request adds a fragment in `.changelog/` (format: [`weareikko/changelog`](https://github.com/weareikko/changelog)), or gets the `no-changelog` label when users do not see the change. Maintainers release with the `Publish` workflow, which tests, bumps the version, folds the fragments into `CHANGELOG.md`, tags, publishes to npm and creates the GitHub release:
+
+```bash
+gh workflow run publish.yml -f bump=patch   # or minor / major
+```
+
 Eval tests call the real LLM and require `ANTHROPIC_API_KEY` (or `CODE_REVIEW_API_KEY`) in a local `.env` file:
 
 ```bash
