@@ -17,13 +17,13 @@ Multi-slash model IDs are supported — the provider is taken from the first seg
 
 ```bash
 OPENROUTER_API_KEY=sk-or-... npx @weareikko/code-review \
-  --model openrouter/anthropic/claude-3-opus-20240229
+  --model openrouter/anthropic/claude-opus-4.5
 ```
 
 ## Google Gemini
 
 ```bash
-GEMINI_API_KEY=... npx @weareikko/code-review --model google/gemini-2.0-flash
+GEMINI_API_KEY=... npx @weareikko/code-review --model google/gemini-2.5-flash
 ```
 
 ## Ollama (local)

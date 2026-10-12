@@ -65,7 +65,7 @@ Options:
                           provider's standard env var (e.g. ANTHROPIC_API_KEY, OPENAI_API_KEY,
                           GEMINI_API_KEY, OPENROUTER_API_KEY) or this flag.
   --model <provider/id>   Model to use. Format: provider/modelId. Multi-slash IDs such as
-                          openrouter/anthropic/claude-3-opus are supported by splitting on the
+                          openrouter/anthropic/claude-opus-4.5 are supported by splitting on the
                           first slash. Use ollama/<model> for local Ollama models.
                           (required; env: CODE_REVIEW_MODEL)
   --model-pool <list>     Comma-separated provider/modelId list for heterogeneous full-depth

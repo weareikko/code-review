@@ -194,7 +194,7 @@ Equivalently, set `CODE_REVIEW_MODEL` and the provider's key (e.g. `ANTHROPIC_AP
 
 ## Providers
 
-`code-review` uses [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi-ai) for model access. Any registered provider can be selected with `--model provider/modelId` (e.g. `anthropic/claude-sonnet-4-5`, `openrouter/anthropic/claude-3-opus-20240229`, `google/gemini-2.0-flash`, `ollama/qwen2.5-coder:32b`). See [Providers](https://github.com/weareikko/code-review/blob/main/docs/providers.md) for per-provider setup and the model pool.
+`code-review` uses [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi-ai) for model access. Any registered provider can be selected with `--model provider/modelId` (e.g. `anthropic/claude-sonnet-4-5`, `openrouter/anthropic/claude-opus-4.5`, `google/gemini-2.5-flash`, `ollama/qwen2.5-coder:32b`). See [Providers](https://github.com/weareikko/code-review/blob/main/docs/providers.md) for per-provider setup and the model pool.
 
 ## Artifacts
 
