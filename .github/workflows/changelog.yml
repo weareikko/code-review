@@ -19,7 +19,7 @@ jobs:
       # Every change to what ships (the package, the composite action and the
       # reusable workflow) needs a fragment in .changelog/, unless the pull
       # request has the `no-changelog` label (tests, refactors, tooling).
-      - uses: weareikko/changelog@033a4d4ec4713fc606ebe2ecb097a086fce6fcf2 # 1.2.0
+      - uses: weareikko/changelog@492f8b1cd2aa5e2462d51d4ff75a70e019c81844 # 1.2.1
         with:
           command: check
           require-paths: |

@@ -118,7 +118,7 @@ jobs:
       - name: Fold changelog fragments
         id: changelog
         if: steps.head.outputs.latest == 'true'
-        uses: weareikko/changelog@033a4d4ec4713fc606ebe2ecb097a086fce6fcf2 # 1.2.0
+        uses: weareikko/changelog@492f8b1cd2aa5e2462d51d4ff75a70e019c81844 # 1.2.1
         with:
           command: release
           version: ${{ steps.bump.outputs.version || 'auto' }}
