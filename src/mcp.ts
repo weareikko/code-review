@@ -72,7 +72,7 @@ export interface ConnectMcpServersOptions {
   maxResultChars?: number;
   /**
    * Supported library extension point (also the test seam): build the transport
-   * for a config instead of the real stdio/http/sse one. See `docs/mcp.md`.
+   * for a config instead of the real stdio/http one. See `docs/mcp.md`.
    */
   createTransport?: (config: McpServerConfig) => McpTransport;
   /**
@@ -162,12 +162,6 @@ export function createMcpTransport(config: McpServerConfig): McpTransport {
         // and skipping it avoids a background reconnect loop per server.
         openGetStream: false,
       });
-    case 'sse':
-      // pi-mcp implements only streamable HTTP. The config layer still parses
-      // `type: sse`, so such a server is reported unavailable with this hint.
-      throw new Error(
-        "legacy SSE transport is not supported; use the server's streamable HTTP endpoint",
-      );
     default:
       throw new Error(`Unsupported MCP transport: ${String(config.type)}`);
   }

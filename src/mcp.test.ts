@@ -345,14 +345,6 @@ describe('createMcpTransport', () => {
     expect(built.options.openGetStream).toBe(false);
   });
 
-  it('refuses a legacy SSE server with a hint to use streamable HTTP', () => {
-    expect(() =>
-      createMcpTransport(
-        config('docs', { type: 'sse', command: undefined, url: 'https://docs.test/sse' }),
-      ),
-    ).toThrow("legacy SSE transport is not supported; use the server's streamable HTTP endpoint");
-  });
-
   it('rejects a transport type the bridge cannot build', () => {
     expect(() =>
       createMcpTransport(config('bad', { type: 'ws' as unknown as McpServerConfig['type'] })),
@@ -406,22 +398,6 @@ describe('connectMcpServers', () => {
     try {
       expect(fake.listRequests).toBe(TOOLS.length);
       expect(conn.tools.map((t) => t.name)).toEqual(['mcp__tracker__get_issue']);
-    } finally {
-      await conn.close();
-    }
-  });
-
-  it('reports a legacy SSE server as unavailable with a hint', async () => {
-    const logger = captureLogger();
-    const conn = await connectMcpServers(
-      [config('legacy', { type: 'sse', command: undefined, url: 'https://docs.test/sse' })],
-      { logger },
-    );
-    try {
-      expect(conn.servers[0]?.status).toBe('unavailable');
-      expect(logger.lines.warn).toEqual([
-        'MCP server "legacy" unavailable: legacy SSE transport is not supported; use the server\'s streamable HTTP endpoint',
-      ]);
     } finally {
       await conn.close();
     }
