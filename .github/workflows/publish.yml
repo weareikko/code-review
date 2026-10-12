@@ -1,15 +1,20 @@
 name: Publish
 
 # Run from the Actions tab or with `gh workflow run publish.yml -f bump=patch`.
-# npm trusted publishing is bound to this file name: keep `npm publish` here.
+# npm trusted publishing is bound to this file name: keep the publish job here.
 on:
   workflow_dispatch:
     inputs:
       bump:
-        description: 'Version bump (on 0.x, a minor bump marks a breaking change)'
+        description: 'Version bump (on 0.x, a minor bump marks a breaking change; the pre* bumps create a prerelease)'
         type: choice
-        options: [patch, minor, major]
+        options: [patch, minor, major, prepatch, preminor, premajor, prerelease]
         default: patch
+      preid:
+        description: 'Prerelease identifier, used by the pre* bumps only'
+        type: choice
+        options: [alpha, beta, rc]
+        default: alpha
 
 concurrency: release
 
@@ -54,7 +59,11 @@ jobs:
       pull-requests: read
     outputs:
       version: ${{ steps.version.outputs.version }}
-      body: ${{ steps.changelog.outputs.body }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      dist-tag: ${{ steps.version.outputs.dist-tag }}
+      # A stable release of a prerelease can have no new fragment: its body
+      # then names the prerelease.
+      body: ${{ steps.changelog.outputs.changed == 'true' && steps.changelog.outputs.body || format('Stable release of {0}.', steps.version.outputs.previous) }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -66,13 +75,30 @@ jobs:
         with:
           node-version: '24'
 
+      # A prerelease version (with a `-`, e.g. 1.2.0-beta.0) goes to the `next`
+      # dist-tag on npm, any other version to `latest`.
       - name: Bump version
         id: version
         env:
           BUMP: ${{ inputs.bump }}
+          PREID: ${{ inputs.preid }}
         run: |
-          npm version "$BUMP" --no-git-tag-version
-          echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
+          PREVIOUS="$(node -p 'require("./package.json").version')"
+          npm version "$BUMP" --preid "$PREID" --no-git-tag-version
+          VERSION="$(node -p 'require("./package.json").version')"
+          if [[ $VERSION == *-* ]]; then
+            PRERELEASE=true
+            DIST_TAG=next
+          else
+            PRERELEASE=false
+            DIST_TAG=latest
+          fi
+          {
+            echo "previous=$PREVIOUS"
+            echo "version=$VERSION"
+            echo "prerelease=$PRERELEASE"
+            echo "dist-tag=$DIST_TAG"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Fold changelog fragments
         id: changelog
@@ -81,9 +107,18 @@ jobs:
           command: release
           version: ${{ steps.version.outputs.version }}
 
+      # Promoting a prerelease (1.0.0-rc.1 to 1.0.0) can have no new fragment:
+      # the prerelease already folded them.
       - name: Fail when there is nothing to release
         if: steps.changelog.outputs.changed != 'true'
+        env:
+          PREVIOUS: ${{ steps.version.outputs.previous }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
+          if [[ $PREVIOUS == *-* && $VERSION != *-* ]]; then
+            echo "::notice::No fragment in .changelog/: stable release of $PREVIOUS."
+            exit 0
+          fi
           echo "::error::No fragment in .changelog/: nothing to release."
           exit 1
 
@@ -100,6 +135,9 @@ jobs:
 
   # A tag pushed with GITHUB_TOKEN does not start other workflows, so the
   # publish job runs in this workflow, on the tag the release job pushed.
+  # Every step can run again: npm skips a version it already has, and the
+  # GitHub release is updated when it exists. "Re-run failed jobs" on this
+  # job publishes what a failed run left.
   publish:
     name: Publish to npm
     needs: release
@@ -107,6 +145,10 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+      PRERELEASE: ${{ needs.release.outputs.prerelease }}
+      DIST_TAG: ${{ needs.release.outputs.dist-tag }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -117,17 +159,24 @@ jobs:
         with:
           node-version: '24'
           cache: 'npm'
-          registry-url: https://registry.npmjs.org/
 
       - name: Install dependencies
         run: npm ci
 
+      # The action publishes with --ignore-scripts, so `prepublishOnly` does not
+      # run: this step builds `dist/`, and the test job ran the checks.
       - name: Build package
         run: npm run build
 
-      - name: Publish package
-        # Auth is OIDC trusted publishing (id-token: write + --provenance); no npm token needed.
-        run: npm publish --provenance --access public
+      # Trusted publishing (OIDC): no npm token. A version that npm already
+      # has is skipped.
+      - name: Publish @weareikko/code-review
+        uses: JS-DevTools/npm-publish@0fd2f4369c5d6bcfcde6091a7c527d810b9b5c3f # v4.1.5
+        with:
+          package: .
+          access: public
+          provenance: true
+          tag: ${{ env.DIST_TAG }}
 
       - name: Create GitHub Release
         uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
@@ -135,16 +184,20 @@ jobs:
           tag: ${{ needs.release.outputs.version }}
           name: ${{ needs.release.outputs.version }}
           body: ${{ needs.release.outputs.body }}
+          prerelease: ${{ env.PRERELEASE }}
+          # GitHub's latest release follows the `latest` dist-tag on npm.
+          makeLatest: ${{ env.PRERELEASE != 'true' }}
+          allowUpdates: true
 
+      # A prerelease does not move the `0` / `0.x` tags.
       - name: Update moving version tags
+        if: env.PRERELEASE != 'true'
         # Re-point the MAJOR (e.g. 0) and MAJOR.MINOR (e.g. 0.8) tags at this release
         # so consumers can pin `@0` or `@0.8` and pick up newer releases automatically,
         # à la actions/checkout. Semantics differ while pre-1.0: a 0.x minor bump marks
         # a breaking change, so `@0` tracks the latest stable release INCLUDING breaking
         # changes, whereas `@0.8` is the non-breaking patch channel (see the README pin
         # note). At 1.0, `@1` becomes a proper semver compatibility boundary.
-        env:
-          VERSION: ${{ needs.release.outputs.version }}
         run: |
           MAJOR_TAG=${VERSION%%.*}
           MINOR_TAG=${VERSION%.*}
