@@ -115,6 +115,9 @@ function makeGitHubBackend() {
   const labels = new Set<string>();
   const labelRequests: string[] = [];
   const labelState = { failLabels: false };
+  // `failReviews` makes every review POST answer 422, as GitHub does when it
+  // rejects a comment position.
+  const reviewState = { failReviews: false };
   let nextId = 1000;
   const jsonResponse = (value: unknown): Response =>
     new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
@@ -155,6 +158,12 @@ function makeGitHubBackend() {
     if (method === 'GET' && path.endsWith('/pulls/1/comments')) return jsonResponse(reviewComments);
     if (method === 'GET' && path.endsWith('/issues/1/comments')) return jsonResponse(issueComments);
     if (method === 'POST' && path.endsWith('/pulls/1/reviews')) {
+      if (reviewState.failReviews) {
+        return new Response(JSON.stringify({ message: 'Unprocessable Entity' }), {
+          status: 422,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
       reviewsPosted.push(bodyJson);
       for (const c of bodyJson.comments ?? []) {
         reviewComments.push({
@@ -203,6 +212,7 @@ function makeGitHubBackend() {
     labels,
     labelRequests,
     labelState,
+    reviewState,
   };
 }
 
@@ -296,6 +306,29 @@ describe('run() over an in-memory GitHubPlatform', () => {
     expect(third.skipped).toBe(true);
     expect(third.posted).toBe(0);
     expect(backend.reviewsPosted).toHaveLength(1);
+  });
+});
+
+describe('run() over GitHub when posting the inline comments fails', () => {
+  it('does not mark the commit as reviewed, so the rerun is not skipped', async () => {
+    const backend = makeGitHubBackend();
+    backend.reviewState.failReviews = true;
+    vi.stubGlobal('fetch', backend.fetchImpl);
+
+    // Run 1: the batched review and the single-comment retry both answer 422, so
+    // the run fails before it writes the summary and its reviewed-commit footer.
+    await expect(run(makeConfig(cwd))).rejects.toMatchObject({ status: 422 });
+    expect(backend.reviewsPosted).toHaveLength(0);
+    expect(backend.issueComments).toHaveLength(0);
+
+    // Run 2 (not forced): no footer marks the head commit, so the review runs
+    // again, posts the comment and writes the summary.
+    backend.reviewState.failReviews = false;
+    const second = await run(makeConfig(cwd));
+    expect(second.skipped).toBeUndefined();
+    expect(second.posted).toBe(1);
+    expect(second.summary?.action).toBe('created');
+    expect(backend.issueComments[0].body).toContain(buildReviewedCommitFooter(HEAD_SHA));
   });
 });
 

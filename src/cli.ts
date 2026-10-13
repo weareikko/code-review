@@ -431,6 +431,48 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
       return { generated, posted: 0, usage, summary: null };
     }
 
+    let draftsPublishFailed = 0;
+    let raceLost = 0;
+    const posted = await traceDiagnosticPhase(
+      'scm.post_comments',
+      config,
+      runId,
+      withHttpStamping(
+        () => platform.lastResponse(),
+        async (context) => {
+          const result = await platform.postComments(generated, config.postingMode);
+          recordCommentCounts(context, generated);
+          context.posted = result.posted;
+          if (result.drafts) {
+            context.draftsAbandoned = result.drafts.abandoned;
+            context.draftsCreated = result.drafts.created;
+            context.draftsDeletedPrePublish = result.drafts.deletedPrePublish;
+            context.draftsPublished = result.drafts.published;
+            context.draftsPublishFailed = result.drafts.publishFailed;
+            draftsPublishFailed = result.drafts.publishFailed;
+            raceLost = result.drafts.deletedPrePublish;
+          }
+          return result.posted;
+        },
+      ),
+    );
+    const duplicates = generated.length - newCount;
+    const raceExtra = raceLost > 0 ? `, ${raceLost} dropped by pre-publish re-check` : '';
+    console.log(
+      `Posted ${posted} new review comment(s) (${duplicates} duplicates skipped${raceExtra}).`,
+    );
+    if (draftsPublishFailed > 0) {
+      console.warn(
+        `[code-review] ${draftsPublishFailed} comment(s) could not be published individually after bulk_publish failed and were dropped.`,
+      );
+    }
+    runContext.posted = posted;
+    runContext.draftsPublishFailed = draftsPublishFailed;
+    if (posted > 0) runContext.postedBySeverity = countPostedBySeverity(generated);
+
+    // The summary carries the reviewed-commit footer that makes the next run skip
+    // this commit, so write it only once the inline comments are posted: a run
+    // whose posting throws must leave the commit unreviewed for the rerun.
     let summary: SummaryResult | null = null;
     if (config.postSummary && parsed.summary) {
       summary = await traceDiagnosticPhase(
@@ -485,45 +527,6 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
     } else if (config.postSummary && !parsed.summary) {
       console.log('No summary returned by the reviewer; skipping summary note.');
     }
-
-    let draftsPublishFailed = 0;
-    let raceLost = 0;
-    const posted = await traceDiagnosticPhase(
-      'scm.post_comments',
-      config,
-      runId,
-      withHttpStamping(
-        () => platform.lastResponse(),
-        async (context) => {
-          const result = await platform.postComments(generated, config.postingMode);
-          recordCommentCounts(context, generated);
-          context.posted = result.posted;
-          if (result.drafts) {
-            context.draftsAbandoned = result.drafts.abandoned;
-            context.draftsCreated = result.drafts.created;
-            context.draftsDeletedPrePublish = result.drafts.deletedPrePublish;
-            context.draftsPublished = result.drafts.published;
-            context.draftsPublishFailed = result.drafts.publishFailed;
-            draftsPublishFailed = result.drafts.publishFailed;
-            raceLost = result.drafts.deletedPrePublish;
-          }
-          return result.posted;
-        },
-      ),
-    );
-    const duplicates = generated.length - newCount;
-    const raceExtra = raceLost > 0 ? `, ${raceLost} dropped by pre-publish re-check` : '';
-    console.log(
-      `Posted ${posted} new review comment(s) (${duplicates} duplicates skipped${raceExtra}).`,
-    );
-    if (draftsPublishFailed > 0) {
-      console.warn(
-        `[code-review] ${draftsPublishFailed} comment(s) could not be published individually after bulk_publish failed and were dropped.`,
-      );
-    }
-    runContext.posted = posted;
-    runContext.draftsPublishFailed = draftsPublishFailed;
-    if (posted > 0) runContext.postedBySeverity = countPostedBySeverity(generated);
 
     // Labels reflect the outcome only once the review succeeded and its comments
     // are published; any earlier failure has already thrown, so a failed review
