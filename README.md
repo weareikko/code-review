@@ -258,7 +258,7 @@ Prereleases follow the file `.changelog/prerelease` ([prereleases](https://githu
 A manual run forces a bump, for example a major version without a breaking entry:
 
 ```bash
-gh workflow run publish.yml -f bump=major   # or patch / minor, or prepatch / preminor / premajor / prerelease with -f preid=beta
+gh workflow run publish.yml -f version=major   # or patch / minor
 ```
 
 Publishing uses npm trusted publishing (no npm token) and skips a version that npm already has: if the `Publish to npm` job fails, use "Re-run failed jobs".
