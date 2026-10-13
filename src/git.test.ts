@@ -1,15 +1,22 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  getMergeCommitLog,
   getMergeCommitLogArguments,
+  getMergeDiff,
   getMergeDiffArguments,
   getMergeDiffCommand,
+  git,
+  prepareGitHistory,
   summarizeDiff,
 } from './git.js';
 
 describe('git', () => {
   it('builds the same merge diff arguments used for review and comment positions', () => {
-    expect(getMergeDiffArguments('develop')).toEqual([
-      'refs/remotes/origin/develop...HEAD',
+    expect(getMergeDiffArguments('develop', 'abc1234')).toEqual([
+      'refs/remotes/origin/develop...abc1234',
       '--unified=20',
       '--',
     ]);
@@ -19,11 +26,11 @@ describe('git', () => {
     // With the default quotepath=true, git emits `--- "a/caf\303\251.ts"`, which
     // the comment-position parser cannot match → comments fall back to invalid
     // one-sided positions. The diff invocation must disable it.
-    expect(getMergeDiffCommand('develop')).toEqual([
+    expect(getMergeDiffCommand('develop', 'abc1234')).toEqual([
       '-c',
       'core.quotepath=false',
       'diff',
-      'refs/remotes/origin/develop...HEAD',
+      'refs/remotes/origin/develop...abc1234',
       '--unified=20',
       '--',
     ]);
@@ -31,23 +38,23 @@ describe('git', () => {
 
   describe('getMergeCommitLogArguments', () => {
     it('targets the correct ref range with default remote', () => {
-      const args = getMergeCommitLogArguments('main');
-      expect(args[0]).toBe('refs/remotes/origin/main...HEAD');
+      const args = getMergeCommitLogArguments('main', 'abc1234');
+      expect(args[0]).toBe('refs/remotes/origin/main...abc1234');
     });
 
     it('uses a custom remote when provided', () => {
-      const args = getMergeCommitLogArguments('main', { remote: 'upstream' });
-      expect(args[0]).toBe('refs/remotes/upstream/main...HEAD');
+      const args = getMergeCommitLogArguments('main', 'abc1234', { remote: 'upstream' });
+      expect(args[0]).toBe('refs/remotes/upstream/main...abc1234');
     });
 
     it('uses chronological order and excludes merge commits', () => {
-      const args = getMergeCommitLogArguments('main');
+      const args = getMergeCommitLogArguments('main', 'abc1234');
       expect(args).toContain('--reverse');
       expect(args).toContain('--no-merges');
     });
 
     it('formats each commit with hash, author, date, and full message', () => {
-      const args = getMergeCommitLogArguments('main');
+      const args = getMergeCommitLogArguments('main', 'abc1234');
       const formatArg = args.find((a) => a.startsWith('--pretty='));
       expect(formatArg).toBeDefined();
       // Must include the key placeholders
@@ -119,6 +126,82 @@ describe('git', () => {
         linesAdded: 1,
         linesRemoved: 1,
       });
+    });
+  });
+
+  describe('merge diff with a stale CI merge commit', () => {
+    const identity = ['-c', 'user.name=Test', '-c', 'user.email=test@example.com'];
+    const commit = async (cwd: string, file: string, message: string) => {
+      await writeFile(join(cwd, file), `${file}\n`);
+      await git(['add', file], { cwd });
+      await git([...identity, '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', message], {
+        cwd,
+      });
+      return (await git(['rev-parse', 'HEAD'], { cwd })).trim();
+    };
+    const merge = async (cwd: string, ref: string) => {
+      await git(
+        [...identity, '-c', 'commit.gpgsign=false', 'merge', '-q', '--no-ff', '--no-edit', ref],
+        {
+          cwd,
+        },
+      );
+    };
+
+    it('diffs the target with the MR head commit, not with HEAD', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'code-review-git-'));
+      try {
+        const origin = join(root, 'origin.git');
+        const work = join(root, 'work');
+        const ci = join(root, 'ci');
+        await git(['init', '-q', '--bare', '-b', 'main', origin]);
+        await git(['clone', '-q', origin, work]);
+        await commit(work, 'readme.txt', 'Initial commit');
+        // A stacked MR: `feature` targets `base`, which is behind `main`.
+        await git(['switch', '-q', '-c', 'base'], { cwd: work });
+        await commit(work, 'base.txt', 'Base change');
+        await git(['switch', '-q', '-c', 'feature'], { cwd: work });
+        const head = await commit(work, 'feature.txt', 'Feature change');
+        await git(['switch', '-q', 'main'], { cwd: work });
+        await commit(work, 'unrelated.txt', 'Unrelated change');
+        await git(['push', '-q', 'origin', 'main', 'base', 'feature'], { cwd: work });
+
+        // CI checks out a merge commit built on a base that also holds `main`.
+        await git(['clone', '-q', origin, ci]);
+        await merge(ci, 'origin/base');
+        await merge(ci, head);
+        const stale = await git(['diff', '--name-only', 'origin/base...HEAD'], { cwd: ci });
+        expect(stale).toContain('unrelated.txt');
+
+        await prepareGitHistory('feature', 'base', head, { cwd: ci });
+        const diff = await getMergeDiff('base', head, { cwd: ci });
+        expect(summarizeDiff(diff).filesChanged).toBe(1);
+        expect(diff).toContain('diff --git a/feature.txt b/feature.txt');
+        const log = await getMergeCommitLog('base', head, { cwd: ci });
+        expect(log).toContain('Feature change');
+        expect(log).not.toContain('Unrelated change');
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    });
+
+    it('fails with a hint when the MR head commit is unknown', async () => {
+      const root = await mkdtemp(join(tmpdir(), 'code-review-git-'));
+      try {
+        const origin = join(root, 'origin.git');
+        const work = join(root, 'work');
+        await git(['init', '-q', '--bare', '-b', 'main', origin]);
+        await git(['clone', '-q', origin, work]);
+        await commit(work, 'readme.txt', 'Initial commit');
+        await git(['push', '-q', 'origin', 'main'], { cwd: work });
+
+        const missing = 'f'.repeat(40);
+        await expect(prepareGitHistory('feature', 'main', missing, { cwd: work })).rejects.toThrow(
+          `merge-base refs/remotes/origin/main ${missing} failed`,
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
     });
   });
 });

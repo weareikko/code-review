@@ -48,13 +48,19 @@ function remoteRef(remote: string, branch: string): string {
   return `refs/remotes/${remote}/${branch}`;
 }
 
+/**
+ * Diff the target branch with the MR head commit, not `HEAD`: CI checks out a
+ * merge commit (GitHub `refs/pull/N/merge`, GitLab merged results) whose base
+ * can be stale, and then `HEAD` carries commits the MR does not change.
+ */
 export function getMergeDiffArguments(
   targetBranch: string,
+  headSha: string,
   options: { remote?: string; context?: number } = {},
 ): string[] {
   const remote = options.remote ?? 'origin';
   const context = options.context ?? DEFAULT_DIFF_CONTEXT;
-  return [`${remoteRef(remote, targetBranch)}...HEAD`, `--unified=${context}`, '--'];
+  return [`${remoteRef(remote, targetBranch)}...${headSha}`, `--unified=${context}`, '--'];
 }
 
 /**
@@ -66,9 +72,15 @@ export function getMergeDiffArguments(
  */
 export function getMergeDiffCommand(
   targetBranch: string,
+  headSha: string,
   options: { remote?: string; context?: number } = {},
 ): string[] {
-  return ['-c', 'core.quotepath=false', 'diff', ...getMergeDiffArguments(targetBranch, options)];
+  return [
+    '-c',
+    'core.quotepath=false',
+    'diff',
+    ...getMergeDiffArguments(targetBranch, headSha, options),
+  ];
 }
 
 async function fetchBranch(remote: string, branch: string, options: GitOptions): Promise<void> {
@@ -108,6 +120,7 @@ export async function removeGeneratedCodeQualityArtifacts(
 export async function prepareGitHistory(
   sourceBranch: string,
   targetBranch: string,
+  headSha: string,
   options: PrepareGitHistoryOptions = {},
 ): Promise<void> {
   const remote = options.remote ?? 'origin';
@@ -133,15 +146,15 @@ export async function prepareGitHistory(
   }
 
   try {
-    await git(['merge-base', remoteRef(remote, targetBranch), 'HEAD'], options);
+    await git(['merge-base', remoteRef(remote, targetBranch), headSha], options);
   } catch (error) {
     const fetchDetail =
       fetchErrors.length > 0 ? `\nFetch warnings:\n${fetchErrors.join('\n')}` : '';
     throw new GitError(
-      `Unable to prepare Git history for MR review: merge-base ${remoteRef(remote, targetBranch)} HEAD failed.`,
+      `Unable to prepare Git history for MR review: merge-base ${remoteRef(remote, targetBranch)} ${headSha} failed.`,
       {
         cause: error,
-        hint: `Set GIT_DEPTH: 0 or ensure ${remote}/${targetBranch} is fetchable.${fetchDetail}\n${gitErrorMessage(error)}`,
+        hint: `Set GIT_DEPTH: 0 or ensure ${remote}/${targetBranch} and ${remote}/${sourceBranch} are fetchable.${fetchDetail}\n${gitErrorMessage(error)}`,
       },
     );
   }
@@ -149,18 +162,20 @@ export async function prepareGitHistory(
 
 export async function getMergeDiff(
   targetBranch: string,
+  headSha: string,
   options: GitOptions & { remote?: string; context?: number } = {},
 ): Promise<string> {
-  return git(getMergeDiffCommand(targetBranch, options), options);
+  return git(getMergeDiffCommand(targetBranch, headSha, options), options);
 }
 
 export function getMergeCommitLogArguments(
   targetBranch: string,
+  headSha: string,
   options: { remote?: string } = {},
 ): string[] {
   const remote = options.remote ?? 'origin';
   return [
-    `${remoteRef(remote, targetBranch)}...HEAD`,
+    `${remoteRef(remote, targetBranch)}...${headSha}`,
     '--pretty=tformat:commit %h%nAuthor: %an%nDate: %as%n%n%s%n%n%b',
     '--reverse',
     '--no-merges',
@@ -169,9 +184,10 @@ export function getMergeCommitLogArguments(
 
 export async function getMergeCommitLog(
   targetBranch: string,
+  headSha: string,
   options: GitOptions & { remote?: string } = {},
 ): Promise<string> {
-  return git(['log', ...getMergeCommitLogArguments(targetBranch, options)], options);
+  return git(['log', ...getMergeCommitLogArguments(targetBranch, headSha, options)], options);
 }
 
 export interface DiffSummary {

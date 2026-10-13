@@ -159,7 +159,7 @@ export interface RunReviewOptions {
   cwd?: string;
   diff: string;
   /**
-   * Commit messages for all non-merge commits in the MR (merge-base…HEAD),
+   * Commit messages for all non-merge commits in the MR (merge-base…MR head),
    * in chronological order. When provided, a `<commits>` section is prepended
    * to the user prompt so the reviewer understands the intent behind each change.
    * Produced by `getMergeCommitLog` in `src/git.ts`.
