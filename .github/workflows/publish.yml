@@ -1,25 +1,18 @@
 name: Publish
 
 # Each merge into main releases what its fragments describe. A manual run
-# (`gh workflow run publish.yml -f bump=minor`) forces a bump.
+# (`gh workflow run publish.yml -f version=major`) forces a bump.
 # npm trusted publishing is bound to this file name: keep the publish job here.
 on:
-  # The `chore: release` commit that this workflow pushes with GITHUB_TOKEN
-  # starts no new run.
   push:
     branches: [main]
   workflow_dispatch:
     inputs:
-      bump:
-        description: 'Version bump: `auto` follows the fragments; the pre* bumps create a prerelease on the `next` npm dist-tag'
+      version:
+        description: 'Version: `auto` follows the fragments; `patch`, `minor` or `major` forces that bump'
         type: choice
-        options: [auto, patch, minor, major, prepatch, preminor, premajor, prerelease]
+        options: [auto, patch, minor, major]
         default: auto
-      preid:
-        description: 'Prerelease identifier, used by the pre* bumps only'
-        type: choice
-        options: [alpha, beta, rc]
-        default: alpha
 
 # One release at a time. GitHub keeps only the newest pending run: it
 # releases everything that main has at that point.
@@ -58,8 +51,10 @@ jobs:
       - name: Test
         run: npm test
 
+  # Folds the fragments, bumps package.json, commits `chore: release <version>`,
+  # tags, pushes, moves the `0` / `0.x` tags and creates the GitHub release.
   release:
-    name: Bump version and changelog
+    name: Release
     needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
@@ -67,134 +62,30 @@ jobs:
       contents: write
       pull-requests: read
     outputs:
-      released: ${{ steps.version.outputs.released }}
-      version: ${{ steps.version.outputs.version }}
-      prerelease: ${{ steps.version.outputs.prerelease }}
-      dist-tag: ${{ steps.version.outputs.dist-tag }}
+      version: ${{ steps.release.outputs.version }}
+      dist-tag: ${{ steps.release.outputs.dist-tag }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-        with:
-          # The changelog action reads the commit that added each fragment, and the tags.
-          fetch-depth: 0
 
-      # Only release the commit that this run tested: when main has moved on,
-      # the run of the newer commit releases.
-      - name: Check that main has not moved on
-        id: head
-        run: |
-          git fetch --quiet origin main
-          if [[ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]]; then
-            echo "::notice::main has moved on since this run started: the newer run releases."
-            echo "latest=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "latest=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Setup Node.js
-        if: steps.head.outputs.latest == 'true'
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
-        with:
-          node-version: '24'
-
-      # `auto` (a push, or the default of a manual run) leaves the version to
-      # the changelog action. An explicit bump sets it here first.
-      - name: Bump version
-        id: bump
-        if: steps.head.outputs.latest == 'true'
-        env:
-          BUMP: ${{ inputs.bump || 'auto' }}
-          PREID: ${{ inputs.preid || 'alpha' }}
-        run: |
-          echo "previous=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
-          if [[ $BUMP != auto ]]; then
-            npm version "$BUMP" --preid "$PREID" --no-git-tag-version
-            echo "version=$(node -p 'require("./package.json").version')" >> "$GITHUB_OUTPUT"
-          fi
-
-      # With `version: auto`, the action computes the next version from the
-      # fragments and `.changelog/prerelease` (see "Development / release" in
-      # the README), and releases nothing without an entry, except the stable
-      # release of a prerelease once the prerelease file is gone.
-      - name: Fold changelog fragments
-        id: changelog
-        if: steps.head.outputs.latest == 'true'
-        uses: weareikko/changelog@492f8b1cd2aa5e2462d51d4ff75a70e019c81844 # 1.2.1
+      - name: Release
+        id: release
+        uses: weareikko/changelog@9d93346df9858eaa29007bd8530aad8f4c5b539a # 0.1.0
         with:
           command: release
-          version: ${{ steps.bump.outputs.version || 'auto' }}
-          current: ${{ !steps.bump.outputs.version && steps.bump.outputs.previous || '' }}
+          version: ${{ inputs.version || 'auto' }}
+          commit-message: 'chore: release {version}'
+          moving-tags: true
 
-      # Promoting a prerelease with an explicit bump (0.10.0-rc.1 to 0.10.0)
-      # can have no new fragment: the prerelease already folded them. A
-      # prerelease version (with a `-`, e.g. 0.10.0-beta.0) goes to the `next`
-      # dist-tag on npm, any other version to `latest`.
-      - name: Set version
-        id: version
-        if: steps.head.outputs.latest == 'true'
-        env:
-          BUMPED: ${{ steps.bump.outputs.version }}
-          PREVIOUS: ${{ steps.bump.outputs.previous }}
-          CHANGED: ${{ steps.changelog.outputs.changed }}
-          COMPUTED: ${{ steps.changelog.outputs.version }}
-        run: |
-          VERSION="${BUMPED:-$COMPUTED}"
-          if [[ -z $BUMPED ]]; then
-            if [[ $CHANGED != true ]]; then
-              echo "::notice::No fragment and no pull request from skip-authors: nothing to release."
-              echo "released=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            npm version "$VERSION" --no-git-tag-version
-          elif [[ $CHANGED != true ]]; then
-            if [[ $PREVIOUS != *-* || $VERSION == *-* ]]; then
-              echo "::error::No fragment in .changelog/: nothing to release."
-              exit 1
-            fi
-            echo "::notice::No fragment in .changelog/: stable release of $PREVIOUS."
-          fi
-          if [[ $VERSION == *-* ]]; then
-            PRERELEASE=true
-            DIST_TAG=next
-          else
-            PRERELEASE=false
-            DIST_TAG=latest
-          fi
-          {
-            echo "released=true"
-            echo "version=$VERSION"
-            echo "prerelease=$PRERELEASE"
-            echo "dist-tag=$DIST_TAG"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Commit, tag and push
-        if: steps.version.outputs.released == 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md .changelog package.json package-lock.json
-          git commit -m "chore: release $VERSION"
-          git tag "$VERSION"
-          git push origin HEAD:main "refs/tags/$VERSION"
-
-  # A tag pushed with GITHUB_TOKEN does not start other workflows, so the
-  # publish job runs in this workflow, on the tag the release job pushed.
-  # Every step can run again: npm skips a version it already has, and the
-  # GitHub release is updated when it exists. "Re-run failed jobs" on this
-  # job publishes what a failed run left.
+  # "Re-run failed jobs" on this job publishes what a failed run left: npm
+  # skips a version that it already has.
   publish:
     name: Publish to npm
     needs: release
-    if: needs.release.outputs.released == 'true'
+    if: needs.release.outputs.version != ''
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       id-token: write
-    env:
-      VERSION: ${{ needs.release.outputs.version }}
-      PRERELEASE: ${{ needs.release.outputs.prerelease }}
-      DIST_TAG: ${{ needs.release.outputs.dist-tag }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -206,48 +97,17 @@ jobs:
           node-version: '24'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm ci
-
       # The action publishes with --ignore-scripts, so `prepublishOnly` does not
       # run: this step builds `dist/`, and the test job ran the checks.
-      - name: Build package
-        run: npm run build
+      - name: Install and build
+        run: |
+          npm ci
+          npm run build
 
-      # Trusted publishing (OIDC): no npm token. A version that npm already
-      # has is skipped.
+      # Trusted publishing (OIDC): no npm token. A prerelease goes to `next`.
       - name: Publish @weareikko/code-review
         uses: JS-DevTools/npm-publish@0fd2f4369c5d6bcfcde6091a7c527d810b9b5c3f # v4.1.5
         with:
-          package: .
           access: public
           provenance: true
-          tag: ${{ env.DIST_TAG }}
-
-      - name: Create GitHub Release
-        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
-        with:
-          tag: ${{ needs.release.outputs.version }}
-          name: ${{ needs.release.outputs.version }}
-          body: Please refer to [CHANGELOG.md](${{ github.server_url }}/${{ github.repository }}/blob/${{ env.VERSION }}/CHANGELOG.md) for details.
-          prerelease: ${{ env.PRERELEASE }}
-          # GitHub's latest release follows the `latest` dist-tag on npm.
-          makeLatest: ${{ env.PRERELEASE != 'true' }}
-          allowUpdates: true
-
-      # A prerelease does not move the `0` / `0.x` tags.
-      - name: Update moving version tags
-        if: env.PRERELEASE != 'true'
-        # Re-point the MAJOR (e.g. 0) and MAJOR.MINOR (e.g. 0.8) tags at this release
-        # so consumers can pin `@0` or `@0.8` and pick up newer releases automatically,
-        # à la actions/checkout. Semantics differ while pre-1.0: a 0.x minor bump marks
-        # a breaking change, so `@0` tracks the latest stable release INCLUDING breaking
-        # changes, whereas `@0.8` is the non-breaking patch channel (see the README pin
-        # note). At 1.0, `@1` becomes a proper semver compatibility boundary.
-        run: |
-          MAJOR_TAG=${VERSION%%.*}
-          MINOR_TAG=${VERSION%.*}
-          for TAG in "$MAJOR_TAG" "$MINOR_TAG"; do
-            git tag -f "$TAG"
-            git push origin "refs/tags/$TAG" --force
-          done
+          tag: ${{ needs.release.outputs.dist-tag }}
