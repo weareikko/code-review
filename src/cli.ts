@@ -254,14 +254,14 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
 
     logger.info('Fetching diff...');
     await traceDiagnosticPhase('git.prepare_history', config, runId, () =>
-      prepareGitHistory(mr.source_branch, mr.target_branch, { cwd: config.cwd }),
+      prepareGitHistory(mr.source_branch, mr.target_branch, refs.head_sha, { cwd: config.cwd }),
     );
     const diff = await traceDiagnosticPhase(
       'git.get_merge_diff',
       config,
       runId,
       async (context) => {
-        const merged = await getMergeDiff(mr.target_branch, {
+        const merged = await getMergeDiff(mr.target_branch, refs.head_sha, {
           cwd: config.cwd,
           ...(config.diffContext > 0 ? { context: config.diffContext } : {}),
         });
@@ -273,7 +273,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
       },
     );
     const commitLog = await traceDiagnosticPhase('git.get_commit_log', config, runId, () =>
-      getMergeCommitLog(mr.target_branch, { cwd: config.cwd }),
+      getMergeCommitLog(mr.target_branch, refs.head_sha, { cwd: config.cwd }),
     );
     const changedFiles = extractChangedFiles(diff);
     const priorThreads = extractPriorThreads(initialDiscussions, changedFiles);

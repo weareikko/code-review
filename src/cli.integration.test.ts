@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from 'vitest';
 import { run } from './cli.js';
 import type { Config } from './config.js';
+import { getMergeCommitLog, getMergeDiff, prepareGitHistory } from './git.js';
 import { runReview } from './gitlab-review.js';
 import { buildGitHubComments, type GitHubReviewCommentPayload } from './platforms/github.js';
 import { buildReviewedCommitFooter, SUMMARY_MARKER } from './posting.js';
@@ -263,7 +264,15 @@ describe('run() over an in-memory GitHubPlatform', () => {
     expect(first.posted).toBe(1);
     expect(first.summary?.action).toBe('created');
     expect(backend.reviewsPosted).toHaveLength(1);
-    expect(backend.reviewsPosted[0].commit_id).toBe(HEAD_SHA);
+    // The diff and commit log come from the PR head commit, not the CI merge commit.
+    expect(prepareGitHistory).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      HEAD_SHA,
+      expect.anything(),
+    );
+    expect(getMergeDiff).toHaveBeenCalledWith(expect.any(String), HEAD_SHA, expect.anything());
+    expect(getMergeCommitLog).toHaveBeenCalledWith(expect.any(String), HEAD_SHA, expect.anything());
     expect(backend.reviewsPosted[0].comments).toEqual([
       expect.objectContaining({ path: 'src/foo.ts', line: 2, side: 'RIGHT' }),
     ]);
