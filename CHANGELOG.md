@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file. Each pull r
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.10.2 - 2026-10-13
+
+### Fixed
+
+- Review only the files that the pull request changes: the diff and the commit log now start from the head commit, not from the CI merge commit, which can hold commits of another branch and made GitHub refuse the review with a 422 ([#173])
+
+[#173]: https://github.com/weareikko/code-review/pull/173
+
 ## 0.10.1 - 2026-10-13
 
 ### Fixed
