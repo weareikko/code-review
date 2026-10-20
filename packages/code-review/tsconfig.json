@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // Type-check against the sources of the workspace packages, so that
+    // `npm run typecheck` works before `npm run build`.
+    "paths": {
+      "@weareikko/agent-context": ["../agent-context/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

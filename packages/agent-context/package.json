@@ -1,0 +1,54 @@
+{
+  "name": "@weareikko/agent-context",
+  "version": "0.10.3",
+  "description": "Shared context, skills and MCP configuration for weareikko pi agents.",
+  "keywords": [
+    "agent",
+    "agents-md",
+    "claude-code",
+    "mcp",
+    "pi",
+    "skills"
+  ],
+  "homepage": "https://github.com/weareikko/code-review/tree/main/packages/agent-context#readme",
+  "bugs": {
+    "url": "https://github.com/weareikko/code-review/issues"
+  },
+  "license": "FSL-1.1-ALv2",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/weareikko/code-review.git",
+    "directory": "packages/agent-context"
+  },
+  "files": [
+    "dist/",
+    "LICENSE",
+    "README.md"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vite build && tsgo -p tsconfig.build.json",
+    "typecheck": "tsgo --noEmit && tsgo -p tsconfig.test.json --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run build && npm pack --dry-run"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.2.0",
+    "memfs": "^4.57.6"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

@@ -2,7 +2,7 @@
   "mcpServers": {
     "docs": {
       "command": "node",
-      "args": ["scripts/docs-mcp.mjs"]
+      "args": ["packages/code-review/scripts/docs-mcp.mjs"]
     },
     "context7": {
       "type": "http",

@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  "exclude": [
+    // Materialized benchmark repositories carry their own sources.
+    "tests/evals/fixtures/**",
+    // The LLM evals (opt-in, `npm run test:evals`) do not type-check yet
+    // against the vitest-evals 0.17 judge and harness types.
+    "tests/evals/**/*.eval.ts",
+    "tests/evals/llm-judge.ts"
+  ]
+}

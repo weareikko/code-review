@@ -1,96 +1,44 @@
 {
-  "name": "@weareikko/code-review",
+  "name": "code-review",
   "version": "0.10.3",
-  "description": "Agent-driven code review for GitLab merge requests and GitHub pull requests, with deduplicated inline comments and summary notes.",
-  "keywords": [
-    "ci",
-    "code-review",
-    "github",
-    "gitlab",
-    "merge-request",
-    "pull-request"
-  ],
-  "homepage": "https://github.com/weareikko/code-review#readme",
-  "bugs": {
-    "url": "https://github.com/weareikko/code-review/issues"
-  },
+  "private": true,
+  "description": "Agent-driven code review for GitLab merge requests and GitHub pull requests (@weareikko/code-review), and the context, skills and MCP configuration it shares with the other weareikko agents (@weareikko/agent-context).",
   "license": "FSL-1.1-ALv2",
+  "author": "weareikko",
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/weareikko/code-review.git"
   },
-  "bin": {
-    "code-review": "./bin/code-review.js"
-  },
-  "files": [
-    "bin/",
-    "dist/",
-    "skills/",
-    "LICENSE",
-    "README.md"
+  "workspaces": [
+    "packages/*"
   ],
   "type": "module",
-  "exports": {
-    ".": {
-      "types": "./dist/review.d.ts",
-      "default": "./dist/review.js"
-    },
-    "./cli": {
-      "types": "./dist/cli.d.ts",
-      "default": "./dist/cli.js"
-    }
-  },
-  "publishConfig": {
-    "access": "public"
-  },
   "scripts": {
-    "build": "vite build && tsgo --emitDeclarationOnly",
+    "build": "npm run build -w @weareikko/agent-context -w @weareikko/code-review",
     "test": "vitest run",
+    "test:watch": "vitest",
     "test:ci": "vitest run --coverage",
-    "test:evals": "vitest run --config vite.eval.config.ts",
-    "snapshot:mr": "node scripts/snapshot-mr.mjs",
-    "typecheck": "tsgo --noEmit",
-    "typecheck:tests": "tsgo -p tsconfig.test.json --noEmit",
+    "test:evals": "npm run test:evals -w @weareikko/code-review",
+    "typecheck": "npm run typecheck --workspaces",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "lint:types": "oxlint --type-aware",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
-    "check": "npm run lint && npm run format:check && npm run typecheck && npm run typecheck:tests && npm test",
-    "prepublishOnly": "npm run check && npm run build && npm pack --dry-run",
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm test",
     "prepare": "husky"
   },
-  "dependencies": {
-    "@earendil-works/pi-agent-core": "1.2.0",
-    "@earendil-works/pi-ai": "1.2.0",
-    "@earendil-works/pi-coding-agent": "1.2.0",
-    "@earendil-works/pi-mcp": "1.2.0",
-    "@opentelemetry/api": "^1.9.1",
-    "@opentelemetry/api-logs": "^0.222.0",
-    "@opentelemetry/resources": "^2.7.1",
-    "@opentelemetry/sdk-node": "^0.222.0",
-    "@opentelemetry/semantic-conventions": "^1.41.1",
-    "diff": "^9.0.0",
-    "isomorphic-git": "^1.38.7",
-    "jsonrepair": "^3.14.0",
-    "typebox": "^1.1.38",
-    "yaml": "^2.9.0"
-  },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.1",
     "@types/node": "^24.12.4",
     "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "@vitest/coverage-v8": "^4.1.8",
-    "dotenv": "^18.0.1",
     "husky": "9.1.7",
     "lint-staged": "17.5.1",
-    "memfs": "^4.57.6",
     "oxfmt": "0.68.0",
     "oxlint": "1.83.0",
     "oxlint-tsgolint": "^7.0.2002",
     "vite": "^8.0.16",
-    "vitest": "^4.1.8",
-    "vitest-evals": "^0.17.0"
+    "vitest": "^4.1.8"
   },
   "lint-staged": {
     "*.{js,ts,json,md,yml,yaml}": "oxfmt --write --no-error-on-unmatched-pattern"

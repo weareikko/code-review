@@ -116,7 +116,7 @@
     "coverage",
     "*.config.js",
     "*.config.ts",
-    "tests/evals/fixtures/swe-prbench/repos"
+    "packages/code-review/tests/evals/fixtures/swe-prbench/repos"
   ],
   "options": {
     "typeAware": true

@@ -1,0 +1,80 @@
+{
+  "name": "@weareikko/code-review",
+  "version": "0.10.3",
+  "description": "Agent-driven code review for GitLab merge requests and GitHub pull requests, with deduplicated inline comments and summary notes.",
+  "keywords": [
+    "ci",
+    "code-review",
+    "github",
+    "gitlab",
+    "merge-request",
+    "pull-request"
+  ],
+  "homepage": "https://github.com/weareikko/code-review/tree/main/packages/code-review#readme",
+  "bugs": {
+    "url": "https://github.com/weareikko/code-review/issues"
+  },
+  "license": "FSL-1.1-ALv2",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/weareikko/code-review.git",
+    "directory": "packages/code-review"
+  },
+  "bin": {
+    "code-review": "./bin/code-review.js"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "skills/",
+    "LICENSE",
+    "README.md"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/review.d.ts",
+      "default": "./dist/review.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "default": "./dist/cli.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vite build && tsgo -p tsconfig.build.json",
+    "typecheck": "tsgo --noEmit && tsgo -p tsconfig.test.json --noEmit",
+    "test:evals": "vitest run --config vite.eval.config.ts",
+    "snapshot:mr": "node scripts/snapshot-mr.mjs",
+    "prepublishOnly": "npm run typecheck && npm run build && npm pack --dry-run"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "1.2.0",
+    "@earendil-works/pi-ai": "1.2.0",
+    "@earendil-works/pi-coding-agent": "1.2.0",
+    "@earendil-works/pi-mcp": "1.2.0",
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/api-logs": "^0.222.0",
+    "@opentelemetry/resources": "^2.7.1",
+    "@opentelemetry/sdk-node": "^0.222.0",
+    "@opentelemetry/semantic-conventions": "^1.41.1",
+    "@weareikko/agent-context": "*",
+    "diff": "^9.0.0",
+    "isomorphic-git": "^1.38.7",
+    "jsonrepair": "^3.14.0",
+    "typebox": "^1.1.38",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.1",
+    "dotenv": "^18.0.1",
+    "memfs": "^4.57.6",
+    "vitest-evals": "^0.17.0"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
