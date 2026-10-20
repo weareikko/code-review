@@ -38,7 +38,7 @@ export type {
   UsageBreakdown,
 } from './gitlab-review.js';
 export type { ReviewIntent } from './intent.js';
-export type { McpServerConfig, McpServerSource } from './mcp-config.js';
+export type { McpServerConfig, McpServerSource } from '@weareikko/agent-context';
 export type { ConnectMcpServersOptions, McpConnection, McpServerStatus } from './mcp.js';
 export { connectMcpServers } from './mcp.js';
 export { filterDiff } from './gitlab-review.js';
@@ -69,31 +69,34 @@ export {
   sha256,
 } from './fingerprints.js';
 export { buildGeneratedComments, buildPayload } from './payloads.js';
-export type { SkillLinkContext, SkillRef } from './skill-links.js';
+export type {
+  LoadNamedSkillOptions,
+  Skill,
+  SkillLinkContext,
+  SkillOrigin,
+  SkillReadCounter,
+  SkillReadTarget,
+  SkillRef,
+  SkillSpec,
+} from '@weareikko/agent-context';
 export {
   blobUrl,
-  formatSkillLink,
-  gitRepoWebUrl,
-  skillDisplayName,
-  skillSourceUrl,
-} from './skill-links.js';
-export type { SkillReadCounter, SkillReadTarget } from './skill-usage.js';
-export {
   createSkillReadCounter,
   findSkillForPath,
   formatMcpUsageState,
   formatReviewUsageSummary,
+  formatSkillLink,
   formatSkillUsageState,
-  readToolPath,
-} from './skill-usage.js';
-export type { LoadNamedSkillOptions, Skill, SkillOrigin, SkillSpec } from './skills.js';
-export {
+  gitRepoWebUrl,
   gitSkillCacheKey,
   loadNamedSkill,
   parseSkillSpec,
+  readToolPath,
   resolveNpmSkillDir,
   resolveSkillCacheDir,
-} from './skills.js';
+  skillDisplayName,
+  skillSourceUrl,
+} from '@weareikko/agent-context';
 export {
   SUMMARY_HISTORY_END,
   SUMMARY_HISTORY_ENTRY_END,

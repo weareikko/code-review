@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentEvent, AgentTool } from '@earendil-works/pi-agent-core';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
+import type { Skill } from '@weareikko/agent-context';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Config } from './config.js';
 import { ReviewerError } from './errors.js';
@@ -22,7 +23,6 @@ import {
   type CreateAgentParams,
 } from './gitlab-review.js';
 import { noopLogger, type Logger } from './logger.js';
-import type { Skill } from './skills.js';
 
 describe('runReview pipeline', () => {
   const minimalConfig: Config = {

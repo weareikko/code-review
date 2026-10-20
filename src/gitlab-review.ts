@@ -1,28 +1,37 @@
-import { execFile } from 'node:child_process';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join, relative, resolve } from 'node:path';
-import { promisify } from 'node:util';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import type { AgentEvent, AgentTool } from '@earendil-works/pi-agent-core';
 import { Agent } from '@earendil-works/pi-agent-core';
 import type { AssistantMessage, Model } from '@earendil-works/pi-ai';
 import { streamSimple } from '@earendil-works/pi-ai/compat';
 import { getBuiltinModel } from '@earendil-works/pi-ai/providers/all';
 import { createReadOnlyTools } from '@earendil-works/pi-coding-agent';
+import {
+  buildMarketplaceRegistry,
+  CONVENTION_FILES,
+  createSkillReadCounter,
+  findGitRoot,
+  formatReviewUsageSummary,
+  loadSkills,
+  pickMcpEnvVars,
+  resolveMcpServers,
+  resolveSkillCacheDir,
+  walkUpContextFiles,
+  type ContextFile,
+  type McpServerUsage as AgentContextMcpServerUsage,
+  type MarketplaceRef,
+  type McpServerConfig,
+  type Skill,
+  type SkillReadCounter,
+  type SkillUsage,
+} from '@weareikko/agent-context';
 import type { Config } from './config.js';
 import { resolveProviderApiKey } from './config.js';
-import { formatError, isQuotaExceededMessage, ReviewerError } from './errors.js';
+import { isQuotaExceededMessage, ReviewerError } from './errors.js';
 import { createGitTools } from './git-tool.js';
 import { renderIntentBlock, type ReviewIntent } from './intent.js';
 import type { Logger } from './logger.js';
 import { noopLogger } from './logger.js';
-import type { MarketplaceRef } from './marketplaces.js';
-import { buildMarketplaceRegistry, loadMarketplaceSkill } from './marketplaces.js';
-import {
-  pickMcpEnvVars,
-  resolveMcpServers,
-  type McpServerConfig,
-  type McpServerSource,
-} from './mcp-config.js';
 import {
   connectMcpServers,
   type ConnectMcpServersOptions,
@@ -32,11 +41,7 @@ import {
 import { parseReviewMarkdownWithWarnings } from './parser.js';
 import type { PriorThread } from './prior-threads.js';
 import { renderPriorThreadsBlock } from './prior-threads.js';
-import type { SkillRef } from './skill-links.js';
-import type { SkillReadCounter } from './skill-usage.js';
-import { createSkillReadCounter, formatReviewUsageSummary } from './skill-usage.js';
-import type { Skill } from './skills.js';
-import { loadAutoDiscoveredSkills, loadNamedSkill, parseSkillSpec } from './skills.js';
+import { BUILTIN_SKILLS_DIR, ENV_PREFIX, PRODUCT_SLUG } from './product.js';
 import {
   cleanupSkippedDiffs,
   renderRetrievableSkippedBlock,
@@ -120,24 +125,12 @@ export interface ReviewUsage {
   sizeNotice: ReviewSizeNotice;
 }
 
-/** One loaded skill's outcome for a review, as reported in {@link ReviewUsage}. */
-export interface SkillUsage extends SkillRef {
-  /**
-   * Files the reviewer read under the skill's directory — its `SKILL.md` or a
-   * reference file it points at. Zero means the skill was offered but never read.
-   */
-  reads: number;
-}
+export type { SkillUsage };
 
 /** One MCP server's outcome for a review, as reported in {@link ReviewUsage}. */
-export interface McpServerUsage {
-  name: string;
-  status: 'connected' | 'unavailable';
+export interface McpServerUsage extends AgentContextMcpServerUsage {
   /** Names of the tools exposed to the reviewer (read-only only — see `isReadOnlyMcpTool`). */
   exposedTools: string[];
-  /** Tool calls made against this server during the review. */
-  calls: number;
-  source: McpServerSource;
 }
 
 export interface AgentLike {
@@ -227,11 +220,6 @@ export interface RunReviewOptions {
 
 const DEFAULT_REVIEW_TIMEOUT_MS = 10 * 60 * 1000;
 
-interface ContextFile {
-  path: string;
-  content: string;
-}
-
 interface ReviewContext {
   conventions: ContextFile[];
   reviewRules: ContextFile[];
@@ -239,9 +227,7 @@ interface ReviewContext {
 }
 
 const DEFAULT_MAX_DIFF_CHARS = 100_000;
-const CONVENTION_FILES = ['AGENTS.md', 'CLAUDE.md'];
 const REVIEW_RULE_FILES = ['REVIEW.md'];
-const CONFIG_DIRS = ['.pi', '.claude', '.agents'];
 
 // Files whose diffs carry no review signal — dependency lockfiles, generated
 // output, minified/compiled bundles, type declarations. They are filtered out
@@ -314,8 +300,6 @@ const SEVERITY_RULE: Record<GitLabReviewSeverity, string | null> = {
   CRITICAL: '- Only report CRITICAL issues — skip WARN and INFO',
 };
 
-const exec = promisify(execFile);
-
 /**
  * Stream function for the reviewer agent.
  *
@@ -349,63 +333,6 @@ function defaultCreateAgent(params: CreateAgentParams): AgentLike {
   });
 }
 
-async function findGitRoot(cwd: string): Promise<string> {
-  try {
-    const { stdout } = await exec('git', ['rev-parse', '--show-toplevel'], { cwd });
-    return stdout.trim() || cwd;
-  } catch {
-    return cwd;
-  }
-}
-
-async function readFirstMatch(dir: string, filenames: string[]): Promise<ContextFile | null> {
-  for (const candidate of [dir, ...CONFIG_DIRS.map((d) => join(dir, d))]) {
-    let entries: string[];
-    try {
-      entries = await readdir(candidate);
-    } catch {
-      continue;
-    }
-    const wanted = new Set(filenames.map((f) => f.toLowerCase()));
-    const match = entries.find((entry) => wanted.has(entry.toLowerCase()));
-    if (!match) continue;
-    const fullPath = join(candidate, match);
-    try {
-      const content = await readFile(fullPath, 'utf8');
-      return { path: fullPath, content };
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
-
-async function walkUpContextFiles(
-  cwd: string,
-  filenames: string[],
-  gitRoot: string,
-): Promise<ContextFile[]> {
-  const dirs: string[] = [];
-  let current = cwd;
-  while (true) {
-    dirs.unshift(current);
-    if (current === gitRoot) break;
-    const parent = dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-
-  const result: ContextFile[] = [];
-  const seen = new Set<string>();
-  for (const dir of dirs) {
-    const file = await readFirstMatch(dir, filenames);
-    if (!file || seen.has(file.path)) continue;
-    seen.add(file.path);
-    result.push({ path: relative(cwd, file.path) || file.path, content: file.content });
-  }
-  return result;
-}
-
 export interface LoadReviewContextOptions {
   /** Re-clone `git:` / `git+ssh:` skills, bypassing the on-disk clone cache. */
   refreshGitSkills?: boolean;
@@ -420,40 +347,18 @@ export async function loadReviewContext(
   options: LoadReviewContextOptions = {},
 ): Promise<ReviewContext> {
   const gitRoot = await findGitRoot(cwd);
-  const [conventions, reviewRules, discovered] = await Promise.all([
+  const [conventions, reviewRules, skills] = await Promise.all([
     walkUpContextFiles(cwd, CONVENTION_FILES, gitRoot),
     walkUpContextFiles(cwd, REVIEW_RULE_FILES, gitRoot),
-    loadAutoDiscoveredSkills(cwd, gitRoot, warn),
+    loadSkills(cwd, gitRoot, skillNames, {
+      cacheDir: resolveSkillCacheDir(PRODUCT_SLUG),
+      refresh: options.refreshGitSkills,
+      marketplaces: options.marketplaces,
+      builtinSkillsDir: BUILTIN_SKILLS_DIR,
+      envPrefix: ENV_PREFIX,
+      warn,
+    }),
   ]);
-
-  const registry = buildMarketplaceRegistry(options.marketplaces ?? []);
-  const knownMarketplaces = new Set(registry.keys());
-
-  const skills = [...discovered];
-  const discoveredNames = new Set(discovered.map((s) => s.name));
-  const named = await Promise.all(
-    skillNames
-      .filter((n) => !discoveredNames.has(n))
-      .map(async (n) => {
-        try {
-          const spec = parseSkillSpec(n, knownMarketplaces);
-          if (spec.protocol === 'marketplace') {
-            return await loadMarketplaceSkill(spec, registry, {
-              refresh: options.refreshGitSkills,
-            });
-          }
-          return await loadNamedSkill(n, cwd, { refresh: options.refreshGitSkills });
-        } catch (error) {
-          // A skill is auxiliary guidance, not part of the diff under review.
-          // Failing to load one (e.g. an external `git:` clone that can't be
-          // downloaded) must not abort the whole review — warn and skip so the
-          // review still runs with whatever skills did load.
-          warn?.(`Skipping skill "${n}": ${formatError(error)}`);
-          return null;
-        }
-      }),
-  );
-  skills.push(...named.filter((s): s is Skill => s !== null));
 
   return { conventions, reviewRules, skills };
 }
@@ -1377,12 +1282,14 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
     cwd,
     gitRoot,
     buildMarketplaceRegistry(config.marketplaces ?? []),
-    logger,
     {
+      cacheDir: resolveSkillCacheDir(PRODUCT_SLUG),
       // Only the operator's allowlist is expandable in a server definition —
       // never the reviewer's whole environment. See `pickMcpEnvVars`.
       vars: pickMcpEnvVars(process.env, config.mcpEnv ?? []),
       refresh: config.refreshGitSkills,
+      envPrefix: ENV_PREFIX,
+      warn: (msg) => logger.warn(msg),
     },
   );
   const connectMcp = options.connectMcp ?? connectMcpServers;

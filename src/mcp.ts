@@ -1,7 +1,7 @@
 /**
  * MCP client bridge for the reviewer agent.
  *
- * Connects the servers described by `McpServerConfig` (see `mcp-config.ts`),
+ * Connects the servers described by `McpServerConfig` (see `@weareikko/agent-context`),
  * lists their tools, keeps only the read-only ones, and wraps each as a pi
  * `AgentTool` named `mcp__<server>__<tool>`. The bridge enforces a per-call
  * timeout, a result size cap, and a per-review call budget shared by every MCP
@@ -10,7 +10,7 @@
  *
  * The reviewer processes attacker-controlled MR content, so only tools that
  * declare themselves read-only (`annotations.readOnlyHint === true` and not
- * `destructiveHint`) are exposed.
+ * `destructiveHint`, see `isReadOnlyMcpTool`) are exposed.
  */
 
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
@@ -23,6 +23,12 @@ import {
   type McpTransport,
   type Tool as McpTool,
 } from '@earendil-works/pi-mcp';
+import {
+  isReadOnlyMcpTool,
+  redactUrl,
+  type McpServerConfig,
+  type McpServerSource,
+} from '@weareikko/agent-context';
 import type { TSchema } from 'typebox';
 import {
   traceMcpDiagnostic,
@@ -30,9 +36,7 @@ import {
   type McpDiagnosticOp,
 } from './diagnostics.js';
 import { noopLogger, type Logger } from './logger.js';
-import type { McpServerConfig, McpServerSource } from './mcp-config.js';
 import { PRODUCT_NAME } from './product.js';
-import { redactUrl } from './skills.js';
 
 declare const __PKG_VERSION__: string;
 
@@ -89,11 +93,6 @@ export interface McpConnection {
   servers: McpServerStatus[];
   /** Close every connected client. Safe to call more than once. */
   close(): Promise<void>;
-}
-
-/** Only tools that declare themselves read-only and non-destructive are exposed. */
-export function isReadOnlyMcpTool(tool: Pick<McpTool, 'annotations'>): boolean {
-  return tool.annotations?.readOnlyHint === true && tool.annotations?.destructiveHint !== true;
 }
 
 function safeSegment(value: string): string {

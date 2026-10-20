@@ -1,9 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { getEnvApiKey } from '@earendil-works/pi-ai/compat';
+import {
+  AgentContextError,
+  type MarketplaceRef,
+  parseMarketplaceEntry,
+} from '@weareikko/agent-context';
 import { ConfigError } from './errors.js';
 import { DEFAULT_GITHUB_API_URL } from './github.js';
-import { type MarketplaceRef, parseMarketplaceEntry } from './marketplaces.js';
 import { POSTING_MODES, type PostingMode } from './posting.js';
+import { ENV_PREFIX } from './product.js';
 import {
   REVIEW_DEPTHS,
   REVIEW_INPUT_MODES,
@@ -62,7 +67,6 @@ export const RESERVED_ENV_SUFFIXES = [
   'LABELS_ON_CLEAN',
 ] as const;
 
-const CODE_REVIEW_PREFIX = 'CODE_REVIEW_';
 const RESERVED_ENV_SUFFIX_SET = new Set<string>(RESERVED_ENV_SUFFIXES);
 
 /**
@@ -92,10 +96,9 @@ const RESERVED_ENV_SUFFIX_SET = new Set<string>(RESERVED_ENV_SUFFIXES);
  */
 export function applyCodeReviewEnvPrefix(env = process.env): NodeJS.ProcessEnv {
   for (const key of Object.keys(env)) {
-    if (!key.startsWith(CODE_REVIEW_PREFIX)) continue;
-    const suffix = key.slice(CODE_REVIEW_PREFIX.length);
-    if (!suffix || RESERVED_ENV_SUFFIX_SET.has(suffix) || suffix.startsWith(CODE_REVIEW_PREFIX))
-      continue;
+    if (!key.startsWith(ENV_PREFIX)) continue;
+    const suffix = key.slice(ENV_PREFIX.length);
+    if (!suffix || RESERVED_ENV_SUFFIX_SET.has(suffix) || suffix.startsWith(ENV_PREFIX)) continue;
     const value = env[key];
     if (typeof value !== 'string' || value.length === 0) continue;
     env[suffix] = value;
@@ -230,7 +233,7 @@ export interface Config {
   /**
    * `--mcp` / `CODE_REVIEW_MCP` specs (repeatable / comma-separated), in the
    * order given: `file:<path>`, `<marketplace>:<plugin>`, or
-   * `<marketplace>:<plugin>/<server>`. See `parseMcpSpec` in `mcp-config.ts`.
+   * `<marketplace>:<plugin>/<server>`. See `parseMcpSpec` in `@weareikko/agent-context`.
    */
   mcp: string[];
   /** MCP server names to drop, applied last over every source (`--disable-mcp` / `CODE_REVIEW_DISABLE_MCP`). */
@@ -426,7 +429,7 @@ function resolveSkills(args: ParsedArgs, env: NodeJS.ProcessEnv): string[] {
 /**
  * Resolve `--mcp` (repeatable, preferred) or the comma-separated
  * `CODE_REVIEW_MCP` into a list of raw spec strings. Parsing (`parseMcpSpec`)
- * and resolution happen later, in `mcp-config.ts`'s `resolveMcpServers`.
+ * and resolution happen later, in `resolveMcpServers` from `@weareikko/agent-context`.
  */
 function resolveMcp(args: ParsedArgs, env: NodeJS.ProcessEnv): string[] {
   const argMcp = args.mcp;
@@ -507,7 +510,17 @@ function resolveMarketplaces(args: ParsedArgs, env: NodeJS.ProcessEnv): Marketpl
   return raw
     .map((entry) => entry.trim())
     .filter(Boolean)
-    .map((entry) => parseMarketplaceEntry(entry));
+    .map((entry) => {
+      try {
+        return parseMarketplaceEntry(entry);
+      } catch (error) {
+        // Report it as this tool's `ConfigError`, so the CLI prints its code and hint.
+        if (error instanceof AgentContextError) {
+          throw new ConfigError(error.message, { hint: error.hint, cause: error });
+        }
+        throw error;
+      }
+    });
 }
 
 /**

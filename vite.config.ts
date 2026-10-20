@@ -13,6 +13,7 @@ const external = [
   /^@earendil-works\//,
   /^@opentelemetry\//,
   /^@grpc\//,
+  /^@weareikko\//,
 ];
 
 const pkg = JSON.parse(
