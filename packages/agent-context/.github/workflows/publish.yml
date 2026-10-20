@@ -1,0 +1,113 @@
+name: Publish
+
+# Each merge into main releases what its fragments describe. A manual run
+# (`gh workflow run publish.yml -f version=major`) forces a bump.
+# npm trusted publishing is bound to this file name: keep the publish job here.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version: `auto` follows the fragments; `patch`, `minor` or `major` forces that bump'
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+
+# One release at a time. GitHub keeps only the newest pending run: it
+# releases everything that main has at that point.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build package
+        run: npm run build
+
+      - name: Type check
+        run: npm run typecheck && npm run typecheck:tests
+
+      - name: Test
+        run: npm test
+
+  # Folds the fragments, bumps package.json, commits `chore: release <version>`,
+  # tags, pushes, moves the `0` / `0.x` tags and creates the GitHub release.
+  release:
+    name: Release
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      dist-tag: ${{ steps.release.outputs.dist-tag }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Release
+        id: release
+        uses: weareikko/changelog@9d93346df9858eaa29007bd8530aad8f4c5b539a # 0.1.0
+        with:
+          command: release
+          version: ${{ inputs.version || 'auto' }}
+          commit-message: 'chore: release {version}'
+          moving-tags: true
+
+  # "Re-run failed jobs" on this job publishes what a failed run left: npm
+  # skips a version that it already has.
+  publish:
+    name: Publish to npm
+    needs: release
+    if: needs.release.outputs.version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: refs/tags/${{ needs.release.outputs.version }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      # The action publishes with --ignore-scripts, so `prepublishOnly` does not
+      # run: this step builds `dist/`, and the test job ran the checks.
+      - name: Install and build
+        run: |
+          npm ci
+          npm run build
+
+      # Trusted publishing (OIDC): no npm token. A prerelease goes to `next`.
+      - name: Publish @weareikko/agent-context
+        uses: JS-DevTools/npm-publish@0fd2f4369c5d6bcfcde6091a7c527d810b9b5c3f # v4.1.5
+        with:
+          access: public
+          provenance: true
+          tag: ${{ needs.release.outputs.dist-tag }}

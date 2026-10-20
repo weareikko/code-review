@@ -1,0 +1,662 @@
+import { readFile, realpath } from 'node:fs/promises';
+import { join, relative, resolve, sep } from 'node:path';
+import { ConfigError } from './errors.js';
+import {
+  parseMcpServers,
+  type McpEnvVars,
+  type McpServerConfig,
+  type McpServerSource,
+} from './mcp-parse.js';
+import { toPosixPath } from './paths.js';
+import {
+  cloneGitRepo,
+  loadSkillFromDir,
+  normalizeGitUrl,
+  redactUrl,
+  type Skill,
+  type SkillSpec,
+} from './skills.js';
+
+/**
+ * Marketplace manifest formats we know how to read. Different vendors ship the
+ * same open SKILL.md standard but package it differently: Claude Code uses a
+ * `.claude-plugin/marketplace.json` catalog (`anthropic`), OpenAI Codex uses a
+ * `.codex-plugin/` layout (a future `codex` format). Only `anthropic` is
+ * implemented today; the type is the extension point for the rest.
+ */
+export const MARKETPLACE_FORMATS = ['anthropic'] as const;
+export type MarketplaceFormat = (typeof MARKETPLACE_FORMATS)[number];
+
+/** The default format assumed when a marketplace declaration omits a prefix. */
+export const DEFAULT_MARKETPLACE_FORMAT: MarketplaceFormat = 'anthropic';
+
+/**
+ * Marketplace names that collide with skill-spec protocol prefixes
+ * (`npm:`, `file:`, `git:`) or the bare-name builtin lookup, and so cannot be
+ * used as a marketplace name — `<name>:<plugin>/<skill>` would be ambiguous.
+ */
+export const RESERVED_MARKETPLACE_NAMES: ReadonlySet<string> = new Set([
+  'npm',
+  'file',
+  'git',
+  'builtin',
+]);
+
+/** A registered marketplace: a git repo cloned once, then read per its format. */
+export interface MarketplaceRef {
+  /** Short name used in skill specs (`<name>:<plugin>/<skill>`). */
+  name: string;
+  format: MarketplaceFormat;
+  /** Clone URL (credentials may be embedded; always redact before logging). */
+  url: string;
+  /** Pinned ref (tag/branch/SHA); empty resolves the remote's default branch. */
+  ref: string;
+}
+
+export type MarketplaceRegistry = ReadonlyMap<string, MarketplaceRef>;
+
+const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+// A leading `<token>:` that is NOT part of a URL scheme (`https://`, `ssh://`).
+// The negative lookahead on `//` is what distinguishes a format tag from a
+// scheme, so `anthropic:https://…` splits but `https://…` does not.
+const FORMAT_PREFIX_PATTERN = /^([a-z][a-z0-9-]*):(?!\/\/)/;
+
+/**
+ * Parse a single marketplace declaration: `<name>=<[format:]url[#ref]>`.
+ *
+ * - `acme=https://host/group/tools.git#1.0.0` → default `anthropic` format
+ * - `acme=anthropic:https://host/group/tools.git#1.0.0` → explicit format
+ * - `acme=git+ssh://git@host/group/tools.git#main` → SSH transport
+ *
+ * The `#<ref>` fragment is taken whole as the ref (branch names may contain
+ * `/`). Throws a `ConfigError` with an actionable hint on any malformed input.
+ */
+export function parseMarketplaceEntry(entry: string): MarketplaceRef {
+  const eqIdx = entry.indexOf('=');
+  if (eqIdx <= 0) {
+    throw new ConfigError(`Invalid marketplace declaration: "${redactUrl(entry)}"`, {
+      hint: 'Use <name>=<git-url>[#ref], e.g. acme=https://host/group/tools.git#1.0.0.',
+    });
+  }
+  const name = entry.slice(0, eqIdx).trim();
+  if (!NAME_PATTERN.test(name)) {
+    throw new ConfigError(`Invalid marketplace name: "${name}"`, {
+      hint: 'Names must start with a letter or digit and contain only letters, digits, ".", "_", or "-".',
+    });
+  }
+  if (RESERVED_MARKETPLACE_NAMES.has(name)) {
+    throw new ConfigError(`Marketplace name "${name}" is reserved`, {
+      hint: `Choose another name — ${[...RESERVED_MARKETPLACE_NAMES].join(', ')} collide with skill-spec protocols.`,
+    });
+  }
+
+  let rhs = entry.slice(eqIdx + 1).trim();
+  let format: MarketplaceFormat = DEFAULT_MARKETPLACE_FORMAT;
+  const formatMatch = rhs.match(FORMAT_PREFIX_PATTERN);
+  if (formatMatch) {
+    const token = formatMatch[1];
+    if (!(MARKETPLACE_FORMATS as readonly string[]).includes(token)) {
+      throw new ConfigError(`Unknown marketplace format "${token}" in "${redactUrl(entry)}"`, {
+        hint: `Supported formats: ${MARKETPLACE_FORMATS.join(', ')}. Omit the prefix (e.g. "${name}=https://…") to default to "${DEFAULT_MARKETPLACE_FORMAT}".`,
+      });
+    }
+    format = token as MarketplaceFormat;
+    rhs = rhs.slice(formatMatch[0].length);
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(normalizeGitUrl(rhs));
+  } catch {
+    throw new ConfigError(`Invalid marketplace URL for "${name}": "${redactUrl(rhs)}"`, {
+      hint: 'Expected a git URL like https://host/group/tools.git or git+ssh://git@host/group/tools.git. scp-style (git@host:group/repo.git) is not supported — use the ssh:// form.',
+    });
+  }
+  const ref = parsed.hash ? parsed.hash.slice(1) : '';
+  parsed.hash = '';
+  return { name, format, url: parsed.toString(), ref };
+}
+
+/**
+ * Build a name→ref registry from parsed marketplace declarations, rejecting
+ * duplicate names (a later entry silently shadowing an earlier one is a config
+ * bug worth surfacing).
+ */
+export function buildMarketplaceRegistry(refs: readonly MarketplaceRef[]): MarketplaceRegistry {
+  const registry = new Map<string, MarketplaceRef>();
+  for (const ref of refs) {
+    if (registry.has(ref.name)) {
+      throw new ConfigError(`Duplicate marketplace name "${ref.name}"`, {
+        hint: 'Each marketplace must be declared once. Remove the duplicate declaration.',
+      });
+    }
+    registry.set(ref.name, ref);
+  }
+  return registry;
+}
+
+/** Minimal shape of a plugin entry in a `.claude-plugin/marketplace.json`. */
+interface AnthropicPluginEntry {
+  name?: unknown;
+  source?: unknown;
+  /** Extra skill directories, added to the default `skills/` scan. */
+  skills?: unknown;
+  /** When `false`, the marketplace entry is the sole component definition. */
+  strict?: unknown;
+}
+
+/** Minimal shape of the fields we read from a `.claude-plugin/marketplace.json`. */
+interface AnthropicMarketplaceManifest {
+  metadata?: { pluginRoot?: unknown };
+  plugins?: AnthropicPluginEntry[];
+}
+
+/** Minimal shape of the fields we read from a plugin's `.claude-plugin/plugin.json`. */
+interface AnthropicPluginManifest {
+  skills?: unknown;
+  /** MCP servers declared inline in the plugin manifest, `{ name: server }`. */
+  mcpServers?: unknown;
+}
+
+type MarketplaceSkillSpec = Extract<SkillSpec, { protocol: 'marketplace' }>;
+
+/** Options shared by the marketplace loaders. */
+export interface LoadMarketplaceOptions {
+  /** The clone cache directory, usually `resolveSkillCacheDir(product)`. */
+  cacheDir: string;
+  /** Re-clone the marketplace even when a cached copy exists. */
+  refresh?: boolean;
+  /**
+   * The calling tool's environment variable prefix (`CODE_REVIEW_`), used to
+   * name `<prefix>MARKETPLACES` in hints. Defaults to no prefix.
+   */
+  envPrefix?: string;
+}
+
+function unregisteredMarketplaceHint(marketplace: string, envPrefix = ''): string {
+  return `No marketplace named "${marketplace}" is registered. Declare it with ${envPrefix}MARKETPLACES.`;
+}
+
+/**
+ * Resolve a `<marketplace>:<plugin>/<skill>` reference to a loaded {@link Skill}.
+ *
+ * Clones the marketplace repo (reusing the shared on-disk clone cache), then
+ * dispatches to the format-specific resolver. Throws a `ConfigError` with a
+ * redacted, actionable hint when the marketplace, plugin, or skill cannot be
+ * resolved — the caller treats that as a skip-and-warn, not a fatal error.
+ */
+export async function loadMarketplaceSkill(
+  spec: MarketplaceSkillSpec,
+  registry: MarketplaceRegistry,
+  options: LoadMarketplaceOptions,
+): Promise<Skill> {
+  const ref = `${spec.marketplace}:${spec.plugin}/${spec.skill}`;
+  const mp = registry.get(spec.marketplace);
+  if (!mp) {
+    throw new ConfigError(`Cannot load skill: "${ref}"`, {
+      hint: unregisteredMarketplaceHint(spec.marketplace, options.envPrefix),
+    });
+  }
+
+  let repoDir: string;
+  try {
+    repoDir = await cloneGitRepo(mp.url, mp.ref, {
+      cacheDir: options.cacheDir,
+      refresh: options.refresh ?? false,
+    });
+  } catch (error) {
+    const atRef = mp.ref ? ` at ref "${mp.ref}"` : '';
+    throw new ConfigError(`Cannot load marketplace "${mp.name}"`, {
+      cause: error,
+      hint: `Failed to clone "${redactUrl(mp.url)}"${atRef}. Check the URL, the ref, and your git credentials. For private GitLab, prefer git+ssh://git@host/group/project.git.`,
+    });
+  }
+
+  switch (mp.format) {
+    case 'anthropic':
+      return resolveAnthropicSkill(repoDir, mp, spec);
+    default: {
+      const exhaustive: never = mp.format;
+      throw new ConfigError(`Unsupported marketplace format: "${String(exhaustive)}"`, {
+        hint: `Supported formats: ${MARKETPLACE_FORMATS.join(', ')}.`,
+      });
+    }
+  }
+}
+
+/**
+ * A `<marketplace>:<plugin>[/<server>]` reference — the `marketplace`
+ * protocol case of `mcp-config.ts`'s `McpSpec`, restated structurally here so
+ * this module does not need to import `mcp-config.ts` (which imports this
+ * module for the marketplace source).
+ */
+export interface MarketplaceMcpSpec {
+  marketplace: string;
+  plugin: string;
+  /** Empty means "every server the plugin exposes". */
+  server: string;
+}
+
+/**
+ * Resolve a `<marketplace>:<plugin>` or `<marketplace>:<plugin>/<server>`
+ * reference to its normalised {@link McpServerConfig}s.
+ *
+ * Clones the marketplace repo (reusing the shared on-disk clone cache), then
+ * reads two independent, additive sources for the plugin's servers: a
+ * `.mcp.json` colocated with the plugin (either the project or the plugin
+ * shape), and the `mcpServers` field of the plugin's own
+ * `.claude-plugin/plugin.json` (subject to the same `strict` gating as its
+ * `skills` field). A server declared in both is taken from `plugin.json`,
+ * since it is the more specific, authored-by-the-plugin declaration.
+ * `${CLAUDE_PLUGIN_ROOT}` expands to the plugin's directory in both.
+ *
+ * With `spec.server` set, only that server is returned. Throws a
+ * `ConfigError` with a redacted, actionable hint when the marketplace,
+ * plugin, or named server cannot be resolved — the caller treats that as a
+ * skip-and-warn, not a fatal error, matching `loadMarketplaceSkill`.
+ */
+export async function loadMarketplaceMcpServers(
+  spec: MarketplaceMcpSpec,
+  registry: MarketplaceRegistry,
+  options: LoadMarketplaceOptions & {
+    vars?: McpEnvVars;
+    warn?: (msg: string) => void;
+  },
+): Promise<McpServerConfig[]> {
+  const ref = spec.server
+    ? `${spec.marketplace}:${spec.plugin}/${spec.server}`
+    : `${spec.marketplace}:${spec.plugin}`;
+  const mp = registry.get(spec.marketplace);
+  if (!mp) {
+    throw new ConfigError(`Cannot load MCP servers: "${ref}"`, {
+      hint: unregisteredMarketplaceHint(spec.marketplace, options.envPrefix),
+    });
+  }
+
+  let repoDir: string;
+  try {
+    repoDir = await cloneGitRepo(mp.url, mp.ref, {
+      cacheDir: options.cacheDir,
+      refresh: options.refresh ?? false,
+    });
+  } catch (error) {
+    const atRef = mp.ref ? ` at ref "${mp.ref}"` : '';
+    throw new ConfigError(`Cannot load marketplace "${mp.name}"`, {
+      cause: error,
+      hint: `Failed to clone "${redactUrl(mp.url)}"${atRef}. Check the URL, the ref, and your git credentials. For private GitLab, prefer git+ssh://git@host/group/project.git.`,
+    });
+  }
+
+  const realRoot = await realpath(repoDir);
+  const { pluginDir, pluginManifest } = await resolvePluginEntry(
+    repoDir,
+    realRoot,
+    mp,
+    spec.plugin,
+    ref,
+  );
+  const source: McpServerSource = {
+    kind: 'marketplace',
+    marketplace: mp.name,
+    plugin: spec.plugin,
+    url: mp.url,
+    ref: mp.ref,
+    path: toPosixPath(relative(repoDir, pluginDir)),
+  };
+  const normalizeOptions = {
+    vars: options.vars,
+    pluginRoot: pluginDir,
+    warn: options.warn,
+    envPrefix: options.envPrefix,
+  };
+
+  const servers = new Map<string, McpServerConfig>();
+  const mcpJsonRaw = await readTextInside(realRoot, join(pluginDir, '.mcp.json'), ref);
+  if (mcpJsonRaw !== null) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(mcpJsonRaw) as unknown;
+    } catch (error) {
+      throw new ConfigError(`Plugin "${spec.plugin}" in marketplace "${mp.name}" is invalid`, {
+        cause: error,
+        hint: `Its .mcp.json is not valid JSON.`,
+      });
+    }
+    for (const server of parseMcpServers(raw, source, normalizeOptions)) {
+      servers.set(server.name, server);
+    }
+  }
+  const manifestServers = (pluginManifest as { mcpServers?: unknown } | null)?.mcpServers;
+  if (manifestServers !== undefined) {
+    for (const server of parseMcpServers(manifestServers, source, normalizeOptions)) {
+      servers.set(server.name, server);
+    }
+  }
+
+  if (!spec.server) return [...servers.values()];
+  const one = servers.get(spec.server);
+  if (!one) {
+    throw new ConfigError(`Cannot load MCP servers: "${ref}"`, {
+      hint: `No server "${spec.server}" found in plugin "${spec.plugin}". Available: ${[...servers.keys()].join(', ') || '(none)'}.`,
+    });
+  }
+  return [one];
+}
+
+/** A plugin entry resolved from a marketplace's `.claude-plugin/marketplace.json`. */
+interface ResolvedPlugin {
+  pluginDir: string;
+  realPluginDir: string | null;
+  pluginManifest: AnthropicPluginManifest | null;
+  entry: AnthropicPluginEntry;
+}
+
+/**
+ * Resolve a named plugin inside a cloned marketplace repo: read
+ * `.claude-plugin/marketplace.json`, find the plugin's entry, resolve its
+ * `source` to a directory, and (unless `strict: false`) read its own
+ * `.claude-plugin/plugin.json`. Shared by skill and MCP-server resolution —
+ * both need the same plugin lookup before reading their own manifest field.
+ */
+async function resolvePluginEntry(
+  repoDir: string,
+  realRoot: string,
+  mp: MarketplaceRef,
+  pluginName: string,
+  ref: string,
+): Promise<ResolvedPlugin> {
+  const manifestRaw = await readTextInside(
+    realRoot,
+    join(repoDir, '.claude-plugin', 'marketplace.json'),
+    ref,
+  );
+  if (manifestRaw === null) {
+    throw new ConfigError(`Marketplace "${mp.name}" is not a valid Anthropic plugin marketplace`, {
+      hint: `Expected a readable .claude-plugin/marketplace.json at "${redactUrl(mp.url)}"${mp.ref ? ` (ref "${mp.ref}")` : ''}.`,
+    });
+  }
+  let manifest: AnthropicMarketplaceManifest;
+  try {
+    manifest = JSON.parse(manifestRaw) as AnthropicMarketplaceManifest;
+  } catch (error) {
+    throw new ConfigError(`Marketplace "${mp.name}" is not a valid Anthropic plugin marketplace`, {
+      cause: error,
+      hint: `.claude-plugin/marketplace.json at "${redactUrl(mp.url)}" is not valid JSON.`,
+    });
+  }
+
+  const plugins = Array.isArray(manifest.plugins) ? manifest.plugins : [];
+  const entry = plugins.find((p) => p && p.name === pluginName);
+  if (!entry) {
+    const available = plugins
+      .map((p) => (typeof p?.name === 'string' ? p.name : null))
+      .filter((n): n is string => Boolean(n));
+    throw new ConfigError(`Plugin "${pluginName}" not found in marketplace "${mp.name}"`, {
+      hint: available.length
+        ? `Available plugins: ${available.join(', ')}.`
+        : 'The marketplace lists no plugins.',
+    });
+  }
+
+  const pluginDir = resolvePluginDir(repoDir, manifest, entry.source, mp, ref);
+  const realPluginDir = await resolveInside(realRoot, pluginDir, ref);
+  // Only read plugin.json when the entry defers to it. With `strict: false` the
+  // marketplace entry is the sole component definition, so a stale or malformed
+  // plugin.json must be ignored rather than fail resolution.
+  const strict = entry.strict !== false;
+  const pluginManifest =
+    strict && realPluginDir ? await readPluginManifest(realRoot, realPluginDir, ref) : null;
+  return { pluginDir, realPluginDir, pluginManifest, entry };
+}
+
+/** Resolve a skill inside a Claude Code (`anthropic`) plugin marketplace. */
+async function resolveAnthropicSkill(
+  repoDir: string,
+  mp: MarketplaceRef,
+  spec: MarketplaceSkillSpec,
+): Promise<Skill> {
+  const ref = `${mp.name}:${spec.plugin}/${spec.skill}`;
+  // Resolve the clone root through symlinks once; every file we read is then
+  // bounds-checked against it (dir- AND file-level) so a symlinked entry in the
+  // marketplace cannot make a read escape the clone.
+  const realRoot = await realpath(repoDir);
+  const { pluginDir, pluginManifest, entry } = await resolvePluginEntry(
+    repoDir,
+    realRoot,
+    mp,
+    spec.plugin,
+    ref,
+  );
+  const bases = computeSkillBases(repoDir, pluginDir, entry, pluginManifest, ref);
+
+  const skill = await findSkillInBases(realRoot, bases, pluginDir, spec, ref, mp);
+  if (!skill) {
+    throw new ConfigError(`Cannot load skill: "${ref}"`, {
+      hint: `No skill "${spec.skill}" found in plugin "${spec.plugin}". Looked under the default skills/ directory${bases.length > 1 ? ' and the plugin\'s custom "skills" paths' : ''}. Check the skill name against the marketplace.`,
+    });
+  }
+  return skill;
+}
+
+/**
+ * Read a plugin's optional `.claude-plugin/plugin.json`. A missing file returns
+ * `null` (the manifest is optional), but a malformed one throws a `ConfigError`
+ * rather than being silently ignored — otherwise a typo would quietly drop the
+ * plugin's declared `skills` paths.
+ */
+async function readPluginManifest(
+  realRoot: string,
+  pluginDir: string,
+  ref: string,
+): Promise<AnthropicPluginManifest | null> {
+  const raw = await readTextInside(realRoot, join(pluginDir, '.claude-plugin', 'plugin.json'), ref);
+  if (raw === null) return null; // absent — plugin.json is optional
+  try {
+    return JSON.parse(raw) as AnthropicPluginManifest;
+  } catch (error) {
+    throw new ConfigError(`Malformed plugin.json for "${ref}"`, {
+      cause: error,
+      hint: "The plugin's .claude-plugin/plugin.json is not valid JSON. Fix it in the marketplace repository.",
+    });
+  }
+}
+
+/** Normalize a `skills`/`commands` manifest field (string | string[]) to a path list. */
+function toPathArray(value: unknown): string[] {
+  const raw = typeof value === 'string' ? [value] : Array.isArray(value) ? value : [];
+  return raw
+    .filter((v): v is string => typeof v === 'string')
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Compute the directories to search for a named skill, per the plugin schema:
+ * the default `<plugin>/skills/` scan plus any directories declared in the
+ * `skills` field of the marketplace entry and (unless `strict: false`) the
+ * plugin's own `plugin.json`. When the plugin source resolves to the marketplace
+ * root and the entry lists specific `skills` subdirectories, those replace the
+ * default scan rather than adding to it.
+ */
+function computeSkillBases(
+  repoDir: string,
+  pluginDir: string,
+  entry: AnthropicPluginEntry,
+  pluginManifest: AnthropicPluginManifest | null,
+  ref: string,
+): string[] {
+  const strict = entry.strict !== false;
+  const entrySkills = toPathArray(entry.skills);
+  const declared = strict ? [...entrySkills, ...toPathArray(pluginManifest?.skills)] : entrySkills;
+  const custom = declared.map((p) => resolveUnderPlugin(repoDir, pluginDir, p, ref));
+
+  const rootSourceException = resolve(pluginDir) === resolve(repoDir) && entrySkills.length > 0;
+  const bases = rootSourceException ? custom : [join(pluginDir, 'skills'), ...custom];
+  return [...new Set(bases)];
+}
+
+/** Resolve a plugin-relative `skills` path to an absolute dir, guarding escapes. */
+function resolveUnderPlugin(repoDir: string, pluginDir: string, rel: string, ref: string): string {
+  let p = rel.trim();
+  if (p === '.' || p === './') {
+    p = '';
+  } else if (p.startsWith('./')) {
+    p = p.slice(2);
+  }
+  const dir = join(pluginDir, p);
+  ensureInside(repoDir, dir, ref);
+  return dir;
+}
+
+/**
+ * Find `skillName` across the candidate base directories. Each base is either a
+ * container of skill sub-directories (`<base>/<skill>/SKILL.md`) or a single
+ * skill directory (`<base>/SKILL.md`, matched by its frontmatter `name`). Falls
+ * back to a single `SKILL.md` at the plugin root (single-skill plugins).
+ *
+ * Every candidate is verified with {@link loadSkillIfInside} to resolve through
+ * symlinks and reject any directory that escapes the cloned marketplace before a
+ * file is read.
+ */
+async function findSkillInBases(
+  realRoot: string,
+  bases: string[],
+  pluginDir: string,
+  spec: MarketplaceSkillSpec,
+  ref: string,
+  mp: MarketplaceRef,
+): Promise<Skill | null> {
+  const skillName = spec.skill;
+  for (const base of bases) {
+    // `skillName` is validated to contain no `/`, so this stays within `base`.
+    const container = await loadSkillIfInside(realRoot, join(base, skillName), ref, mp, spec);
+    if (container) return container;
+    const single = await loadSkillIfInside(realRoot, base, ref, mp, spec);
+    if (single && single.name === skillName) return single;
+  }
+  const root = await loadSkillIfInside(realRoot, pluginDir, ref, mp, spec);
+  return root && root.name === skillName ? root : null;
+}
+
+/**
+ * Resolve `dir` through symlinks and confirm it stays within `realRoot`. Returns
+ * the real path, or `null` when the directory does not exist (nothing to read).
+ * A directory that resolves — via `..` or a symlink — outside the marketplace
+ * throws a `ConfigError`, so a malicious manifest cannot reach outside the clone.
+ */
+async function resolveInside(realRoot: string, dir: string, ref: string): Promise<string | null> {
+  let real: string;
+  try {
+    real = await realpath(dir);
+  } catch {
+    return null; // does not exist — nothing is read
+  }
+  assertInside(realRoot, real, ref);
+  return real;
+}
+
+/** Throw if `real` (an already-resolved real path) is not within `realRoot`. */
+function assertInside(realRoot: string, real: string, ref: string): void {
+  if (real !== realRoot && !real.startsWith(realRoot + sep)) {
+    throw new ConfigError(`Refusing to load "${ref}": path escapes the marketplace repository`, {
+      hint: 'A plugin "source", manifest, or skill path resolved (via ".." or a symlink) outside the cloned marketplace.',
+    });
+  }
+}
+
+/**
+ * Read a file only if its real path (following any symlink on the file itself,
+ * not just its parent directory) stays within `realRoot`. Returns `null` when
+ * the file does not exist; throws a `ConfigError` when it resolves outside the
+ * marketplace, so a symlinked `SKILL.md` / manifest cannot exfiltrate an outside
+ * file's contents.
+ */
+async function readTextInside(
+  realRoot: string,
+  filePath: string,
+  ref: string,
+): Promise<string | null> {
+  let real: string;
+  try {
+    real = await realpath(filePath);
+  } catch {
+    return null; // does not exist
+  }
+  assertInside(realRoot, real, ref);
+  return readFile(real, 'utf8');
+}
+
+/**
+ * Load a skill from `dir` only if both the directory AND its `SKILL.md` file
+ * resolve within `realRoot`. Guarding the file (not just the directory) closes
+ * the case where a legitimate in-repo dir holds a `SKILL.md` symlinked outside.
+ */
+async function loadSkillIfInside(
+  realRoot: string,
+  dir: string,
+  ref: string,
+  mp: MarketplaceRef,
+  spec: MarketplaceSkillSpec,
+): Promise<Skill | null> {
+  const real = await resolveInside(realRoot, dir, ref);
+  if (!real) return null;
+  // Bounds-check the SKILL.md file itself before `loadSkillFromDir` reads it.
+  if ((await readTextInside(realRoot, join(real, 'SKILL.md'), ref)) === null) return null;
+  // The origin path is relative to the clone root, so it doubles as the skill's
+  // path inside the marketplace repository when the footer links to its source.
+  return loadSkillFromDir(real, {
+    kind: 'marketplace',
+    marketplace: mp.name,
+    plugin: spec.plugin,
+    url: mp.url,
+    ref: mp.ref,
+    path: toPosixPath(relative(realRoot, real)),
+  });
+}
+
+/**
+ * Resolve a plugin entry's `source` to an absolute directory inside the cloned
+ * marketplace. Honors `metadata.pluginRoot` for bare (non-`./`) sources, per the
+ * marketplace schema. Remote sources (github/url/git-subdir/npm) are rejected —
+ * we only resolve plugins that live in the marketplace repository itself.
+ */
+function resolvePluginDir(
+  repoDir: string,
+  manifest: AnthropicMarketplaceManifest,
+  source: unknown,
+  mp: MarketplaceRef,
+  ref: string,
+): string {
+  if (typeof source !== 'string' || !source.trim()) {
+    throw new ConfigError(`Plugin in marketplace "${mp.name}" has no local source`, {
+      hint: 'Only plugins whose "source" is a relative path within the marketplace repo are supported. Remote plugin sources (github/url/git-subdir/npm) are not fetched.',
+    });
+  }
+
+  let rel = source.trim();
+  if (rel === '.' || rel === './') {
+    rel = '';
+  } else if (rel.startsWith('./')) {
+    rel = rel.slice(2);
+  } else {
+    const pluginRoot =
+      typeof manifest.metadata?.pluginRoot === 'string' ? manifest.metadata.pluginRoot.trim() : '';
+    const root = pluginRoot.startsWith('./') ? pluginRoot.slice(2) : pluginRoot;
+    rel = root ? `${root.replace(/\/+$/, '')}/${rel}` : rel;
+  }
+
+  const dir = join(repoDir, rel);
+  ensureInside(repoDir, dir, ref);
+  return dir;
+}
+
+/** Guard against `..`/symlink escapes: `target` must stay within `root`. */
+function ensureInside(root: string, target: string, ref: string): void {
+  const rootResolved = resolve(root);
+  const targetResolved = resolve(target);
+  if (targetResolved !== rootResolved && !targetResolved.startsWith(rootResolved + sep)) {
+    throw new ConfigError(`Refusing to load "${ref}": path escapes the marketplace repository`, {
+      hint: 'A plugin "source" or skill path resolved outside the cloned marketplace. Check the marketplace manifest.',
+    });
+  }
+}
