@@ -5,7 +5,7 @@ import type { AgentEvent, AgentTool } from '@earendil-works/pi-agent-core';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
 import type { Skill } from '@weareikko/agent-context';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { Config } from './config.js';
+import { partialConfig } from '../tests/partial-config.js';
 import { ReviewerError } from './errors.js';
 import {
   blendedCost,
@@ -25,7 +25,7 @@ import {
 import { noopLogger, type Logger } from './logger.js';
 
 describe('runReview pipeline', () => {
-  const minimalConfig: Config = {
+  const minimalConfig = partialConfig({
     project: 'proj',
     mr: '1',
     gitlabUrl: 'https://gitlab.example.com',
@@ -53,7 +53,7 @@ describe('runReview pipeline', () => {
     skills: [],
     refreshGitSkills: false,
     modelPool: [],
-  };
+  });
 
   const sampleDiff = [
     'diff --git a/src/a.ts b/src/a.ts',
@@ -68,7 +68,7 @@ describe('runReview pipeline', () => {
 
   function makeAssistant(
     text: string,
-    usage: Partial<AssistantMessage['usage']> & {
+    usage: Partial<Omit<AssistantMessage['usage'], 'cost'>> & {
       cost?: Partial<AssistantMessage['usage']['cost']>;
     } = {},
   ): AssistantMessage {
@@ -1493,7 +1493,7 @@ describe('resolveModel (via runReview createAgent)', () => {
     };
   }
 
-  const base: Config = {
+  const base = partialConfig({
     project: 'proj',
     mr: '1',
     gitlabUrl: 'https://gitlab.example.com',
@@ -1518,7 +1518,7 @@ describe('resolveModel (via runReview createAgent)', () => {
     skills: [],
     refreshGitSkills: false,
     modelPool: [],
-  };
+  });
 
   it('builds an openai-completions model for ollama provider', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
@@ -2289,7 +2289,7 @@ const poolAngleJson = (comments: unknown[]) =>
   JSON.stringify({ summary: '**Risk: High** — x\n\noverview.', comments });
 
 describe('full depth with a model pool', () => {
-  const baseConfig: Config = {
+  const baseConfig = partialConfig({
     project: 'proj',
     mr: '1',
     gitlabUrl: 'https://gitlab.example.com',
@@ -2316,7 +2316,7 @@ describe('full depth with a model pool', () => {
     skills: [],
     refreshGitSkills: false,
     modelPool: [],
-  };
+  });
 
   const sampleDiff = [
     'diff --git a/src/a.ts b/src/a.ts',
@@ -2532,7 +2532,7 @@ describe('full depth with a model pool', () => {
 });
 
 describe('resolveVerifyMember', () => {
-  const baseConfig: Config = {
+  const baseConfig = partialConfig({
     project: 'proj',
     mr: '1',
     gitlabUrl: 'https://gitlab.example.com',
@@ -2560,7 +2560,7 @@ describe('resolveVerifyMember', () => {
     cwd: '/tmp',
     skills: [],
     refreshGitSkills: false,
-  };
+  });
 
   function capturingLogger(): { logger: Logger; warns: string[]; infos: string[] } {
     const warns: string[] = [];

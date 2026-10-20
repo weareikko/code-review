@@ -64,6 +64,7 @@ describe('fingerprints and duplicate detection', () => {
       line: 2,
       side: 'RIGHT' as const,
       severity: 'info' as const,
+      confidence: 'high' as const,
       body: 'Fix   this',
     };
     const sameComment = { ...comment, body: 'Fix this' };
@@ -79,6 +80,7 @@ describe('fingerprints and duplicate detection', () => {
       line: 2,
       side: 'RIGHT' as const,
       severity: 'info' as const,
+      confidence: 'high' as const,
       body: 'Fix this',
     };
     const fpA = fingerprints(comment, 'hunk-a');
@@ -97,6 +99,7 @@ describe('fingerprints and duplicate detection', () => {
       line: 2,
       side: 'RIGHT' as const,
       severity: 'info' as const,
+      confidence: 'high' as const,
       body: 'Please rename this variable',
     };
     const hunk = '@@ -1,1 +1,2 @@\n old\n+new';
@@ -123,7 +126,14 @@ describe('payload generation', () => {
 
   it('builds right-side payloads with new_line', () => {
     const payload = buildPayload(
-      { file: 'src/file.ts', line: 42, side: 'RIGHT', severity: 'info', body: 'Body' },
+      {
+        file: 'src/file.ts',
+        line: 42,
+        side: 'RIGHT',
+        severity: 'info',
+        confidence: 'high',
+        body: 'Body',
+      },
       'Body',
       refs,
     );
@@ -144,7 +154,14 @@ describe('payload generation', () => {
 
   it('builds left-side payloads with old_line', () => {
     const payload = buildPayload(
-      { file: 'src/file.ts', line: 5, side: 'LEFT', severity: 'warn', body: 'Body' },
+      {
+        file: 'src/file.ts',
+        line: 5,
+        side: 'LEFT',
+        severity: 'warn',
+        confidence: 'high',
+        body: 'Body',
+      },
       'Body',
       refs,
     );

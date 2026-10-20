@@ -320,7 +320,13 @@ function routedFetch(
 }
 
 function makePlatform(fetchImpl: ReturnType<typeof vi.fn>): GitHubPlatform {
-  return new GitHubPlatform({ token: 'gh-token', owner: 'octo', repo: 'repo', pull: 7, fetchImpl });
+  return new GitHubPlatform({
+    token: 'gh-token',
+    owner: 'octo',
+    repo: 'repo',
+    pull: 7,
+    fetchImpl: fetchImpl as unknown as typeof fetch,
+  });
 }
 
 afterEach(() => {

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { partialConfig } from '../../tests/partial-config.js';
 import type { Config } from '../config.js';
 import { createPlatform } from '../platform.js';
 import type { ReviewComment } from '../types.js';
@@ -6,7 +7,7 @@ import { GitLabPlatform } from './gitlab.js';
 
 /** Minimal but complete Config for constructing a GitLabPlatform. */
 function makeConfig(overrides: Partial<Config> = {}): Config {
-  return {
+  return partialConfig({
     project: 'group/repo',
     mr: '7',
     gitlabUrl: 'https://gitlab.example.com',
@@ -29,7 +30,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     skills: [],
     refreshGitSkills: false,
     ...overrides,
-  };
+  });
 }
 
 /**

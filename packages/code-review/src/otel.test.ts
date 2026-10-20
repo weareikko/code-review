@@ -1,7 +1,9 @@
+import type { AgentEvent } from '@earendil-works/pi-agent-core';
 import type { Context } from '@opentelemetry/api';
 import { trace } from '@opentelemetry/api';
 import { SeverityNumber } from '@opentelemetry/api-logs';
 import { describe, expect, it, vi } from 'vitest';
+import { partialConfig } from '../tests/partial-config.js';
 import type { Config } from './config.js';
 import { GitLabApiError, ReviewerError } from './errors.js';
 import type { AgentLike } from './gitlab-review.js';
@@ -17,7 +19,7 @@ import {
 
 /** Builds a minimal but complete Config for inline test helpers that need it. */
 function makeConfig(overrides: Partial<Config> = {}): Config {
-  return {
+  return partialConfig({
     project: 'mygroup/myrepo',
     mr: '7',
     gitlabUrl: 'https://gitlab.example.com',
@@ -40,11 +42,11 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     skills: [],
     refreshGitSkills: false,
     ...overrides,
-  };
+  });
 }
 
 function makeAgent(): AgentLike & { emit: (event: Record<string, unknown>) => Promise<void> } {
-  type Listener = (event: Record<string, unknown>) => void | Promise<void>;
+  type Listener = (event: AgentEvent) => void | Promise<void>;
   const listeners: Listener[] = [];
   return {
     subscribe(listener: Listener): () => void {
@@ -56,7 +58,7 @@ function makeAgent(): AgentLike & { emit: (event: Record<string, unknown>) => Pr
     },
     async prompt() {},
     async emit(event) {
-      for (const l of listeners) await l(event);
+      for (const l of listeners) await l(event as AgentEvent);
     },
   };
 }
@@ -215,7 +217,7 @@ describe('OpenTelemetry bridge', () => {
     });
     expect(bridge).not.toBeNull();
 
-    const config: Config = {
+    const config = partialConfig({
       project: 'proj',
       mr: '1',
       gitlabUrl: 'https://gitlab.example.com',
@@ -237,7 +239,7 @@ describe('OpenTelemetry bridge', () => {
       cwd: '/tmp',
       skills: [],
       refreshGitSkills: false,
-    };
+    });
 
     const runContext = createDiagnosticContext('run', config, runId);
     try {
@@ -538,7 +540,7 @@ describe('OpenTelemetry bridge', () => {
       env: { CODE_REVIEW_OTEL: '1' },
     });
 
-    const config: Config = {
+    const config = partialConfig({
       project: 'proj',
       mr: '1',
       gitlabUrl: 'https://gitlab.example.com',
@@ -560,7 +562,7 @@ describe('OpenTelemetry bridge', () => {
       cwd: '/tmp',
       skills: [],
       refreshGitSkills: false,
-    };
+    });
     const ctx = createDiagnosticContext('reviewer.run', config, 'run-error');
     await expect(
       traceDiagnostic(diagnosticChannels.runReviewer, ctx, async () => {
@@ -789,7 +791,7 @@ describe('OpenTelemetry bridge', () => {
       env: { CODE_REVIEW_OTEL: '1' },
     });
 
-    const config: Config = {
+    const config = partialConfig({
       project: 'proj',
       mr: '1',
       gitlabUrl: 'https://gitlab.example.com',
@@ -811,7 +813,7 @@ describe('OpenTelemetry bridge', () => {
       cwd: '/tmp',
       skills: [],
       refreshGitSkills: false,
-    };
+    });
 
     const runContext = createDiagnosticContext('run', config, runId);
     await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
@@ -1519,7 +1521,14 @@ describe('OpenTelemetry bridge', () => {
       bridge!.logComments(
         [
           {
-            comment: { file: 'x.ts', line: 1, side: 'RIGHT', severity: 'info', body: 'test' },
+            comment: {
+              file: 'x.ts',
+              line: 1,
+              side: 'RIGHT',
+              severity: 'info',
+              confidence: 'high',
+              body: 'test',
+            },
             fingerprints: { primary: 'a', secondary: 'b' },
             duplicate: false,
             payload: {
@@ -1569,7 +1578,7 @@ describe('OpenTelemetry bridge', () => {
       env: { CODE_REVIEW_OTEL: '1' },
     });
 
-    const config: Config = {
+    const config = partialConfig({
       project: 'acme/web',
       mr: '42',
       gitlabUrl: 'https://gitlab.acme.com',
@@ -1591,7 +1600,7 @@ describe('OpenTelemetry bridge', () => {
       cwd: '/tmp',
       skills: [],
       refreshGitSkills: false,
-    };
+    });
     const runContext = createDiagnosticContext('run', config, 'run-logs');
     await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
       bridge!.logComments(
@@ -1602,6 +1611,7 @@ describe('OpenTelemetry bridge', () => {
               line: 42,
               side: 'RIGHT',
               severity: 'critical',
+              confidence: 'high',
               body: 'Use bcrypt.',
             },
             fingerprints: { primary: 'a', secondary: 'b' },
@@ -1624,6 +1634,7 @@ describe('OpenTelemetry bridge', () => {
               line: 7,
               side: 'RIGHT',
               severity: 'warn',
+              confidence: 'high',
               body: 'Remove unused import.',
             },
             fingerprints: { primary: 'c', secondary: 'd' },
@@ -1680,7 +1691,7 @@ describe('OpenTelemetry bridge', () => {
       },
     });
 
-    const config: Config = {
+    const config = partialConfig({
       project: 'proj',
       mr: '1',
       gitlabUrl: 'https://gitlab.example.com',
@@ -1702,7 +1713,7 @@ describe('OpenTelemetry bridge', () => {
       cwd: '/tmp',
       skills: [],
       refreshGitSkills: false,
-    };
+    });
     const runContext = createDiagnosticContext('run', config, 'run-ci');
     await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
       const reviewerContext = createDiagnosticContext('reviewer.run', config, 'run-ci');
@@ -1765,7 +1776,7 @@ describe('OpenTelemetry bridge', () => {
       },
     });
 
-    const config: Config = {
+    const config = partialConfig({
       platform: 'github',
       project: 'weareikko/code-review',
       mr: '57',
@@ -1790,7 +1801,7 @@ describe('OpenTelemetry bridge', () => {
       cwd: '/tmp',
       skills: [],
       refreshGitSkills: false,
-    };
+    });
     const runContext = createDiagnosticContext('run', config, 'run-gha');
     await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
       const reviewerContext = createDiagnosticContext('reviewer.run', config, 'run-gha');
@@ -1862,7 +1873,7 @@ describe('OpenTelemetry bridge', () => {
       env: { CODE_REVIEW_OTEL: '1' },
     });
 
-    const config: Config = {
+    const config = partialConfig({
       project: 'proj',
       mr: '1',
       gitlabUrl: 'https://gitlab.example.com',
@@ -1884,7 +1895,7 @@ describe('OpenTelemetry bridge', () => {
       cwd: '/tmp',
       skills: [],
       refreshGitSkills: false,
-    };
+    });
 
     const runContext = createDiagnosticContext('run', config, 'run-first');
     runContext.firstReview = true;
@@ -1985,7 +1996,7 @@ describe('OpenTelemetry bridge', () => {
       runtime: fake.runtime,
       env: { CODE_REVIEW_OTEL: '1' },
     });
-    const config: Config = {
+    const config = partialConfig({
       project: 'p',
       mr: '1',
       gitlabUrl: 'https://gitlab.example.com',
@@ -2007,7 +2018,7 @@ describe('OpenTelemetry bridge', () => {
       cwd: '/tmp',
       skills: [],
       refreshGitSkills: false,
-    };
+    });
     const runContext = createDiagnosticContext('run', config, 'run-trunc');
     await traceDiagnostic(diagnosticChannels.run, runContext, async () => {
       bridge!.logComments(
@@ -2018,6 +2029,7 @@ describe('OpenTelemetry bridge', () => {
               line: 1,
               side: 'RIGHT',
               severity: 'info',
+              confidence: 'high',
               body: 'x'.repeat(600),
             },
             fingerprints: { primary: 'e', secondary: 'f' },

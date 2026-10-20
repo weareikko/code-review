@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Config } from './config.js';
+import { partialConfig } from '../tests/partial-config.js';
 import { collectSecrets, scrubSecrets } from './diagnostics.js';
 import { ConfigError, GitLabApiError, ReviewerError } from './errors.js';
 import {
@@ -13,7 +13,7 @@ import {
   type McpDiagnosticContext,
 } from './review.js';
 
-const diagnosticConfig: Config = {
+const diagnosticConfig = partialConfig({
   project: 'proj',
   mr: '1',
   gitlabUrl: 'https://gitlab.example.com',
@@ -35,7 +35,7 @@ const diagnosticConfig: Config = {
   cwd: '/tmp',
   skills: [],
   refreshGitSkills: false,
-};
+});
 
 describe('diagnostics_channel instrumentation', () => {
   it('sets gitlabUrl to the platform server URL (github → githubServerUrl)', () => {
@@ -57,8 +57,10 @@ describe('diagnostics_channel instrumentation', () => {
 
   it('publishes tracing channel lifecycle events with safe context', async () => {
     const events: Array<{ type: string; message: DiagnosticContext }> = [];
-    const onStart = (message: DiagnosticContext) => events.push({ type: 'start', message });
-    const onAsyncEnd = (message: DiagnosticContext) => events.push({ type: 'asyncEnd', message });
+    const onStart = (message: unknown) =>
+      events.push({ type: 'start', message: message as DiagnosticContext });
+    const onAsyncEnd = (message: unknown) =>
+      events.push({ type: 'asyncEnd', message: message as DiagnosticContext });
 
     diagnosticChannels.run.start.subscribe(onStart);
     diagnosticChannels.run.asyncEnd.subscribe(onAsyncEnd);
@@ -95,7 +97,7 @@ describe('diagnostics_channel instrumentation', () => {
 
   it('adds sanitized error details to failed traces', async () => {
     const errors: DiagnosticContext[] = [];
-    const onError = (message: DiagnosticContext) => errors.push(message);
+    const onError = (message: unknown) => errors.push(message as DiagnosticContext);
 
     diagnosticChannels.run.error.subscribe(onError);
     try {
@@ -121,7 +123,7 @@ describe('diagnostics_channel instrumentation', () => {
 
   it('captures the HTTP status from a GitLab API error so the bridge can label it', async () => {
     const errors: DiagnosticContext[] = [];
-    const onError = (message: DiagnosticContext) => errors.push(message);
+    const onError = (message: unknown) => errors.push(message as DiagnosticContext);
 
     diagnosticChannels.run.error.subscribe(onError);
     try {
@@ -148,7 +150,7 @@ describe('diagnostics_channel instrumentation', () => {
 
   it('leaves status undefined for errors without an HTTP status', async () => {
     const errors: DiagnosticContext[] = [];
-    const onError = (message: DiagnosticContext) => errors.push(message);
+    const onError = (message: unknown) => errors.push(message as DiagnosticContext);
 
     diagnosticChannels.run.error.subscribe(onError);
     try {
@@ -167,7 +169,7 @@ describe('diagnostics_channel instrumentation', () => {
 
   it('flags timeout errors so the bridge can label the run status=timeout', async () => {
     const errors: DiagnosticContext[] = [];
-    const onError = (message: DiagnosticContext) => errors.push(message);
+    const onError = (message: unknown) => errors.push(message as DiagnosticContext);
 
     diagnosticChannels.run.error.subscribe(onError);
     try {
@@ -190,12 +192,12 @@ describe('diagnostics_channel instrumentation', () => {
 
   it("scrubs the run's own secret values from error messages stored on the trace", async () => {
     const errors: DiagnosticContext[] = [];
-    const onError = (message: DiagnosticContext) => errors.push(message);
-    const secretConfig: Config = {
+    const onError = (message: unknown) => errors.push(message as DiagnosticContext);
+    const secretConfig = partialConfig({
       ...diagnosticConfig,
       gitlabToken: 'glpat-ABCDEFGHIJKLMNOPQRSTUV',
       apiKey: 'sk-ant-secretkeyvalue0123456789',
-    };
+    });
 
     diagnosticChannels.run.error.subscribe(onError);
     try {
@@ -221,9 +223,10 @@ describe('diagnostics_channel instrumentation', () => {
 describe('MCP diagnostics', () => {
   it('publishes mcp.connect start/asyncEnd with server and durationMs, no args/results', async () => {
     const events: Array<{ type: string; message: McpDiagnosticContext }> = [];
-    const onStart = (message: McpDiagnosticContext) => events.push({ type: 'start', message });
-    const onAsyncEnd = (message: McpDiagnosticContext) =>
-      events.push({ type: 'asyncEnd', message });
+    const onStart = (message: unknown) =>
+      events.push({ type: 'start', message: message as McpDiagnosticContext });
+    const onAsyncEnd = (message: unknown) =>
+      events.push({ type: 'asyncEnd', message: message as McpDiagnosticContext });
 
     mcpDiagnosticChannels.connect.start.subscribe(onStart);
     mcpDiagnosticChannels.connect.asyncEnd.subscribe(onAsyncEnd);
@@ -249,7 +252,7 @@ describe('MCP diagnostics', () => {
 
   it('lets the operation set toolCount on mcp.tools', async () => {
     const ends: McpDiagnosticContext[] = [];
-    const onAsyncEnd = (message: McpDiagnosticContext) => ends.push(message);
+    const onAsyncEnd = (message: unknown) => ends.push(message as McpDiagnosticContext);
 
     mcpDiagnosticChannels.tools.asyncEnd.subscribe(onAsyncEnd);
     try {
@@ -266,7 +269,7 @@ describe('MCP diagnostics', () => {
 
   it('lets the operation set tool and resultChars on mcp.call', async () => {
     const ends: McpDiagnosticContext[] = [];
-    const onAsyncEnd = (message: McpDiagnosticContext) => ends.push(message);
+    const onAsyncEnd = (message: unknown) => ends.push(message as McpDiagnosticContext);
 
     mcpDiagnosticChannels.call.asyncEnd.subscribe(onAsyncEnd);
     try {
@@ -297,7 +300,7 @@ describe('MCP diagnostics', () => {
 
   it('records a sanitized errorInfo on mcp.call failure and still rejects', async () => {
     const errors: McpDiagnosticContext[] = [];
-    const onError = (message: McpDiagnosticContext) => errors.push(message);
+    const onError = (message: unknown) => errors.push(message as McpDiagnosticContext);
 
     mcpDiagnosticChannels.call.error.subscribe(onError);
     try {

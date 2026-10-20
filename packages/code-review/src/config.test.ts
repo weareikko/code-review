@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { partialConfig } from '../tests/partial-config.js';
 import {
   applyDefaultCacheRetention,
   applyCodeReviewEnvPrefix,
@@ -13,7 +14,6 @@ import {
   resolveGitHubPr,
   resolveProjectWebUrl,
   validateConfig,
-  type Config,
   type Severity,
   type ThinkingLevel,
 } from './config.js';
@@ -547,7 +547,7 @@ describe('GitHub config resolution', () => {
 });
 
 describe('per-platform validateConfig', () => {
-  const gitHubConfig: Config = {
+  const gitHubConfig = partialConfig({
     platform: 'github',
     project: '',
     mr: '',
@@ -584,7 +584,7 @@ describe('per-platform validateConfig', () => {
     marketplaces: [],
     refreshGitSkills: false,
     modelPool: [],
-  };
+  });
 
   it('accepts a complete GitHub config', () => {
     expect(() => validateConfig(gitHubConfig)).not.toThrow();
@@ -622,7 +622,7 @@ describe('platform constants', () => {
 });
 
 describe('validateConfig', () => {
-  const minimalConfig: Config = {
+  const minimalConfig = partialConfig({
     platform: 'gitlab',
     project: 'proj',
     mr: '1',
@@ -654,7 +654,7 @@ describe('validateConfig', () => {
     marketplaces: [],
     refreshGitSkills: false,
     modelPool: [],
-  } as Config;
+  });
 
   it('throws listing all missing required fields', () => {
     expect(() => validateConfig({ ...minimalConfig, project: '', mr: '' })).toThrow(

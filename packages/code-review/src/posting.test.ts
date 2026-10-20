@@ -17,7 +17,7 @@ import {
   SUMMARY_MARKER,
   upsertSummaryNote,
 } from './posting.js';
-import type { GeneratedComment } from './review.js';
+import type { GeneratedComment, GitLabDiscussionPayload } from './review.js';
 
 declare const __PKG_VERSION__: string;
 
@@ -79,8 +79,8 @@ describe('summary note upsert', () => {
     const body = buildSummaryBody('Looks good.', undefined, {
       sizeNotice: {
         sizeSkippedFiles: [
-          { path: 'src/huge.ts', chars: 120_000 },
-          { path: 'src/also-huge.ts', chars: 80_000 },
+          { path: 'src/huge.ts', chars: 120_000, changedLines: 0 },
+          { path: 'src/also-huge.ts', chars: 80_000, changedLines: 0 },
         ],
       },
     });
@@ -412,8 +412,15 @@ describe('legacy summary history markers', () => {
 });
 
 describe('postGeneratedComments strategies', () => {
-  const fresh: GeneratedComment = {
-    comment: { file: 'a.ts', line: 1, side: 'RIGHT', severity: 'info', body: 'fresh' },
+  const fresh: GeneratedComment<GitLabDiscussionPayload> = {
+    comment: {
+      file: 'a.ts',
+      line: 1,
+      side: 'RIGHT',
+      severity: 'info',
+      confidence: 'high',
+      body: 'fresh',
+    },
     fingerprints: { primary: 'p1', secondary: 's1' },
     duplicate: false,
     payload: {
@@ -429,7 +436,7 @@ describe('postGeneratedComments strategies', () => {
       },
     },
   };
-  const dup: GeneratedComment = {
+  const dup: GeneratedComment<GitLabDiscussionPayload> = {
     ...fresh,
     comment: { ...fresh.comment, body: 'dup' },
     duplicate: true,
@@ -439,7 +446,7 @@ describe('postGeneratedComments strategies', () => {
     return new GitLabClient({
       gitlabUrl: 'https://gitlab.example.com',
       token: 't',
-      fetchImpl,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
     });
   }
 
@@ -467,11 +474,11 @@ describe('postGeneratedComments strategies', () => {
     expect(fetchImpl.mock.calls[0][1]?.method).toBe('POST');
   });
 
-  const draftA: GeneratedComment = {
+  const draftA: GeneratedComment<GitLabDiscussionPayload> = {
     ...fresh,
     fingerprints: { primary: 'aaaa', secondary: 'aabb' },
   };
-  const draftB: GeneratedComment = {
+  const draftB: GeneratedComment<GitLabDiscussionPayload> = {
     ...fresh,
     fingerprints: { primary: 'bbbb', secondary: 'bbcc' },
   };
@@ -761,11 +768,11 @@ describe('postGeneratedComments strategies', () => {
       'DELETE /draft_notes': () => new Response(null, { status: 204 }),
     });
 
-    const aWithFp: GeneratedComment = {
+    const aWithFp: GeneratedComment<GitLabDiscussionPayload> = {
       ...draftA,
       payload: { ...draftA.payload, body: 'collision text aaaa' },
     };
-    const bWithFp: GeneratedComment = {
+    const bWithFp: GeneratedComment<GitLabDiscussionPayload> = {
       ...draftB,
       payload: { ...draftB.payload, body: 'unique text bbbb' },
     };

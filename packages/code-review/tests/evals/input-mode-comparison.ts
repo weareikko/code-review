@@ -24,6 +24,7 @@ import type { CreateAgent } from '../../src/gitlab-review.js';
 import { runReview } from '../../src/gitlab-review.js';
 import { parseReviewMarkdownWithWarnings } from '../../src/parser.js';
 import type { ReviewInputMode } from '../../src/types.js';
+import { partialConfig } from '../partial-config.js';
 import type { MaterializedRepo } from './materialize.js';
 import { scoreReview, type ScoreResult } from './scoring.js';
 import type { PlantedBug, SyntheticReview } from './synthetic.js';
@@ -64,7 +65,7 @@ function slugOf(path: string): string {
 
 function makeConfig(overrides: Partial<Config>): Config {
   const model = overrides.model ?? EVAL_MODEL;
-  return {
+  return partialConfig({
     project: 'test',
     mr: '1',
     gitlabUrl: 'https://gitlab.example.com',
@@ -92,7 +93,7 @@ function makeConfig(overrides: Partial<Config>): Config {
     skills: [],
     refreshGitSkills: false,
     ...overrides,
-  };
+  });
 }
 
 function countGitToolCalls(trajectory: Trajectory): number {

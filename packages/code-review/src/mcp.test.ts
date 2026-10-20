@@ -548,8 +548,8 @@ describe('connectMcpServers', () => {
     const events: Array<{ channel: string; ctx: McpDiagnosticContext }> = [];
     const record =
       (channel: string) =>
-      (ctx: McpDiagnosticContext): void => {
-        events.push({ channel, ctx });
+      (ctx: unknown): void => {
+        events.push({ channel, ctx: ctx as McpDiagnosticContext });
       };
     const onConnect = record('connect');
     const onTools = record('tools');
@@ -593,7 +593,7 @@ describe('connectMcpServers', () => {
   it('publishes no diagnostics when runId is not set', async () => {
     const fake = await startFakeServer();
     const seen: McpDiagnosticContext[] = [];
-    const onAsyncEnd = (ctx: McpDiagnosticContext) => seen.push(ctx);
+    const onAsyncEnd = (ctx: unknown) => seen.push(ctx as McpDiagnosticContext);
     mcpDiagnosticChannels.call.asyncEnd.subscribe(onAsyncEnd);
 
     const conn = await connectMcpServers([config('tracker')], {
