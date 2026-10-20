@@ -47,14 +47,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build package
+      - name: Build packages
         run: npm run build
+
+      # Lists the files each package would publish, and fails on a broken
+      # `files` or `bin` entry.
+      - name: Check package contents
+        run: npm pack --dry-run --workspaces
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist
-          path: dist/
+          path: packages/*/dist/
 
   typecheck:
     name: Type Check

@@ -72,4 +72,4 @@ jobs:
           # for the .mcp.json fallback in local runs).
           GITHUB_PERSONAL_ACCESS_TOKEN: ${{ github.token }}
           CODE_REVIEW_MCP_ENV: GITHUB_TOKEN,GITHUB_PERSONAL_ACCESS_TOKEN
-        run: node bin/code-review.js
+        run: node packages/code-review/bin/code-review.js

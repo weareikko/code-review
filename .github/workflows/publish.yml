@@ -2,6 +2,8 @@ name: Publish
 
 # Each merge into main releases what its fragments describe. A manual run
 # (`gh workflow run publish.yml -f version=major`) forces a bump.
+# Both packages share one version: @weareikko/agent-context and
+# @weareikko/code-review.
 # npm trusted publishing is bound to this file name: keep the publish job here.
 on:
   push:
@@ -42,7 +44,7 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Build package
+      - name: Build packages
         run: npm run build
 
       - name: Type check
@@ -51,8 +53,10 @@ jobs:
       - name: Test
         run: npm test
 
-  # Folds the fragments, bumps package.json, commits `chore: release <version>`,
-  # tags, pushes, moves the `0` / `0.x` tags and creates the GitHub release.
+  # Folds the fragments into CHANGELOG.md, sets the version of every
+  # package.json (`npm version --workspaces --include-workspace-root`),
+  # commits `chore: release <version>`, tags, pushes, moves the `0` / `0.x`
+  # tags of the GitHub Action and creates the GitHub release.
   release:
     name: Release
     needs: test
@@ -69,7 +73,7 @@ jobs:
 
       - name: Release
         id: release
-        uses: weareikko/changelog@9d93346df9858eaa29007bd8530aad8f4c5b539a # 0.1.0
+        uses: weareikko/changelog@fce59bfe7b620305dfcc222f1b150dda9c3cc157 # 0.1.3
         with:
           command: release
           version: ${{ inputs.version || 'auto' }}
@@ -98,16 +102,45 @@ jobs:
           cache: 'npm'
 
       # The action publishes with --ignore-scripts, so `prepublishOnly` does not
-      # run: this step builds `dist/`, and the test job ran the checks.
+      # run: this step builds each `dist/`, and the test job ran the checks.
       - name: Install and build
         run: |
           npm ci
           npm run build
 
+      # In the repository, code-review depends on agent-context at "*", so npm
+      # links the workspace at any version. The published manifest pins the
+      # version released with it.
+      - name: Pin @weareikko/agent-context in @weareikko/code-review
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: npm pkg set "dependencies.@weareikko/agent-context=${VERSION}" --workspace @weareikko/code-review
+
       # Trusted publishing (OIDC): no npm token. A prerelease goes to `next`.
-      - name: Publish @weareikko/code-review
+      # Provenance needs a public source repository, which this one is. A
+      # version that npm already has is skipped.
+      # A failure here does not stop the code-review publish; the last step
+      # fails the job, and "Re-run failed jobs" publishes the missing package.
+      - name: Publish @weareikko/agent-context
+        id: agent-context
+        continue-on-error: true
         uses: JS-DevTools/npm-publish@0fd2f4369c5d6bcfcde6091a7c527d810b9b5c3f # v4.1.5
         with:
+          package: packages/agent-context
           access: public
           provenance: true
           tag: ${{ needs.release.outputs.dist-tag }}
+
+      - name: Publish @weareikko/code-review
+        uses: JS-DevTools/npm-publish@0fd2f4369c5d6bcfcde6091a7c527d810b9b5c3f # v4.1.5
+        with:
+          package: packages/code-review
+          access: public
+          provenance: true
+          tag: ${{ needs.release.outputs.dist-tag }}
+
+      - name: Check the @weareikko/agent-context publish
+        if: steps.agent-context.outcome == 'failure'
+        run: |
+          echo "::error::@weareikko/agent-context was not published: @weareikko/code-review depends on it. Fix the cause (npm trusted publisher of the package), then use \"Re-run failed jobs\"."
+          exit 1
