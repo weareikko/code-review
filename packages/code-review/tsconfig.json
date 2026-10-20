@@ -1,23 +1,13 @@
 {
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2024",
-    "module": "ESNext",
-    "lib": ["ES2024"],
-    "moduleResolution": "bundler",
-    "resolveJsonModule": true,
-    "allowJs": false,
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "types": ["node"],
-    "erasableSyntaxOnly": true
+    "noEmit": true,
+    // Type-check against the sources of the workspace packages, so that
+    // `npm run typecheck` works before `npm run build`.
+    "paths": {
+      "@weareikko/agent-context": ["../agent-context/src/index.ts"]
+    }
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "tests/**/*.ts"]
+  "exclude": ["src/**/*.test.ts"]
 }

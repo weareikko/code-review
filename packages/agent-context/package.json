@@ -1,6 +1,6 @@
 {
   "name": "@weareikko/agent-context",
-  "version": "0.0.1",
+  "version": "0.10.3",
   "description": "Shared context, skills and MCP configuration for weareikko pi agents.",
   "keywords": [
     "agent",
@@ -10,14 +10,15 @@
     "pi",
     "skills"
   ],
-  "homepage": "https://github.com/weareikko/agent-context#readme",
+  "homepage": "https://github.com/weareikko/code-review/tree/main/packages/agent-context#readme",
   "bugs": {
-    "url": "https://github.com/weareikko/agent-context/issues"
+    "url": "https://github.com/weareikko/code-review/issues"
   },
   "license": "FSL-1.1-ALv2",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/weareikko/agent-context.git"
+    "url": "git+ssh://git@github.com/weareikko/code-review.git",
+    "directory": "packages/agent-context"
   },
   "files": [
     "dist/",
@@ -36,39 +37,16 @@
     "access": "public"
   },
   "scripts": {
-    "build": "vite build && tsgo --emitDeclarationOnly",
-    "test": "vitest run",
-    "test:ci": "vitest run --coverage",
-    "typecheck": "tsgo --noEmit",
-    "typecheck:tests": "tsgo -p tsconfig.test.json --noEmit",
-    "lint": "oxlint",
-    "lint:fix": "oxlint --fix",
-    "lint:types": "oxlint --type-aware",
-    "format": "oxfmt --write .",
-    "format:check": "oxfmt --check .",
-    "check": "npm run lint && npm run format:check && npm run typecheck && npm run typecheck:tests && npm test",
-    "prepublishOnly": "npm run check && npm run build && npm pack --dry-run",
-    "prepare": "husky"
+    "build": "vite build && tsgo -p tsconfig.build.json",
+    "typecheck": "tsgo --noEmit && tsgo -p tsconfig.test.json --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run build && npm pack --dry-run"
   },
   "dependencies": {
     "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "1.2.0",
-    "@types/node": "^24.12.4",
-    "@typescript/native-preview": "7.0.0-dev.20260707.2",
-    "@vitest/coverage-v8": "^4.1.8",
-    "husky": "9.1.7",
-    "lint-staged": "17.5.1",
-    "memfs": "^4.57.6",
-    "oxfmt": "0.68.0",
-    "oxlint": "1.83.0",
-    "oxlint-tsgolint": "^7.0.2002",
-    "vite": "^8.0.16",
-    "vitest": "^4.1.8"
-  },
-  "lint-staged": {
-    "*.{js,ts,json,md,yml,yaml}": "oxfmt --write --no-error-on-unmatched-pattern"
+    "memfs": "^4.57.6"
   },
   "engines": {
     "node": ">=24"

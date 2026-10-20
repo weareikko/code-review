@@ -1,0 +1,49 @@
+{
+  "name": "code-review",
+  "version": "0.10.3",
+  "private": true,
+  "description": "Agent-driven code review for GitLab merge requests and GitHub pull requests (@weareikko/code-review), and the context, skills and MCP configuration it shares with the other weareikko agents (@weareikko/agent-context).",
+  "license": "FSL-1.1-ALv2",
+  "author": "weareikko",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/weareikko/code-review.git"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "npm run build -w @weareikko/agent-context -w @weareikko/code-review",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ci": "vitest run --coverage",
+    "test:evals": "npm run test:evals -w @weareikko/code-review",
+    "typecheck": "npm run typecheck --workspaces",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "lint:types": "oxlint --type-aware",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm test",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.4",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
+    "@vitest/coverage-v8": "^4.1.8",
+    "husky": "9.1.7",
+    "lint-staged": "17.5.1",
+    "oxfmt": "0.68.0",
+    "oxlint": "1.83.0",
+    "oxlint-tsgolint": "^7.0.2002",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.8"
+  },
+  "lint-staged": {
+    "*.{js,ts,json,md,yml,yaml}": "oxfmt --write --no-error-on-unmatched-pattern"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

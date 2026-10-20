@@ -1,23 +1,24 @@
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { config as loadDotenv } from 'dotenv';
 import EvalReporter from 'vitest-evals/reporter';
 import { defineConfig } from 'vitest/config';
+import { packageDefines, readPackageInfo } from '../../vite.shared.ts';
 
-// Load .env in the main process (covers env vars used at config time).
-loadDotenv();
-
-// `src/mcp.ts` reads the build-time `__PKG_VERSION__` define (the MCP client
-// identifies itself to every server it connects to), so evals that connect a
-// server need the same define the library build injects.
-const pkg = JSON.parse(
-  readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf8'),
-) as { name: string; version: string };
+// Load the repository's .env in the main process (covers env vars used at
+// config time).
+loadDotenv({ path: fileURLToPath(new URL('../../.env', import.meta.url)) });
 
 export default defineConfig({
-  define: {
-    __PKG_NAME__: JSON.stringify(pkg.name),
-    __PKG_VERSION__: JSON.stringify(pkg.version),
+  // `src/mcp.ts` reads the build-time `__PKG_VERSION__` define (the MCP client
+  // identifies itself to every server it connects to), so evals that connect a
+  // server need the same define the library build injects.
+  define: packageDefines(readPackageInfo(fileURLToPath(new URL('.', import.meta.url)))),
+  resolve: {
+    alias: {
+      '@weareikko/agent-context': fileURLToPath(
+        new URL('../agent-context/src/index.ts', import.meta.url),
+      ),
+    },
   },
   test: {
     include: ['tests/evals/**/*.eval.ts'],

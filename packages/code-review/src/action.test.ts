@@ -5,9 +5,9 @@ import { parse } from 'yaml';
 import { PRODUCT_NAME } from './product.js';
 
 // The composite action lives at the repo root (referenced as
-// `weareikko/code-review@<ref>` from consumer workflows), one level up from
-// this `src/` file.
-const actionPath = fileURLToPath(new URL('../action.yml', import.meta.url));
+// `weareikko/code-review@<ref>` from consumer workflows), three levels up
+// from this `packages/code-review/src/` file.
+const actionPath = fileURLToPath(new URL('../../../action.yml', import.meta.url));
 const action = parse(readFileSync(actionPath, 'utf8')) as {
   runs?: { using?: string; steps?: Array<{ uses?: string; run?: string; shell?: string }> };
   inputs?: Record<string, { required?: boolean; default?: unknown }>;
