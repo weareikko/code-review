@@ -4,17 +4,16 @@ import {
   type CallToolResult,
   type Tool as McpTool,
 } from '@earendil-works/pi-mcp';
+import type { McpServerConfig } from '@weareikko/agent-context';
 import { describe, expect, it, vi } from 'vitest';
 import { startFakeMcpServer, type FakeMcpServer } from '../tests/mcp-fake-server.js';
 import { mcpDiagnosticChannels, type McpDiagnosticContext } from './diagnostics.js';
 import type { Logger } from './logger.js';
-import type { McpServerConfig } from './mcp-config.js';
 import {
   connectMcpServers,
   createMcpTransport,
   formatMcpToolResult,
   inheritedMcpEnvironment,
-  isReadOnlyMcpTool,
   MAX_MCP_IMAGE_BLOCKS,
   mcpToolName,
 } from './mcp.js';
@@ -85,20 +84,6 @@ function textOf(result: { content: { type: string; text?: string }[] }): string 
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
-
-describe('isReadOnlyMcpTool', () => {
-  it('requires readOnlyHint and rejects destructiveHint', () => {
-    expect(isReadOnlyMcpTool({ annotations: { readOnlyHint: true } })).toBe(true);
-    expect(isReadOnlyMcpTool({ annotations: { readOnlyHint: true, destructiveHint: false } })).toBe(
-      true,
-    );
-    expect(isReadOnlyMcpTool({ annotations: { readOnlyHint: true, destructiveHint: true } })).toBe(
-      false,
-    );
-    expect(isReadOnlyMcpTool({ annotations: { readOnlyHint: false } })).toBe(false);
-    expect(isReadOnlyMcpTool({})).toBe(false);
-  });
-});
 
 describe('mcpToolName', () => {
   it('joins server and tool with the mcp__ prefix', () => {

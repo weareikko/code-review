@@ -29,6 +29,7 @@
 - `src/posting.ts`: direct/draft posting, summary note upsert/history, reviewed-commit skip marker.
 - `src/diagnostics.ts` and `src/otel.ts`: diagnostics_channel tracing and opt-in OTel bridge.
 - `src/review.ts`: public library exports.
+- `@weareikko/agent-context` (dependency): convention files, skills, marketplaces, MCP server configuration, the read-only MCP rule and the footer builders, shared with code-implementation. Change them in that package, not here.
 - `skills/code-review/`: built-in skill packaged with the npm artifact.
 - `tests/evals/`: LLM-backed evaluation tests and fixtures.
 

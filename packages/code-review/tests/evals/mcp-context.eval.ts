@@ -33,6 +33,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Tool as McpTool } from '@earendil-works/pi-mcp';
+import type { McpServerConfig } from '@weareikko/agent-context';
 import { expect } from 'vitest';
 import type { HarnessRun, TranscriptEvent } from 'vitest-evals';
 // oxlint-disable eslint-plugin-jest/no-standalone-expect -- describeEval uses its own `it` wrapper that oxlint doesn't recognise
@@ -40,7 +41,6 @@ import { createHarness, describeEval } from 'vitest-evals';
 import type { Config } from '../../src/config.js';
 import { resolveProviderApiKey } from '../../src/config.js';
 import { runReview } from '../../src/gitlab-review.js';
-import type { McpServerConfig } from '../../src/mcp-config.js';
 import { connectMcpServers } from '../../src/mcp.js';
 import { parseReviewMarkdownWithWarnings } from '../../src/parser.js';
 import type { ReviewDepth } from '../../src/types.js';

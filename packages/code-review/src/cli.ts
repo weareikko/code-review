@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { formatMcpFooter, formatSkillsFooter } from '@weareikko/agent-context';
 import type { Config } from './config.js';
 import {
   applyDefaultCacheRetention,
@@ -17,7 +18,7 @@ import {
 import { formatError, isQuotaExceededError, ParseError, RuntimeError } from './errors.js';
 import { extractExistingFingerprints } from './fingerprints.js';
 import { getMergeCommitLog, getMergeDiff, prepareGitHistory, summarizeDiff } from './git.js';
-import type { McpServerUsage, ReviewUsage, SkillUsage } from './gitlab-review.js';
+import type { ReviewUsage } from './gitlab-review.js';
 import { runReview } from './gitlab-review.js';
 import { createLogger } from './logger.js';
 import type { OtelBridge } from './otel.js';
@@ -27,8 +28,7 @@ import { createPlatform, type ScmResponseInfo } from './platform.js';
 import type { SummaryResult } from './posting.js';
 import { findExistingReviewedCommitSha, findExistingSummaryNote } from './posting.js';
 import { extractChangedFiles, extractPriorThreads } from './prior-threads.js';
-import { formatSkillLink, mcpSourceUrl, type SkillLinkContext } from './skill-links.js';
-import { formatMcpUsageState, formatSkillUsageState } from './skill-usage.js';
+import { BUILTIN_SKILLS } from './product.js';
 import { withCarriedOverFindings } from './summary-carryover.js';
 import type { GeneratedComment, Severity, ThinkingLevel } from './types.js';
 
@@ -502,6 +502,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
               skillsFooter: formatSkillsFooter(usage.skills, {
                 projectWebUrl: config.projectWebUrl,
                 commitSha: refs.head_sha,
+                builtinSkills: BUILTIN_SKILLS,
               }),
               mcpFooter: formatMcpFooter(usage.mcp, {
                 projectWebUrl: config.projectWebUrl,
@@ -594,45 +595,6 @@ function zeroReviewUsage(model: string, thinkingLevel: ThinkingLevel): ReviewUsa
     mcp: [],
     sizeNotice: { sizeSkippedFiles: [] },
   };
-}
-
-/**
- * The summary footer's skills line. Each skill links to its `SKILL.md` source so
- * a developer reading the review can check what the reviewer was told; skills
- * with no reachable source (a `file:` path, or an in-repo skill on a run without
- * CI project coordinates) stay as plain names.
- */
-export function formatSkillsFooter(
-  skills: SkillUsage[],
-  context: SkillLinkContext = {},
-): string | undefined {
-  if (skills.length === 0) return undefined;
-  const parts = skills.map(
-    (skill) => `${formatSkillLink(skill, context)} (${formatSkillUsageState(skill)})`,
-  );
-  return `Skills: ${parts.join(', ')}`;
-}
-
-/**
- * The summary footer's MCP line, e.g. `MCP: jira (2 calls), docs (unused),
- * context7 (unavailable)`. A connected server reports how many tool calls the
- * reviewer actually made against it; an unavailable one is flagged as such. The
- * exposed tool list stays in the usage artifact — the footer answers what was
- * used, not what was offered. Each server name links to its source (the repo
- * `.mcp.json` or the marketplace plugin) when one is reachable, the same way
- * `formatSkillsFooter` links skills.
- */
-export function formatMcpFooter(
-  servers: McpServerUsage[],
-  context: SkillLinkContext = {},
-): string | undefined {
-  if (servers.length === 0) return undefined;
-  const parts = servers.map((server) => {
-    const url = mcpSourceUrl(server.source, context);
-    const name = url ? `[${server.name}](${url})` : server.name;
-    return `${name} (${formatMcpUsageState(server)})`;
-  });
-  return `MCP: ${parts.join(', ')}`;
 }
 
 export function formatUsageLine(usage: ReviewUsage): string {
