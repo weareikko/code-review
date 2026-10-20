@@ -73,7 +73,7 @@ The summary is upserted **before** inline comments are posted so it appears at t
 
 Review usage: 12,345 in / 678 out tokens — $0.0421 (anthropic/claude-sonnet-4-5, thinking: off)
 
-Skills: [`code-review`](https://github.com/weareikko/code-review/blob/0.9.5/skills/code-review/SKILL.md) (read), [`ikko-tools:dev/aria-apg`](https://gitlab.example.com/tools/ikko-tools/-/blob/main/plugins/dev/skills/aria-apg/SKILL.md) (not read)
+Skills: [`code-review`](https://github.com/weareikko/code-review/blob/0.11.0/packages/code-review/skills/code-review/SKILL.md) (read), [`ikko-tools:dev/aria-apg`](https://gitlab.example.com/tools/ikko-tools/-/blob/main/plugins/dev/skills/aria-apg/SKILL.md) (not read)
 
 MCP: [jira](https://gitlab.example.com/team/app/-/blob/a1b2c3d/.mcp.json) (2 calls), docs (unavailable)
 

@@ -122,7 +122,7 @@ Project skills take precedence over built-in skills with the same name. A skill 
 When skills are active, their names appear in the review summary footer (the MR note on GitLab, the PR summary comment on GitHub), each linked to the `SKILL.md` the run loaded and marked with whether the reviewer read it:
 
 ```md
-Skills: [`code-review`](https://github.com/weareikko/code-review/blob/0.9.5/skills/code-review/SKILL.md) (read), [`ikko-tools:dev/aria-apg`](https://gitlab.example.com/tools/ikko-tools/-/blob/main/plugins/dev/skills/aria-apg/SKILL.md) (not read)
+Skills: [`code-review`](https://github.com/weareikko/code-review/blob/0.11.0/packages/code-review/skills/code-review/SKILL.md) (read), [`ikko-tools:dev/aria-apg`](https://gitlab.example.com/tools/ikko-tools/-/blob/main/plugins/dev/skills/aria-apg/SKILL.md) (not read)
 ```
 
 A skill counts as **read** when the reviewer read any file under its directory — its `SKILL.md` or a reference file it points at — in either the Find or the Verify stage. `not read` means the skill was offered in the prompt and never opened, which is the signal that its instructions did not reach the review.

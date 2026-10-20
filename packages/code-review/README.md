@@ -172,15 +172,15 @@ Prefer no action at all? `GITHUB_TOKEN`, `GITHUB_REPOSITORY`, and the PR number 
 
 ## Documentation
 
-The README covers getting started. Reference material lives in [`docs/`](https://github.com/weareikko/code-review/tree/main/docs):
+The README covers getting started. Reference material lives in [`docs/`](https://github.com/weareikko/code-review/tree/main/packages/code-review/docs):
 
-- [Configuration](https://github.com/weareikko/code-review/blob/main/docs/configuration.md) — full environment-variable and CLI-flag reference, plus the `CODE_REVIEW_` namespacing convention.
-- [Providers](https://github.com/weareikko/code-review/blob/main/docs/providers.md) — Anthropic, OpenRouter, Gemini, Ollama, and OpenAI-compatible endpoints, plus heterogeneous review with a model pool.
-- [Skills](https://github.com/weareikko/code-review/blob/main/docs/skills.md) — built-in, external (`npm:`/`file:`/`git:`), Claude plugin marketplaces, and project auto-discovered review skills.
-- [MCP servers](https://github.com/weareikko/code-review/blob/main/docs/mcp.md) — connect Model Context Protocol servers so the reviewer can call read-only tools (marketplace plugins, `--mcp file:`, opt-in repo `.mcp.json`), the read-only gate, the `${VAR}` allowlist, and the summary footer line.
-- [Multi-stage review](https://github.com/weareikko/code-review/blob/main/docs/multi-stage-review.md) — the staged Find / Verify / Synthesize pipeline behind `--review-depth`.
-- [Observability](https://github.com/weareikko/code-review/blob/main/docs/observability.md) — diagnostics-channel tracing and the opt-in OpenTelemetry bridge (spans, metrics, logs).
-- [Output format](https://github.com/weareikko/code-review/blob/main/docs/output-format.md) — inline-comment shape, the upserted summary (a note on GitLab, an issue comment on GitHub), footer, and duplicate prevention.
+- [Configuration](https://github.com/weareikko/code-review/blob/main/packages/code-review/docs/configuration.md) — full environment-variable and CLI-flag reference, plus the `CODE_REVIEW_` namespacing convention.
+- [Providers](https://github.com/weareikko/code-review/blob/main/packages/code-review/docs/providers.md) — Anthropic, OpenRouter, Gemini, Ollama, and OpenAI-compatible endpoints, plus heterogeneous review with a model pool.
+- [Skills](https://github.com/weareikko/code-review/blob/main/packages/code-review/docs/skills.md) — built-in, external (`npm:`/`file:`/`git:`), Claude plugin marketplaces, and project auto-discovered review skills.
+- [MCP servers](https://github.com/weareikko/code-review/blob/main/packages/code-review/docs/mcp.md) — connect Model Context Protocol servers so the reviewer can call read-only tools (marketplace plugins, `--mcp file:`, opt-in repo `.mcp.json`), the read-only gate, the `${VAR}` allowlist, and the summary footer line.
+- [Multi-stage review](https://github.com/weareikko/code-review/blob/main/packages/code-review/docs/multi-stage-review.md) — the staged Find / Verify / Synthesize pipeline behind `--review-depth`.
+- [Observability](https://github.com/weareikko/code-review/blob/main/packages/code-review/docs/observability.md) — diagnostics-channel tracing and the opt-in OpenTelemetry bridge (spans, metrics, logs).
+- [Output format](https://github.com/weareikko/code-review/blob/main/packages/code-review/docs/output-format.md) — inline-comment shape, the upserted summary (a note on GitLab, an issue comment on GitHub), footer, and duplicate prevention.
 
 ## Configuration
 
@@ -190,11 +190,11 @@ The CLI auto-resolves most values from the CI environment (GitLab CI variables o
 code-review --model anthropic/claude-sonnet-4-5 --api-key "$ANTHROPIC_API_KEY"
 ```
 
-Equivalently, set `CODE_REVIEW_MODEL` and the provider's key (e.g. `ANTHROPIC_API_KEY`) as CI/CD variables (GitLab) or repository/organization variables and secrets (GitHub). Common knobs include `--min-severity`, `--thinking`, `--posting-mode draft`, `--no-summary`, and `--dry-run`. See the full [environment-variable and flag reference](https://github.com/weareikko/code-review/blob/main/docs/configuration.md).
+Equivalently, set `CODE_REVIEW_MODEL` and the provider's key (e.g. `ANTHROPIC_API_KEY`) as CI/CD variables (GitLab) or repository/organization variables and secrets (GitHub). Common knobs include `--min-severity`, `--thinking`, `--posting-mode draft`, `--no-summary`, and `--dry-run`. See the full [environment-variable and flag reference](https://github.com/weareikko/code-review/blob/main/packages/code-review/docs/configuration.md).
 
 ## Providers
 
-`code-review` uses [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi-ai) for model access. Any registered provider can be selected with `--model provider/modelId` (e.g. `anthropic/claude-sonnet-4-5`, `openrouter/anthropic/claude-opus-4.5`, `google/gemini-2.5-flash`, `ollama/qwen2.5-coder:32b`). See [Providers](https://github.com/weareikko/code-review/blob/main/docs/providers.md) for per-provider setup and the model pool.
+`code-review` uses [`@earendil-works/pi-ai`](https://github.com/earendil-works/pi-ai) for model access. Any registered provider can be selected with `--model provider/modelId` (e.g. `anthropic/claude-sonnet-4-5`, `openrouter/anthropic/claude-opus-4.5`, `google/gemini-2.5-flash`, `ollama/qwen2.5-coder:32b`). See [Providers](https://github.com/weareikko/code-review/blob/main/packages/code-review/docs/providers.md) for per-provider setup and the model pool.
 
 ## Artifacts
 
@@ -236,34 +236,9 @@ Use these files for CI debugging and auditing.
 
 ## Development / release
 
-```bash
-npm run typecheck
-npm test
-npm run build
-npm pack --dry-run
-```
+This package lives in the [weareikko/code-review](https://github.com/weareikko/code-review) monorepo, next to [`@weareikko/agent-context`](https://github.com/weareikko/code-review/tree/main/packages/agent-context), which loads its context files, skills and MCP server configuration. Both packages share one version and are released together. See [CONTRIBUTING.md](https://github.com/weareikko/code-review/blob/main/CONTRIBUTING.md) for the commands, the changelog fragments and the release.
 
-Do not edit `CHANGELOG.md`: each pull request adds a fragment in `.changelog/` (format: [`weareikko/changelog`](https://github.com/weareikko/changelog)), or gets the `no-changelog` label when users do not see the change.
-
-Each merge into `main` releases: the `Publish` workflow tests, folds the fragments into `CHANGELOG.md`, bumps the version, tags, publishes to npm and creates the GitHub release. A merge without a fragment (and without a dependency pull request from Renovate) releases nothing. The fragments give the version ([automatic version](https://github.com/weareikko/changelog#automatic-version)):
-
-| Entries                                    | From 1.0.0 | On 0.x |
-| ------------------------------------------ | ---------- | ------ |
-| A breaking entry (`**BREAKING**: …`)       | major      | minor  |
-| An entry under `Added`, no breaking entry  | minor      | patch  |
-| Other entries only (fixes, `Dependencies`) | patch      | patch  |
-
-Prereleases follow the file `.changelog/prerelease` ([prereleases](https://github.com/weareikko/changelog#prereleases)): a pull request that adds it with `beta` makes the next merges with fragments release prereleases (from `0.10.0`, a fix gives `0.10.1-beta.0`, then `0.10.1-beta.1`…); a pull request that deletes it releases the stable version, also without a new fragment. A prerelease (a version with a `-`) is published on the `next` npm dist-tag, is a GitHub prerelease and does not move the `@0` / `@0.x` tags; any other version goes to `latest`.
-
-A manual run forces a bump, for example a major version without a breaking entry:
-
-```bash
-gh workflow run publish.yml -f version=major   # or patch / minor
-```
-
-Publishing uses npm trusted publishing (no npm token) and skips a version that npm already has: if the `Publish to npm` job fails, use "Re-run failed jobs".
-
-Eval tests call the real LLM and require `ANTHROPIC_API_KEY` (or `CODE_REVIEW_API_KEY`) in a local `.env` file:
+Eval tests call the real LLM and require `ANTHROPIC_API_KEY` (or `CODE_REVIEW_API_KEY`) in the `.env` file at the repository root:
 
 ```bash
 npm run test:evals

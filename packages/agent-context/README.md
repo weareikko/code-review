@@ -2,7 +2,7 @@
 
 Shared context, skills and MCP configuration for weareikko pi agents.
 
-This library holds what the weareikko agents ([`@weareikko/code-review`](https://github.com/weareikko/code-review) and `code-implementation`) read before they start work on a repository, so that each agent gets the same features from the same code:
+This library holds what the weareikko agents ([`@weareikko/code-review`](https://github.com/weareikko/code-review/tree/main/packages/code-review) and `code-implementation`) read before they start work on a repository, so that each agent gets the same features from the same code:
 
 - **Convention files**: `AGENTS.md` / `CLAUDE.md`, walked from the git root down to the working directory.
 - **Skills**: project skills in `.agents/skills` and `.claude/skills`, plus named skills from `npm:`, `file:`, `git:` / `git+ssh:` specs, Claude plugin marketplaces, and the tool's own built-in skills.
@@ -85,13 +85,7 @@ The library has no product name and no configuration prefix of its own. The call
 
 ## Development
 
-```bash
-npm ci
-npm run check   # lint, format, typecheck, tests
-npm run build
-```
-
-Each pull request adds a fragment in `.changelog/` (format: [`weareikko/changelog`](https://github.com/weareikko/changelog)). Each merge into `main` releases with the `Publish` workflow, which publishes to npm with trusted publishing.
+This package lives in the [weareikko/code-review](https://github.com/weareikko/code-review) monorepo, next to `@weareikko/code-review`. Both packages share one version and are released together. See [CONTRIBUTING.md](https://github.com/weareikko/code-review/blob/main/CONTRIBUTING.md) for the commands, the changelog fragments and the release.
 
 ## License
 
