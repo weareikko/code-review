@@ -1,6 +1,6 @@
 {
   "name": "@weareikko/agent-context",
-  "version": "0.10.3",
+  "version": "0.11.0",
   "description": "Shared context, skills and MCP configuration for weareikko pi agents.",
   "keywords": [
     "agent",

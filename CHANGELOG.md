@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file. Each pull r
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.11.0 - 2026-10-20
+
+### Added
+
+- Publish `@weareikko/agent-context` from this repository, which is now an npm workspaces monorepo (`packages/code-review`, `packages/agent-context`). Both packages share one version and are released together ([#176])
+
+### Changed
+
+- Move the convention files, skills, marketplaces, MCP server configuration, read-only MCP rule and footer builders to `@weareikko/agent-context`, shared with code-implementation (internal) ([#176])
+- **BREAKING**: Library API: `resolveSkillCacheDir` takes the product name (`resolveSkillCacheDir('code-review')`), and `loadNamedSkill` requires `cacheDir` in its options, plus `builtinSkillsDir` for a bare skill name. Both are now re-exported from `@weareikko/agent-context` ([#176])
+- Link the built-in skills of the review footer to `packages/code-review/skills` at the version tag ([#176])
+
+### Fixed
+
+- Resolve a relative `file:` MCP spec from `--cwd`, not from the working directory of the process ([#176])
+
+[#176]: https://github.com/weareikko/code-review/pull/176
+
 ## 0.10.3 - 2026-10-13
 
 ### Fixed

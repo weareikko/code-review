@@ -1,6 +1,6 @@
 {
   "name": "code-review",
-  "version": "0.10.3",
+  "version": "0.11.0",
   "private": true,
   "description": "Agent-driven code review for GitLab merge requests and GitHub pull requests (@weareikko/code-review), and the context, skills and MCP configuration it shares with the other weareikko agents (@weareikko/agent-context).",
   "license": "FSL-1.1-ALv2",
