@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file. Each pull r
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.11.1 - 2026-10-28
+
+### Added
+
+- `@weareikko/code-review`: Add `off`, `worktree`, and immutable `target` modes for repository MCP configuration discovery. ([#178])
+- `@weareikko/agent-context`: Add working-tree and immutable Git-revision readers for repository-controlled MCP configuration. ([#177])
+
+[#177]: https://github.com/weareikko/code-review/pull/177
+[#178]: https://github.com/weareikko/code-review/pull/178
+
 ## 0.11.0 - 2026-10-20
 
 ### Added
