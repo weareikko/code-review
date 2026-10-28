@@ -14,13 +14,16 @@ Merges the sources in this order. A server declared by a later source replaces a
 
 A spec that fails to resolve is skipped with a warning (`Skipping MCP spec "<spec>": …`).
 
-| Option      | Notes                                                                              |
-| ----------- | ---------------------------------------------------------------------------------- |
-| `cacheDir`  | Required. The marketplace clone cache, usually `resolveSkillCacheDir(product)`.    |
-| `vars`      | The variables `${VAR}` may read, usually `pickMcpEnvVars(process.env, allowlist)`. |
-| `refresh`   | Clone the marketplaces again.                                                      |
-| `envPrefix` | The tool's variable prefix, named in hints and warnings.                           |
-| `warn`      | Receives the warnings.                                                             |
+The optional `projectConfigReader` reads all repository-controlled MCP configuration: `.mcp.json`, `.claude/settings.json`, and `.claude/settings.local.json`. Use `GitRevisionProjectConfigReader.create(gitRoot, revision)` to bind these reads to one immutable commit. Absolute paths and `..` traversal are rejected, and missing files are ignored. Explicit `file:` specs and marketplace files stay operator-selected filesystem sources and do not use this reader.
+
+| Option                | Notes                                                                              |
+| --------------------- | ---------------------------------------------------------------------------------- |
+| `cacheDir`            | Required. The marketplace clone cache, usually `resolveSkillCacheDir(product)`.    |
+| `vars`                | The variables `${VAR}` may read, usually `pickMcpEnvVars(process.env, allowlist)`. |
+| `refresh`             | Clone the marketplaces again.                                                      |
+| `envPrefix`           | The tool's variable prefix, named in hints and warnings.                           |
+| `projectConfigReader` | Reader for repository-controlled files. Defaults to the current working tree.      |
+| `warn`                | Receives the warnings.                                                             |
 
 ### Repository discovery is opt-in
 
@@ -58,7 +61,7 @@ Expansion reads **only** `vars`. Build it with `pickMcpEnvVars(process.env, allo
 
 ## Disable lists
 
-- `loadMcpDisableFilters(cwd, gitRoot, warn?)` reads `disabledMcpjsonServers` and `disabledMcpServers` from `.claude/settings.json` and `.claude/settings.local.json` in each directory from `gitRoot` to `cwd`.
+- `loadMcpDisableFilters(cwd, gitRoot, warn?, projectConfigReader?)` reads `disabledMcpjsonServers` and `disabledMcpServers` from `.claude/settings.json` and `.claude/settings.local.json` in each directory from `gitRoot` to `cwd`.
 - `parseMcpDisableFilters(raw)` reads them from one parsed document.
 - `applyMcpDisableFilters(servers, filters)` drops the servers named in either list.
 
