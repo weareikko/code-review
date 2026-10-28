@@ -242,6 +242,7 @@ function makeConfig(cwd: string, overrides: Partial<Config> = {}): Config {
     postSummary: true,
     forceReview: false,
     verbose: false,
+    mcpDiscovery: 'off',
     cwd,
     ...overrides,
   } as Config;
@@ -283,6 +284,7 @@ describe('run() over an in-memory GitHubPlatform', () => {
     );
     expect(getMergeDiff).toHaveBeenCalledWith(expect.any(String), HEAD_SHA, expect.anything());
     expect(getMergeCommitLog).toHaveBeenCalledWith(expect.any(String), HEAD_SHA, expect.anything());
+    expect(runReviewMock.mock.calls.at(-1)?.[1]).toMatchObject({ targetSha: REFS.base_sha });
     expect(backend.reviewsPosted[0].comments).toEqual([
       expect.objectContaining({ path: 'src/foo.ts', line: 2, side: 'RIGHT' }),
     ]);

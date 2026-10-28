@@ -25,6 +25,8 @@ export type { OtelBridge, OtelBridgeOptions, OtelRuntime } from './otel.js';
 export { isOtelEnabled, startOtelBridge } from './otel.js';
 export type { RunBridges, RunResult } from './cli.js';
 export { run } from './cli.js';
+export type { Config, McpDiscoveryMode } from './config.js';
+export { MCP_DISCOVERY_MODES } from './config.js';
 export type {
   AgentLike,
   CreateAgent,

@@ -68,8 +68,8 @@ jobs:
           # while the plain URL in .mcp.json is anonymous.
           CODE_REVIEW_MARKETPLACES: 'anthropic=https://github.com/anthropics/claude-plugins-official.git#fbe07fb6ce7d51d8e86ca6efdf050059894cdb80'
           CODE_REVIEW_MCP: 'anthropic:github'
-          # Keeps the docs and context7 servers in .mcp.json loaded.
-          CODE_REVIEW_MCP_DISCOVERY: 'true'
+          # Keeps the docs and context7 servers from the immutable target commit loaded.
+          CODE_REVIEW_MCP_DISCOVERY: target
           # The marketplace github plugin reads GITHUB_PERSONAL_ACCESS_TOKEN;
           # map the job token to that name and allow only it (plus GITHUB_TOKEN
           # for the .mcp.json fallback in local runs).

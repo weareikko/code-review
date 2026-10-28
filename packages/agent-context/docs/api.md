@@ -17,16 +17,16 @@ Every export of `@weareikko/agent-context`. The JSDoc of each function in `src/`
 
 ## Git, paths and project configuration
 
-| Export                           | Kind      | Notes                                                                           |
-| -------------------------------- | --------- | ------------------------------------------------------------------------------- |
-| `findGitRoot(cwd)`               | function  | Work tree root, or `cwd` outside a work tree.                                   |
-| `git(args, options?)`            | function  | Runs `git`, returns stdout, throws `GitError`.                                  |
-| `walkDirs(cwd, gitRoot)`         | function  | Directories from `gitRoot` down to `cwd`, root first.                           |
-| `toPosixPath(path)`              | function  | `/`-separated path.                                                             |
-| `WorkingTreeProjectConfigReader` | class     | Reads repository-relative UTF-8 paths from a working tree.                      |
-| `GitRevisionProjectConfigReader` | class     | `create(root, revision)` freezes a commit and reads its blobs without checkout. |
-| `ProjectConfigReader`            | interface | `read(path)` returns UTF-8 text or `undefined` for a missing file.              |
-| `GitOptions`                     | type      |                                                                                 |
+| Export                           | Kind      | Notes                                                                                   |
+| -------------------------------- | --------- | --------------------------------------------------------------------------------------- |
+| `findGitRoot(cwd)`               | function  | Work tree root, or `cwd` outside a work tree.                                           |
+| `git(args, options?)`            | function  | Runs `git`, returns stdout, throws `GitError`.                                          |
+| `walkDirs(cwd, gitRoot)`         | function  | Directories from `gitRoot` down to `cwd`, root first.                                   |
+| `toPosixPath(path)`              | function  | `/`-separated path.                                                                     |
+| `WorkingTreeProjectConfigReader` | class     | Reads repository-relative UTF-8 paths from a working tree.                              |
+| `GitRevisionProjectConfigReader` | class     | `create(root, revision)` freezes a commit and reads its blobs without checkout.         |
+| `ProjectConfigReader`            | interface | `read(path)` returns UTF-8 text or `undefined`; `commitSha` identifies immutable reads. |
+| `GitOptions`                     | type      |                                                                                         |
 
 ## Context files — [docs](./context.md)
 
@@ -72,27 +72,27 @@ Every export of `@weareikko/agent-context`. The JSDoc of each function in `src/`
 
 ## MCP configuration — [docs](./mcp.md)
 
-| Export                                                        | Kind     |
-| ------------------------------------------------------------- | -------- |
-| `resolveMcpServers(config, cwd, gitRoot, registry, options)`  | function |
-| `loadAutoDiscoveredMcpServers(cwd, gitRoot, warn?, options?)` | function |
-| `loadMcpDisableFilters(cwd, gitRoot, warn?, reader?)`         | function |
-| `parseMcpSpec(spec)`                                          | function |
-| `parseMcpServers(raw, source, options?)`                      | function |
-| `normalizeMcpServer(name, raw, source, options?)`             | function |
-| `extractMcpServerMap(raw)`                                    | function |
-| `expandMcpTemplate(value, vars)`                              | function |
-| `pickMcpEnvVars(env, allowlist)`                              | function |
-| `dropEmptyHeaders(headers)`                                   | function |
-| `parseMcpDisableFilters(raw)`                                 | function |
-| `applyMcpDisableFilters(servers, filters)`                    | function |
-| `isReadOnlyMcpTool(tool)`                                     | function |
-| `MAX_MCP_TIMEOUT_MS`                                          | constant |
-| `McpServerConfig`, `McpServerSource`, `McpTransportType`      | types    |
-| `McpEnvVars`, `McpDisableFilters`, `McpSpec`                  | types    |
-| `McpServerSourcesConfig`, `ResolveMcpServersOptions`          | types    |
-| `LoadAutoDiscoveredMcpServersOptions`                         | type     |
-| `NormalizeMcpServerOptions`, `McpToolAnnotations`             | types    |
+| Export                                                           | Kind      |
+| ---------------------------------------------------------------- | --------- |
+| `resolveMcpServers(config, cwd, gitRoot, registry, options)`     | function  |
+| `loadAutoDiscoveredMcpServers(cwd, gitRoot, warn?, options?)`    | function  |
+| `loadMcpDisableFilters(cwd, gitRoot, warn?, reader?)`            | function  |
+| `parseMcpSpec(spec)`                                             | function  |
+| `parseMcpServers(raw, source, options?)`                         | function  |
+| `normalizeMcpServer(name, raw, source, options?)`                | function  |
+| `extractMcpServerMap(raw)`                                       | function  |
+| `expandMcpTemplate(value, vars)`                                 | function  |
+| `pickMcpEnvVars(env, allowlist)`                                 | function  |
+| `dropEmptyHeaders(headers)`                                      | function  |
+| `parseMcpDisableFilters(raw)`                                    | function  |
+| `applyMcpDisableFilters(servers, filters)`                       | function  |
+| `isReadOnlyMcpTool(tool)`                                        | function  |
+| `MAX_MCP_TIMEOUT_MS`, `MCP_DISCOVERY_MODES`                      | constants |
+| `McpServerConfig`, `McpServerSource`, `McpTransportType`         | types     |
+| `McpDiscoveryMode`, `McpEnvVars`, `McpDisableFilters`, `McpSpec` | types     |
+| `McpServerSourcesConfig`, `ResolveMcpServersOptions`             | types     |
+| `LoadAutoDiscoveredMcpServersOptions`                            | type      |
+| `NormalizeMcpServerOptions`, `McpToolAnnotations`                | types     |
 
 ## Links, usage and footer — [docs](./footer.md)
 

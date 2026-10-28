@@ -119,6 +119,9 @@ Options:
                           Comma-separated labels added to the MR/PR when the review posts no
                           new comment; the --labels-on-findings set is removed.
                           (env: CODE_REVIEW_LABELS_ON_CLEAN)
+  --mcp-discovery <mode>  Repository MCP discovery: off, worktree, or target. target reads
+                          .mcp.json and .claude/settings*.json from the immutable review target
+                          commit. (default: off; env: CODE_REVIEW_MCP_DISCOVERY)
   --review-file <path>    Raw code-review output file (default: code-review.md)
   --output <path>         Generated payload artifact (default: review-comments.json)
   --cwd <path>            Working directory (default: process.cwd())
@@ -318,6 +321,7 @@ export async function run(config: Config, bridges?: RunBridges): Promise<RunResu
               reviewedCommitSha !== refs.head_sha
                 ? reviewedCommitSha
                 : undefined,
+            targetSha: refs.base_sha,
           });
           context.usage = result;
           return result;

@@ -270,12 +270,12 @@ describe('config env defaults', () => {
     );
   });
 
-  it('defaults mcp/disableMcp/mcpEnv to empty and mcpDiscovery to false when unset', () => {
+  it('defaults mcp/disableMcp/mcpEnv to empty and mcpDiscovery to off when unset', () => {
     const cfg = resolveConfig([], { ...baseEnv });
     expect(cfg.mcp).toEqual([]);
     expect(cfg.disableMcp).toEqual([]);
     expect(cfg.mcpEnv).toEqual([]);
-    expect(cfg.mcpDiscovery).toBe(false);
+    expect(cfg.mcpDiscovery).toBe('off');
   });
 
   it('collects repeatable --mcp-env flags, and falls back to CODE_REVIEW_MCP_ENV', () => {
@@ -320,23 +320,45 @@ describe('config env defaults', () => {
     ).toEqual(['a', 'b']);
   });
 
-  it('enables mcpDiscovery via --mcp-discovery or a truthy env value', () => {
-    expect(resolveConfig(['--mcp-discovery'], { ...baseEnv }).mcpDiscovery).toBe(true);
-    expect(resolveConfig([], { ...baseEnv, CODE_REVIEW_MCP_DISCOVERY: 'true' }).mcpDiscovery).toBe(
-      true,
-    );
-    expect(resolveConfig([], { ...baseEnv, CODE_REVIEW_MCP_DISCOVERY: '1' }).mcpDiscovery).toBe(
-      true,
-    );
+  it.each(['off', 'worktree', 'target'] as const)(
+    'accepts mcpDiscovery mode %s from the CLI and environment',
+    (mode) => {
+      expect(resolveConfig(['--mcp-discovery', mode], { ...baseEnv }).mcpDiscovery).toBe(mode);
+      expect(resolveConfig([], { ...baseEnv, CODE_REVIEW_MCP_DISCOVERY: mode }).mcpDiscovery).toBe(
+        mode,
+      );
+    },
+  );
+
+  it('prefers --mcp-discovery over CODE_REVIEW_MCP_DISCOVERY', () => {
+    expect(
+      resolveConfig(['--mcp-discovery', 'target'], {
+        ...baseEnv,
+        CODE_REVIEW_MCP_DISCOVERY: 'worktree',
+      }).mcpDiscovery,
+    ).toBe('target');
   });
 
-  it('keeps mcpDiscovery off for a falsy or unrecognised CODE_REVIEW_MCP_DISCOVERY', () => {
-    expect(resolveConfig([], { ...baseEnv, CODE_REVIEW_MCP_DISCOVERY: 'false' }).mcpDiscovery).toBe(
-      false,
-    );
-    expect(resolveConfig([], { ...baseEnv, CODE_REVIEW_MCP_DISCOVERY: 'maybe' }).mcpDiscovery).toBe(
-      false,
-    );
+  it.each([
+    { argv: ['--mcp-discovery'], env: { ...baseEnv } },
+    { argv: ['--mcp-discovery', 'true'], env: { ...baseEnv } },
+    { argv: ['--mcp-discovery', 'TARGET'], env: { ...baseEnv } },
+    { argv: [], env: { ...baseEnv, CODE_REVIEW_MCP_DISCOVERY: 'true' } },
+    { argv: [], env: { ...baseEnv, CODE_REVIEW_MCP_DISCOVERY: ' target ' } },
+    { argv: [], env: { ...baseEnv, CODE_REVIEW_MCP_DISCOVERY: '' } },
+  ])('rejects a missing or unknown MCP discovery mode', ({ argv, env }) => {
+    expect(() => resolveConfig(argv, env)).toThrow(ConfigError);
+  });
+
+  it('lists the accepted modes when an MCP discovery value is unknown', () => {
+    let caught: unknown;
+    try {
+      resolveConfig([], { ...baseEnv, CODE_REVIEW_MCP_DISCOVERY: 'unknown' });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ConfigError);
+    expect((caught as ConfigError).hint).toContain('off, worktree, target');
   });
 });
 

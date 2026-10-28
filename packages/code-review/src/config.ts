@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs';
 import { getEnvApiKey } from '@earendil-works/pi-ai/compat';
 import {
   AgentContextError,
+  MCP_DISCOVERY_MODES,
   type MarketplaceRef,
+  type McpDiscoveryMode,
   parseMarketplaceEntry,
 } from '@weareikko/agent-context';
 import { ConfigError } from './errors.js';
@@ -246,14 +248,11 @@ export interface Config {
    */
   mcpEnv: string[];
   /**
-   * Auto-discover `.mcp.json` files walked from the git root to `cwd` (same
-   * walk as skill auto-discovery). Default `false` — those files are content of
-   * the repository under review, and connecting a server means running a command
-   * or calling a URL the merge request chose. Opt in with `--mcp-discovery` /
-   * `CODE_REVIEW_MCP_DISCOVERY=true`, and only for repositories whose
-   * contributors you trust.
+   * How repository-controlled `.mcp.json` and `.claude/settings*.json` files are
+   * read: `off` reads none, `worktree` reads the checkout, and `target` reads the
+   * immutable review target commit. Default `off`.
    */
-  mcpDiscovery: boolean;
+  mcpDiscovery: McpDiscoveryMode;
   /**
    * Labels added to the MR/PR when the review published at least one fresh
    * (non-duplicate) comment; the {@link Config.labelsOnClean} set is removed at
@@ -280,7 +279,6 @@ const BOOLEAN_FLAGS = new Set([
   'retrieve-skipped',
   'no-retrieve-skipped',
   'verbose',
-  'mcp-discovery',
   'help',
   'version',
 ]);
@@ -479,19 +477,25 @@ function resolveMcpEnv(args: ParsedArgs, env: NodeJS.ProcessEnv): string[] {
   return [];
 }
 
-/**
- * Resolve whether repo `.mcp.json` auto-discovery runs. Off by default because
- * those files belong to the repository under review; `--mcp-discovery` always
- * wins, otherwise `CODE_REVIEW_MCP_DISCOVERY` truthy values (`1`, `true`, `yes`,
- * `on`) turn it on.
- */
-function resolveMcpDiscovery(args: ParsedArgs, env: NodeJS.ProcessEnv): boolean {
-  if (args.mcpDiscovery === true) return true;
-  const raw = env.CODE_REVIEW_MCP_DISCOVERY;
-  if (typeof raw === 'string') {
-    return ['1', 'true', 'yes', 'on'].includes(raw.trim().toLowerCase());
+/** Resolve the repository-controlled MCP configuration source. */
+function resolveMcpDiscovery(args: ParsedArgs, env: NodeJS.ProcessEnv): McpDiscoveryMode {
+  const fromFlag = args.mcpDiscovery;
+  const hasFlag = fromFlag !== undefined;
+  const fromEnv = env.CODE_REVIEW_MCP_DISCOVERY;
+  const hasEnv = fromEnv !== undefined;
+  if (!hasFlag && !hasEnv) return 'off';
+
+  const raw = hasFlag ? fromFlag : fromEnv;
+  if (MCP_DISCOVERY_MODES.includes(raw as McpDiscoveryMode)) {
+    return raw as McpDiscoveryMode;
   }
-  return false;
+
+  throw new ConfigError(
+    raw ? `Unknown MCP discovery mode "${String(raw)}".` : 'Missing MCP discovery mode.',
+    {
+      hint: `--mcp-discovery (or CODE_REVIEW_MCP_DISCOVERY) must be one of: ${MCP_DISCOVERY_MODES.join(', ')}.`,
+    },
+  );
 }
 
 /**
@@ -894,6 +898,10 @@ export function validateConfig(config: Config): void {
     throw new ConfigError(`--posting-mode must be one of: ${POSTING_MODES.join(', ')}`);
   }
 
+  if (!MCP_DISCOVERY_MODES.includes(config.mcpDiscovery)) {
+    throw new ConfigError(`--mcp-discovery must be one of: ${MCP_DISCOVERY_MODES.join(', ')}`);
+  }
+
   const clean = new Set(config.labelsOnClean ?? []);
   const overlap = (config.labelsOnFindings ?? []).filter((label) => clean.has(label));
   if (overlap.length > 0) {
@@ -906,4 +914,4 @@ export function validateConfig(config: Config): void {
   }
 }
 
-export { type Severity, type ThinkingLevel };
+export { MCP_DISCOVERY_MODES, type McpDiscoveryMode, type Severity, type ThinkingLevel };

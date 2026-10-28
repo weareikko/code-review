@@ -5,5 +5,5 @@ import type { Config } from '../src/config.js';
  * `Partial<Config>` still checks the name and the type of each field it sets.
  */
 export function partialConfig(fields: Partial<Config>): Config {
-  return fields as Config;
+  return { mcpDiscovery: 'off', ...fields } as Config;
 }

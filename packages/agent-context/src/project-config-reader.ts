@@ -5,6 +5,8 @@ import { git } from './git.js';
 
 /** Reads UTF-8 configuration files by repository-relative path. */
 export interface ProjectConfigReader {
+  /** Immutable commit used for reads, when the reader is bound to one. */
+  readonly commitSha?: string;
   /** Return the file contents, or `undefined` when the path does not exist. */
   read(path: string): Promise<string | undefined>;
 }
@@ -53,11 +55,11 @@ export class WorkingTreeProjectConfigReader implements ProjectConfigReader {
 /** Reads project configuration from the commit captured for a Git revision. */
 export class GitRevisionProjectConfigReader implements ProjectConfigReader {
   readonly root: string;
-  readonly commit: string;
+  readonly commitSha: string;
 
-  private constructor(root: string, commit: string) {
+  private constructor(root: string, commitSha: string) {
     this.root = root;
-    this.commit = commit;
+    this.commitSha = commitSha;
   }
 
   /** Resolve `revision` to one commit now, so later reads cannot follow a moving ref. */
@@ -73,9 +75,12 @@ export class GitRevisionProjectConfigReader implements ProjectConfigReader {
 
   async read(path: string): Promise<string | undefined> {
     const normalized = normalizeProjectConfigPath(path);
-    const entry = await git(['ls-tree', '-z', this.commit, '--', `:(top,literal)${normalized}`], {
-      cwd: this.root,
-    });
+    const entry = await git(
+      ['ls-tree', '-z', this.commitSha, '--', `:(top,literal)${normalized}`],
+      {
+        cwd: this.root,
+      },
+    );
     const match = /^[0-7]{6} blob ([0-9a-f]+)\t/.exec(entry);
     if (!match) return undefined;
     return git(['cat-file', 'blob', match[1]], { cwd: this.root });

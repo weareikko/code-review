@@ -82,9 +82,11 @@ export {
 export {
   loadAutoDiscoveredMcpServers,
   loadMcpDisableFilters,
+  MCP_DISCOVERY_MODES,
   parseMcpSpec,
   resolveMcpServers,
   type LoadAutoDiscoveredMcpServersOptions,
+  type McpDiscoveryMode,
   type McpServerSourcesConfig,
   type McpSpec,
   type ResolveMcpServersOptions,

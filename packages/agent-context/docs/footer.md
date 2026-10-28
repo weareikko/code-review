@@ -40,14 +40,14 @@ MCP: [jira](https://gitlab.example.com/group/app/-/blob/abc123/.mcp.json) (2 cal
 
 What each source links to (`skillSourceUrl`, `mcpSourceUrl`):
 
-| Source        | Link                                                                               |
-| ------------- | ---------------------------------------------------------------------------------- |
-| `builtin`     | `<builtinSkills.repoWebUrl>/blob/<ref>/<path>/<name>/SKILL.md`; none without it    |
-| `project`     | The file at `commitSha` in `projectWebUrl`; none without both                      |
-| `npm`         | The npm package page                                                               |
-| `git`         | The `SKILL.md` at the pinned ref in the repository                                 |
-| `marketplace` | The `SKILL.md` (skill) or the plugin directory (MCP server) at the marketplace ref |
-| `file`        | None                                                                               |
+| Source        | Link                                                                                  |
+| ------------- | ------------------------------------------------------------------------------------- |
+| `builtin`     | `<builtinSkills.repoWebUrl>/blob/<ref>/<path>/<name>/SKILL.md`; none without it       |
+| `project`     | The file at the source's `commitSha`, or the context `commitSha` for worktree sources |
+| `npm`         | The npm package page                                                                  |
+| `git`         | The `SKILL.md` at the pinned ref in the repository                                    |
+| `marketplace` | The `SKILL.md` (skill) or the plugin directory (MCP server) at the marketplace ref    |
+| `file`        | None                                                                                  |
 
 `blobUrl` builds GitHub links (`/blob/`) for `github.com` and GitLab links (`/-/blob/`) for every other host. `gitRepoWebUrl` converts a clone URL (HTTPS, SSH, `git+ssh://`, scp-style) to an HTTPS web URL and removes credentials.
 
