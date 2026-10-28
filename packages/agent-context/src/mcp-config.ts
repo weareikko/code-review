@@ -12,21 +12,32 @@ import {
   type McpServerSource,
 } from './mcp-parse.js';
 import { toPosixPath, walkDirs } from './paths.js';
+import {
+  type ProjectConfigReader,
+  WorkingTreeProjectConfigReader,
+} from './project-config-reader.js';
 
-async function readJsonFile(
-  path: string,
-): Promise<{ raw: unknown } | { error: 'missing' | 'invalid' }> {
-  let content: string;
-  try {
-    content = await readFile(path, 'utf8');
-  } catch {
-    return { error: 'missing' };
-  }
+type JsonFile = { raw: unknown } | { error: 'missing' | 'invalid' };
+
+function parseJsonFile(content: string | undefined): JsonFile {
+  if (content === undefined) return { error: 'missing' };
   try {
     return { raw: JSON.parse(content) as unknown };
   } catch {
     return { error: 'invalid' };
   }
+}
+
+async function readJsonFile(path: string): Promise<JsonFile> {
+  try {
+    return parseJsonFile(await readFile(path, 'utf8'));
+  } catch {
+    return { error: 'missing' };
+  }
+}
+
+async function readProjectJsonFile(reader: ProjectConfigReader, path: string): Promise<JsonFile> {
+  return parseJsonFile(await reader.read(path));
 }
 
 /** Options for `loadAutoDiscoveredMcpServers`. */
@@ -35,6 +46,8 @@ export interface LoadAutoDiscoveredMcpServersOptions {
   vars?: McpEnvVars;
   /** Disable lists to apply; loaded with `loadMcpDisableFilters` when omitted. */
   filters?: McpDisableFilters;
+  /** Reader for repository-controlled configuration; defaults to the working tree. */
+  projectConfigReader?: ProjectConfigReader;
   /** The tool's environment variable prefix (`CODE_REVIEW_`), named in warnings. */
   envPrefix?: string;
 }
@@ -51,12 +64,14 @@ export async function loadMcpDisableFilters(
   cwd: string,
   gitRoot: string,
   warn?: (msg: string) => void,
+  projectConfigReader: ProjectConfigReader = new WorkingTreeProjectConfigReader(gitRoot),
 ): Promise<McpDisableFilters> {
   const filters: McpDisableFilters = { disabledMcpjsonServers: [], disabledMcpServers: [] };
   for (const dir of walkDirs(cwd, gitRoot)) {
     for (const file of ['settings.json', 'settings.local.json']) {
       const settingsPath = join(dir, '.claude', file);
-      const settingsFile = await readJsonFile(settingsPath);
+      const projectPath = toPosixPath(relative(gitRoot, settingsPath));
+      const settingsFile = await readProjectJsonFile(projectConfigReader, projectPath);
       if ('raw' in settingsFile) {
         const parsed = parseMcpDisableFilters(settingsFile.raw);
         filters.disabledMcpjsonServers.push(...parsed.disabledMcpjsonServers);
@@ -86,11 +101,15 @@ export async function loadAutoDiscoveredMcpServers(
   options: LoadAutoDiscoveredMcpServersOptions = {},
 ): Promise<McpServerConfig[]> {
   const found = new Map<string, McpServerConfig>();
-  const filters = options.filters ?? (await loadMcpDisableFilters(cwd, gitRoot, warn));
+  const projectConfigReader =
+    options.projectConfigReader ?? new WorkingTreeProjectConfigReader(gitRoot);
+  const filters =
+    options.filters ?? (await loadMcpDisableFilters(cwd, gitRoot, warn, projectConfigReader));
 
   for (const dir of walkDirs(cwd, gitRoot)) {
     const mcpPath = join(dir, '.mcp.json');
-    const mcpFile = await readJsonFile(mcpPath);
+    const projectPath = toPosixPath(relative(gitRoot, mcpPath));
+    const mcpFile = await readProjectJsonFile(projectConfigReader, projectPath);
     if ('raw' in mcpFile) {
       const source: McpServerSource = {
         kind: 'project',
@@ -202,6 +221,8 @@ export interface ResolveMcpServersOptions {
   refresh?: boolean;
   /** The tool's environment variable prefix (`CODE_REVIEW_`), named in hints. */
   envPrefix?: string;
+  /** Reader for repository-controlled configuration; defaults to the working tree. */
+  projectConfigReader?: ProjectConfigReader;
   warn?: (msg: string) => void;
 }
 
@@ -234,15 +255,19 @@ export async function resolveMcpServers(
 ): Promise<McpServerConfig[]> {
   const warn = (msg: string): void => options.warn?.(msg);
 
+  const projectConfigReader =
+    options.projectConfigReader ?? new WorkingTreeProjectConfigReader(gitRoot);
+
   // Loaded even with discovery off: `disabledMcpServers` is not scoped to
   // project-declared servers, so it must reach the spec sources too.
-  const filters = await loadMcpDisableFilters(cwd, gitRoot, warn);
+  const filters = await loadMcpDisableFilters(cwd, gitRoot, warn, projectConfigReader);
 
   const found = new Map<string, McpServerConfig>();
   if (config.mcpDiscovery) {
     for (const server of await loadAutoDiscoveredMcpServers(cwd, gitRoot, warn, {
       vars: options.vars,
       filters,
+      projectConfigReader,
       envPrefix: options.envPrefix,
     })) {
       found.set(server.name, server);

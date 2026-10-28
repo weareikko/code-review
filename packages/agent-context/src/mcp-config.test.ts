@@ -569,6 +569,42 @@ describe('resolveMcpServers', () => {
     expect(servers.map((s) => s.name)).toEqual(['docs']);
   });
 
+  it('reads repository MCP and settings files through one injected reader', async () => {
+    const root = await makeTmp();
+    const extra = join(root, 'operator.json');
+    await writeJson(extra, { operator: { command: 'operator' } });
+    const files = new Map([
+      [
+        '.mcp.json',
+        JSON.stringify({
+          mcpServers: {
+            repo: { command: 'repo' },
+            settings_blocked: { command: 'blocked' },
+            local_blocked: { command: 'blocked' },
+          },
+        }),
+      ],
+      ['.claude/settings.json', JSON.stringify({ disabledMcpjsonServers: ['settings_blocked'] })],
+      ['.claude/settings.local.json', JSON.stringify({ disabledMcpServers: ['local_blocked'] })],
+    ]);
+    const projectConfigReader = { read: vi.fn(async (path: string) => files.get(path)) };
+
+    const servers = await resolveMcpServers(
+      { mcp: [`file:${extra}`], disableMcp: [], mcpDiscovery: true },
+      root,
+      root,
+      emptyRegistry,
+      { vars, cacheDir, projectConfigReader },
+    );
+
+    expect(servers.map((server) => server.name)).toEqual(['repo', 'operator']);
+    expect(projectConfigReader.read.mock.calls.map(([path]) => path)).toEqual([
+      '.claude/settings.json',
+      '.claude/settings.local.json',
+      '.mcp.json',
+    ]);
+  });
+
   it('skips repo auto-discovery when mcpDiscovery is false', async () => {
     const root = await makeTmp();
     await writeJson(join(root, '.mcp.json'), {

@@ -10,6 +10,7 @@ The commands, conventions and release notes of the monorepo are in the root `CLA
 
 - `src/index.ts`: the public API. Every export is listed in `docs/api.md`.
 - `src/context-files.ts`: `walkUpContextFiles`, `CONVENTION_FILES`.
+- `src/project-config-reader.ts`: working-tree and frozen Git-revision readers for repository-controlled configuration.
 - `src/skills.ts`: skill specs, loaders, clone cache. `src/load-skills.ts`: the `loadSkills` aggregator.
 - `src/marketplaces.ts`: Claude plugin marketplaces (skills and MCP servers).
 - `src/mcp-parse.ts`: pure MCP document parsing and `${VAR}` expansion. `src/mcp-config.ts`: MCP sources and `resolveMcpServers`.

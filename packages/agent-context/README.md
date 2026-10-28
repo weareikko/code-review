@@ -7,6 +7,7 @@ This library holds what the weareikko agents ([`@weareikko/code-review`](https:/
 - **Convention files**: `AGENTS.md` / `CLAUDE.md`, walked from the git root down to the working directory.
 - **Skills**: project skills in `.agents/skills` and `.claude/skills`, plus named skills from `npm:`, `file:`, `git:` / `git+ssh:` specs, Claude plugin marketplaces, and the tool's own built-in skills.
 - **MCP server configuration**: marketplace plugins, `file:` documents, repository `.mcp.json` discovery (opt-in), `.claude/settings*.json` disable lists, `${VAR}` expansion from an allowlist, and shape validation.
+- **Project configuration readers**: working-tree reads by default, or immutable reads from a Git revision without changing the checkout.
 - **The read-only rule** for MCP tools.
 - **Footer builders**: skill links, skill read counts, and the MCP usage line.
 
@@ -27,6 +28,7 @@ import {
   buildMarketplaceRegistry,
   CONVENTION_FILES,
   findGitRoot,
+  GitRevisionProjectConfigReader,
   loadSkills,
   parseMarketplaceEntry,
   pickMcpEnvVars,
@@ -55,12 +57,21 @@ const skills = await loadSkills(cwd, gitRoot, ['ikko:dev/changelog', 'file:./ski
   warn,
 });
 
+// Use this reader when repository configuration must come from a reviewed commit.
+const projectConfigReader = await GitRevisionProjectConfigReader.create(gitRoot, 'HEAD');
+
 const mcpServers = await resolveMcpServers(
   { mcp: ['ikko:dev'], disableMcp: [], mcpDiscovery: false },
   cwd,
   gitRoot,
   buildMarketplaceRegistry(marketplaces),
-  { cacheDir, vars: pickMcpEnvVars(process.env, ['JIRA_TOKEN']), envPrefix, warn },
+  {
+    cacheDir,
+    vars: pickMcpEnvVars(process.env, ['JIRA_TOKEN']),
+    envPrefix,
+    projectConfigReader,
+    warn,
+  },
 );
 ```
 

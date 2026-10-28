@@ -11,6 +11,11 @@ export {
 // Git and paths
 export { findGitRoot, git, type GitOptions } from './git.js';
 export { toPosixPath, walkDirs } from './paths.js';
+export {
+  GitRevisionProjectConfigReader,
+  type ProjectConfigReader,
+  WorkingTreeProjectConfigReader,
+} from './project-config-reader.js';
 
 // Convention and context files
 export {
