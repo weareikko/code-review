@@ -58,13 +58,22 @@ describe('blobUrl', () => {
 });
 
 describe('mcpSourceUrl', () => {
-  it('links a project .mcp.json to its blob at the reviewed commit', () => {
+  it('links a project .mcp.json to the commit recorded by its source', () => {
+    expect(
+      mcpSourceUrl(
+        { kind: 'project', path: '.mcp.json', commitSha: 'target123' },
+        { projectWebUrl: 'https://gitlab.example.com/acme/app', commitSha: 'head456' },
+      ),
+    ).toBe('https://gitlab.example.com/acme/app/-/blob/target123/.mcp.json');
+  });
+
+  it('uses the link context commit for a worktree project source', () => {
     expect(
       mcpSourceUrl(
         { kind: 'project', path: '.mcp.json' },
-        { projectWebUrl: 'https://gitlab.example.com/team/app', commitSha: 'a1b2c3d' },
+        { projectWebUrl: 'https://gitlab.example.com/acme/app', commitSha: 'head456' },
       ),
-    ).toBe('https://gitlab.example.com/team/app/-/blob/a1b2c3d/.mcp.json');
+    ).toBe('https://gitlab.example.com/acme/app/-/blob/head456/.mcp.json');
   });
 
   it('leaves a project source unlinked without CI project coordinates', () => {

@@ -13,7 +13,7 @@
  * the repository root, POSIX-separated, like `SkillOrigin.project`.
  */
 export type McpServerSource =
-  | { kind: 'project'; path: string }
+  | { kind: 'project'; path: string; commitSha?: string }
   | {
       kind: 'marketplace';
       marketplace: string;

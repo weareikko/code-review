@@ -6,7 +6,7 @@ This library holds what the weareikko agents ([`@weareikko/code-review`](https:/
 
 - **Convention files**: `AGENTS.md` / `CLAUDE.md`, walked from the git root down to the working directory.
 - **Skills**: project skills in `.agents/skills` and `.claude/skills`, plus named skills from `npm:`, `file:`, `git:` / `git+ssh:` specs, Claude plugin marketplaces, and the tool's own built-in skills.
-- **MCP server configuration**: marketplace plugins, `file:` documents, repository `.mcp.json` discovery (opt-in), `.claude/settings*.json` disable lists, `${VAR}` expansion from an allowlist, and shape validation.
+- **MCP server configuration**: marketplace plugins, `file:` documents, and repository `.mcp.json` plus `.claude/settings*.json` discovery from no repository source, the worktree, or an immutable target commit.
 - **Project configuration readers**: working-tree reads by default, or immutable reads from a Git revision without changing the checkout.
 - **The read-only rule** for MCP tools.
 - **Footer builders**: skill links, skill read counts, and the MCP usage line.
@@ -44,24 +44,23 @@ const warn = (message: string) => console.warn(message);
 // Each tool keeps its own configuration names and its own clone cache.
 const envPrefix = 'CODE_REVIEW_';
 const cacheDir = resolveSkillCacheDir('code-review');
-const marketplaces = ['ikko=git+ssh://git@gitlab.example.com/ikko/ikko-tools.git#main'].map(
-  parseMarketplaceEntry,
-);
+const marketplaces = ['acme=https://github.com/acme/tools.git#main'].map(parseMarketplaceEntry);
 
 const conventions = await walkUpContextFiles(cwd, CONVENTION_FILES, gitRoot);
 
-const skills = await loadSkills(cwd, gitRoot, ['ikko:dev/changelog', 'file:./skills/house'], {
+const skills = await loadSkills(cwd, gitRoot, ['acme:dev/changelog', 'file:./skills/house'], {
   cacheDir,
   marketplaces,
   envPrefix,
   warn,
 });
 
-// Use this reader when repository configuration must come from a reviewed commit.
-const projectConfigReader = await GitRevisionProjectConfigReader.create(gitRoot, 'HEAD');
+// Use this reader when repository configuration must come from the review target.
+const targetSha = '0123456789abcdef0123456789abcdef01234567';
+const projectConfigReader = await GitRevisionProjectConfigReader.create(gitRoot, targetSha);
 
 const mcpServers = await resolveMcpServers(
-  { mcp: ['ikko:dev'], disableMcp: [], mcpDiscovery: false },
+  { mcp: ['acme:dev'], disableMcp: [], mcpDiscovery: 'target' },
   cwd,
   gitRoot,
   buildMarketplaceRegistry(marketplaces),

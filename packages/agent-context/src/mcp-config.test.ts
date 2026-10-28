@@ -554,13 +554,26 @@ describe('resolveMcpServers', () => {
     loadMarketplaceMcpServersMock.mockImplementation(actual.loadMarketplaceMcpServers);
   });
 
-  it('auto-discovers repo servers when mcpDiscovery is opted into', async () => {
+  it.each([true, false, 'yes'])('rejects legacy or unknown discovery mode %j', async (mode) => {
+    const root = await makeTmp();
+    await expect(
+      resolveMcpServers(
+        { mcp: [], disableMcp: [], mcpDiscovery: mode as never },
+        root,
+        root,
+        emptyRegistry,
+        { vars, cacheDir },
+      ),
+    ).rejects.toThrow(/off, worktree, target/);
+  });
+
+  it('auto-discovers repo servers from the worktree when selected', async () => {
     const root = await makeTmp();
     await writeJson(join(root, '.mcp.json'), {
       mcpServers: { docs: { url: 'https://docs.test/mcp' } },
     });
     const servers = await resolveMcpServers(
-      { mcp: [], disableMcp: [], mcpDiscovery: true },
+      { mcp: [], disableMcp: [], mcpDiscovery: 'worktree' },
       root,
       root,
       emptyRegistry,
@@ -590,7 +603,7 @@ describe('resolveMcpServers', () => {
     const projectConfigReader = { read: vi.fn(async (path: string) => files.get(path)) };
 
     const servers = await resolveMcpServers(
-      { mcp: [`file:${extra}`], disableMcp: [], mcpDiscovery: true },
+      { mcp: [`file:${extra}`], disableMcp: [], mcpDiscovery: 'worktree' },
       root,
       root,
       emptyRegistry,
@@ -605,19 +618,59 @@ describe('resolveMcpServers', () => {
     ]);
   });
 
-  it('skips repo auto-discovery when mcpDiscovery is false', async () => {
+  it('requires an immutable reader for target discovery and records its commit', async () => {
+    const root = await makeTmp();
+    const projectConfigReader = {
+      commitSha: 'abc123',
+      read: vi.fn(async (path: string) =>
+        path === '.mcp.json'
+          ? JSON.stringify({ mcpServers: { docs: { url: 'https://docs.test/mcp' } } })
+          : undefined,
+      ),
+    };
+
+    const servers = await resolveMcpServers(
+      { mcp: [], disableMcp: [], mcpDiscovery: 'target' },
+      root,
+      root,
+      emptyRegistry,
+      { vars, cacheDir, projectConfigReader },
+    );
+
+    expect(servers[0].source).toEqual({
+      kind: 'project',
+      path: '.mcp.json',
+      commitSha: 'abc123',
+    });
+    await expect(
+      resolveMcpServers(
+        { mcp: [], disableMcp: [], mcpDiscovery: 'target' },
+        root,
+        root,
+        emptyRegistry,
+        { vars, cacheDir },
+      ),
+    ).rejects.toThrow(ConfigError);
+  });
+
+  it('reads no repository-controlled configuration when discovery is off', async () => {
     const root = await makeTmp();
     await writeJson(join(root, '.mcp.json'), {
       mcpServers: { docs: { url: 'https://docs.test/mcp' } },
     });
+    await writeJson(join(root, '.claude', 'settings.json'), { disabledMcpServers: ['operator'] });
+    const extra = join(root, 'operator.json');
+    await writeJson(extra, { operator: { command: 'operator' } });
+    const projectConfigReader = { read: vi.fn(async () => undefined) };
     const servers = await resolveMcpServers(
-      { mcp: [], disableMcp: [], mcpDiscovery: false },
+      { mcp: [`file:${extra}`], disableMcp: [], mcpDiscovery: 'off' },
       root,
       root,
       emptyRegistry,
-      { vars, cacheDir },
+      { vars, cacheDir, projectConfigReader },
     );
-    expect(servers).toEqual([]);
+    expect(servers.map((server) => server.name)).toEqual(['operator']);
+    expect(projectConfigReader.read).not.toHaveBeenCalled();
   });
 
   it('merges a file: MCP spec with repo auto-discovery, a later spec winning by name', async () => {
@@ -629,7 +682,7 @@ describe('resolveMcpServers', () => {
     await writeJson(extra, { shared: { command: 'file-cmd' }, file_only: { command: 'f' } });
 
     const servers = await resolveMcpServers(
-      { mcp: [`file:${extra}`], disableMcp: [], mcpDiscovery: true },
+      { mcp: [`file:${extra}`], disableMcp: [], mcpDiscovery: 'worktree' },
       root,
       root,
       emptyRegistry,
@@ -646,7 +699,7 @@ describe('resolveMcpServers', () => {
       mcpServers: { a: { command: 'a' }, b: { command: 'b' } },
     });
     const servers = await resolveMcpServers(
-      { mcp: [], disableMcp: ['a'], mcpDiscovery: true },
+      { mcp: [], disableMcp: ['a'], mcpDiscovery: 'worktree' },
       root,
       root,
       emptyRegistry,
@@ -661,7 +714,7 @@ describe('resolveMcpServers', () => {
     const extra = join(root, 'extra.json');
     await writeJson(extra, { ok: { command: 'x' } });
     const servers = await resolveMcpServers(
-      { mcp: ['not-a-valid-spec', `file:${extra}`], disableMcp: [], mcpDiscovery: false },
+      { mcp: ['not-a-valid-spec', `file:${extra}`], disableMcp: [], mcpDiscovery: 'off' },
       root,
       root,
       emptyRegistry,
@@ -675,7 +728,7 @@ describe('resolveMcpServers', () => {
     const root = await makeTmp();
     await writeJson(join(root, 'extra.json'), { rel: { command: 'r' } });
     const servers = await resolveMcpServers(
-      { mcp: ['file:./extra.json'], disableMcp: [], mcpDiscovery: false },
+      { mcp: ['file:./extra.json'], disableMcp: [], mcpDiscovery: 'off' },
       root,
       root,
       emptyRegistry,
@@ -690,7 +743,7 @@ describe('resolveMcpServers', () => {
     const root = await makeTmp();
     const warn = vi.fn();
     const servers = await resolveMcpServers(
-      { mcp: [`file:${join(root, 'missing.json')}`], disableMcp: [], mcpDiscovery: false },
+      { mcp: [`file:${join(root, 'missing.json')}`], disableMcp: [], mcpDiscovery: 'off' },
       root,
       root,
       emptyRegistry,
@@ -704,7 +757,7 @@ describe('resolveMcpServers', () => {
     const warn = vi.fn();
     const root = await makeTmp();
     const servers = await resolveMcpServers(
-      { mcp: ['acme:dev/context7'], disableMcp: [], mcpDiscovery: false },
+      { mcp: ['acme:dev/context7'], disableMcp: [], mcpDiscovery: 'off' },
       root,
       root,
       emptyRegistry,
@@ -721,7 +774,7 @@ describe('resolveMcpServers', () => {
     const extra = join(root, 'extra.json');
     await writeJson(extra, { b: { command: 'b' } });
     const servers = await resolveMcpServers(
-      { mcp: [`file:${extra}`], disableMcp: [], mcpDiscovery: true },
+      { mcp: [`file:${extra}`], disableMcp: [], mcpDiscovery: 'worktree' },
       root,
       root,
       emptyRegistry,
@@ -734,7 +787,7 @@ describe('resolveMcpServers', () => {
     const root = await makeTmp();
     loadMarketplaceMcpServersMock.mockResolvedValue([]);
     await resolveMcpServers(
-      { mcp: ['acme:dev'], disableMcp: [], mcpDiscovery: false },
+      { mcp: ['acme:dev'], disableMcp: [], mcpDiscovery: 'off' },
       root,
       root,
       buildMarketplaceRegistry([]),
@@ -747,13 +800,13 @@ describe('resolveMcpServers', () => {
     );
   });
 
-  it('applies settings.json disabledMcpServers even with repo discovery off', async () => {
+  it('applies settings.json disabledMcpServers in worktree mode', async () => {
     const root = await makeTmp();
     await writeJson(join(root, '.claude', 'settings.json'), { disabledMcpServers: ['b'] });
     const extra = join(root, 'extra.json');
     await writeJson(extra, { a: { command: 'a' }, b: { command: 'b' } });
     const servers = await resolveMcpServers(
-      { mcp: [`file:${extra}`], disableMcp: [], mcpDiscovery: false },
+      { mcp: [`file:${extra}`], disableMcp: [], mcpDiscovery: 'worktree' },
       root,
       root,
       emptyRegistry,

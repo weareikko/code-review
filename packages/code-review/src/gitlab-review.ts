@@ -11,12 +11,14 @@ import {
   CONVENTION_FILES,
   createSkillReadCounter,
   findGitRoot,
+  GitRevisionProjectConfigReader,
   formatReviewUsageSummary,
   loadSkills,
   pickMcpEnvVars,
   resolveMcpServers,
   resolveSkillCacheDir,
   walkUpContextFiles,
+  WorkingTreeProjectConfigReader,
   type ContextFile,
   type McpServerUsage as AgentContextMcpServerUsage,
   type MarketplaceRef,
@@ -27,7 +29,7 @@ import {
 } from '@weareikko/agent-context';
 import type { Config } from './config.js';
 import { resolveProviderApiKey } from './config.js';
-import { isQuotaExceededMessage, ReviewerError } from './errors.js';
+import { ConfigError, isQuotaExceededMessage, ReviewerError } from './errors.js';
 import { createGitTools } from './git-tool.js';
 import { renderIntentBlock, type ReviewIntent } from './intent.js';
 import type { Logger } from './logger.js';
@@ -198,6 +200,12 @@ export interface RunReviewOptions {
    * after it (incremental review); when absent, the whole history is in scope.
    */
   sinceRef?: string;
+  /**
+   * Immutable review target commit used by `target` MCP discovery. The CLI
+   * passes the platform-neutral `DiffRefs.base_sha`; library callers must supply
+   * it when `config.mcpDiscovery` is `target`.
+   */
+  targetSha?: string;
   /**
    * Supported library extension point: override how resolved MCP server configs
    * are connected. Defaults to `connectMcpServers`. A caller (or a test) can
@@ -1273,11 +1281,33 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
   // Connection is fail-soft per server (see `connectMcpServers`) — a server
   // that cannot connect is reported `unavailable` and never blocks the review.
   const gitRoot = await findGitRoot(cwd);
+  const mcpDiscovery = config.mcpDiscovery ?? 'off';
+  let projectConfigReader;
+  if (mcpDiscovery === 'worktree') {
+    projectConfigReader = new WorkingTreeProjectConfigReader(gitRoot);
+  } else if (mcpDiscovery === 'target') {
+    if (!options.targetSha) {
+      throw new ConfigError('Target MCP discovery requires the immutable review target SHA.', {
+        hint: 'Pass RunReviewOptions.targetSha from DiffRefs.base_sha, or select mcpDiscovery "off" or "worktree".',
+      });
+    }
+    try {
+      projectConfigReader = await GitRevisionProjectConfigReader.create(gitRoot, options.targetSha);
+    } catch (error) {
+      throw new ConfigError(
+        `Unable to load MCP configuration from target commit ${options.targetSha}.`,
+        {
+          hint: 'Ensure the immutable target commit is available in the local Git history, or select mcpDiscovery "off" or "worktree".',
+          cause: error,
+        },
+      );
+    }
+  }
   const mcpConfigs = await resolveMcpServers(
     {
       mcp: config.mcp ?? [],
       disableMcp: config.disableMcp ?? [],
-      mcpDiscovery: config.mcpDiscovery ?? false,
+      mcpDiscovery,
     },
     cwd,
     gitRoot,
@@ -1289,6 +1319,7 @@ export async function runReview(config: Config, options: RunReviewOptions): Prom
       vars: pickMcpEnvVars(process.env, config.mcpEnv ?? []),
       refresh: config.refreshGitSkills,
       envPrefix: ENV_PREFIX,
+      projectConfigReader,
       warn: (msg) => logger.warn(msg),
     },
   );

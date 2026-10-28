@@ -19,6 +19,10 @@ import {
 
 type JsonFile = { raw: unknown } | { error: 'missing' | 'invalid' };
 
+/** Repository-controlled MCP configuration discovery modes. */
+export const MCP_DISCOVERY_MODES = ['off', 'worktree', 'target'] as const;
+export type McpDiscoveryMode = (typeof MCP_DISCOVERY_MODES)[number];
+
 function parseJsonFile(content: string | undefined): JsonFile {
   if (content === undefined) return { error: 'missing' };
   try {
@@ -101,7 +105,7 @@ export async function loadAutoDiscoveredMcpServers(
   options: LoadAutoDiscoveredMcpServersOptions = {},
 ): Promise<McpServerConfig[]> {
   const found = new Map<string, McpServerConfig>();
-  const projectConfigReader =
+  const projectConfigReader: ProjectConfigReader =
     options.projectConfigReader ?? new WorkingTreeProjectConfigReader(gitRoot);
   const filters =
     options.filters ?? (await loadMcpDisableFilters(cwd, gitRoot, warn, projectConfigReader));
@@ -114,6 +118,7 @@ export async function loadAutoDiscoveredMcpServers(
       const source: McpServerSource = {
         kind: 'project',
         path: toPosixPath(relative(gitRoot, mcpPath)),
+        ...(projectConfigReader.commitSha ? { commitSha: projectConfigReader.commitSha } : {}),
       };
       for (const server of parseMcpServers(mcpFile.raw, source, {
         vars: options.vars,
@@ -184,8 +189,8 @@ export interface McpServerSourcesConfig {
   mcp: readonly string[];
   /** Server names to drop (`<prefix>DISABLE_MCP`), applied last over every source. */
   disableMcp: readonly string[];
-  /** Whether to auto-discover `.mcp.json` files walked from `gitRoot` to `cwd`. Opt-in. */
-  mcpDiscovery: boolean;
+  /** How repository-controlled `.mcp.json` and `.claude/settings*.json` files are read. */
+  mcpDiscovery: McpDiscoveryMode;
 }
 
 /** Load a `file:` MCP spec — a standalone `.mcp.json`-style document anywhere on disk. */
@@ -221,7 +226,7 @@ export interface ResolveMcpServersOptions {
   refresh?: boolean;
   /** The tool's environment variable prefix (`CODE_REVIEW_`), named in hints. */
   envPrefix?: string;
-  /** Reader for repository-controlled configuration; defaults to the working tree. */
+  /** Reader for repository-controlled configuration; required with `target`. */
   projectConfigReader?: ProjectConfigReader;
   warn?: (msg: string) => void;
 }
@@ -229,18 +234,14 @@ export interface ResolveMcpServersOptions {
 /**
  * Resolve every MCP server for a run, merging sources in the approved order:
  *
- * 1. Repo auto-discovery (`.mcp.json` walked from `gitRoot` to `cwd`, closest
- *    wins, `disabledMcpjsonServers` applied) — only when `config.mcpDiscovery`
- *    is `true`, which is opt-in: `.mcp.json` is content of the repository the
- *    agent works on, so a merge request could otherwise make the agent spawn a
- *    process of its choosing on the runner.
- * 2. Every spec in `config.mcp`, in the order given: a `file:` spec loads a
- *    standalone document (a relative path resolves from `cwd`), a `<marketplace>:<plugin>[/<server>]` spec loads from
- *    the registered marketplace. A later spec's server overrides an earlier one
- *    (from any source) of the same name.
- * 3. `disabledMcpServers` from `.claude/settings.json` (and `settings.local.json`)
- *    plus `config.disableMcp`, applied last over every source above — a name
- *    disabled there stays dropped even when a spec redeclares it.
+ * 1. Repository `.mcp.json` files when discovery is `worktree` or `target`.
+ * 2. Every explicit spec in `config.mcp`, in order. Explicit sources override
+ *    repository servers of the same name.
+ * 3. `config.disableMcp`, plus repository `.claude/settings*.json` filters when
+ *    discovery is enabled, applied last over every source above.
+ *
+ * `off` reads no repository-controlled files. `target` requires a reader bound
+ * to an immutable commit.
  *
  * A spec that fails to resolve (bad file, unregistered marketplace, unknown
  * plugin/server) is skipped with a warning — one broken entry must not abort
@@ -255,15 +256,28 @@ export async function resolveMcpServers(
 ): Promise<McpServerConfig[]> {
   const warn = (msg: string): void => options.warn?.(msg);
 
-  const projectConfigReader =
-    options.projectConfigReader ?? new WorkingTreeProjectConfigReader(gitRoot);
+  if (!MCP_DISCOVERY_MODES.includes(config.mcpDiscovery)) {
+    throw new ConfigError(`MCP discovery must be one of: ${MCP_DISCOVERY_MODES.join(', ')}.`);
+  }
 
-  // Loaded even with discovery off: `disabledMcpServers` is not scoped to
-  // project-declared servers, so it must reach the spec sources too.
-  const filters = await loadMcpDisableFilters(cwd, gitRoot, warn, projectConfigReader);
+  let filters: McpDisableFilters = { disabledMcpjsonServers: [], disabledMcpServers: [] };
+  let projectConfigReader: ProjectConfigReader | undefined;
+  if (config.mcpDiscovery !== 'off') {
+    projectConfigReader =
+      options.projectConfigReader ?? new WorkingTreeProjectConfigReader(gitRoot);
+    if (config.mcpDiscovery === 'target' && !projectConfigReader.commitSha) {
+      throw new ConfigError(
+        'Target MCP discovery requires an immutable project configuration reader.',
+        {
+          hint: 'Pass a ProjectConfigReader with commitSha set to the immutable review target commit.',
+        },
+      );
+    }
+    filters = await loadMcpDisableFilters(cwd, gitRoot, warn, projectConfigReader);
+  }
 
   const found = new Map<string, McpServerConfig>();
-  if (config.mcpDiscovery) {
+  if (projectConfigReader) {
     for (const server of await loadAutoDiscoveredMcpServers(cwd, gitRoot, warn, {
       vars: options.vars,
       filters,

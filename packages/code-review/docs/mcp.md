@@ -6,18 +6,23 @@ The reviewer can connect to [Model Context Protocol](https://modelcontextprotoco
 
 ## Sources
 
-MCP servers are loaded from four sources, in this order. A server name declared by a later source overrides an earlier one of the same name.
+MCP servers are loaded from these sources, in order. A server name declared by a later source overrides an earlier one of the same name.
 
-1. **Marketplace plugins**, via `--mcp <marketplace>:<plugin>` (every server the plugin exposes) or `--mcp <marketplace>:<plugin>/<server>` (one server), reusing the [marketplace](./skills.md#marketplaces) clone cache and registry — declare the marketplace first with `--marketplace` / `CODE_REVIEW_MARKETPLACES`.
-2. **An explicit file**, via `--mcp file:<path>`.
-3. **Repo `.mcp.json` files** — walked from the git root down to `cwd`, the same walk [project skill auto-discovery](./skills.md#project-skills-auto-discovery) uses, the closest file winning per server name. **Off by default**; see [Repo auto-discovery is opt-in](#repo-auto-discovery-is-opt-in).
-4. **Repo `.claude/settings.json` and `.claude/settings.local.json`** at the same levels — `disabledMcpjsonServers` and `disabledMcpServers` from every level and both files are unioned and applied last, after every other source. `disabledMcpjsonServers` only drops servers declared in a repo `.mcp.json`; `disabledMcpServers` drops a name whatever its source, `--mcp` included. Enable keys are ignored: this tool never re-enables a server another config disabled.
+1. **Repository configuration**, when `--mcp-discovery` is `worktree` or `target`: `.mcp.json` files are walked from the git root down to `cwd`, with the closest file winning per server name.
+2. **Explicit operator sources**, in the order given: marketplace plugins via `--mcp <marketplace>:<plugin>[/<server>]`, or standalone files via `--mcp file:<path>`. These sources keep precedence over repository discovery.
+3. **Disable lists**, applied last: `--disable-mcp` always applies. In `worktree` and `target` modes, `disabledMcpjsonServers` and `disabledMcpServers` are also read from repository `.claude/settings.json` and `.claude/settings.local.json`. `disabledMcpjsonServers` only drops repository servers. `disabledMcpServers` drops a name from every source. Enable keys are ignored.
 
-## Repo auto-discovery is opt-in
+## Repository discovery modes
 
-`.mcp.json` is content of the repository under review. In CI the working tree **is** the merge request's source branch, so connecting a server declared there means running a command, or calling a URL, that the change author chose — before any tool annotation is inspected. The [read-only gate](#the-read-only-gate) filters what a connected server may expose; it does not decide which process gets spawned.
+`--mcp-discovery <mode>` and `CODE_REVIEW_MCP_DISCOVERY` accept exactly these values:
 
-So repo auto-discovery is off unless you turn it on with `--mcp-discovery` / `CODE_REVIEW_MCP_DISCOVERY=true`, and you should turn it on only for repositories whose contributors you trust. Everywhere else, name the servers you want with `--mcp` / `CODE_REVIEW_MCP`, which the CI configuration controls rather than the branch.
+| Mode       | Repository-controlled files read                                                                                   |
+| ---------- | ------------------------------------------------------------------------------------------------------------------ |
+| `off`      | None. This is the default. Explicit `--mcp` sources and `--disable-mcp` still work.                                |
+| `worktree` | `.mcp.json`, `.claude/settings.json`, and `.claude/settings.local.json` from the checked-out worktree.             |
+| `target`   | The same files from the immutable review target commit (`DiffRefs.base_sha`), without reading their head versions. |
+
+`.mcp.json` can start a process or call a URL chosen by the repository. `worktree` therefore trusts the checked-out change. `target` keeps project MCP behavior enabled while preventing the reviewed head from changing either server definitions or disable lists. If the target SHA is unavailable, the run fails with a configuration error and never falls back to the worktree.
 
 ## `.mcp.json` shapes
 
@@ -93,12 +98,12 @@ The reviewer processes attacker-controlled MR content — a malicious diff or de
 
 ## CLI flags and environment variables
 
-| Flag                   | Environment variable             | Notes                                                                                                                |
-| ---------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `--mcp <spec>`         | `CODE_REVIEW_MCP`                | Repeatable / comma-separated. `file:<path>`, `<marketplace>:<plugin>`, or `<marketplace>:<plugin>/<server>`.         |
-| `--disable-mcp <name>` | `CODE_REVIEW_DISABLE_MCP`        | Repeatable / comma-separated. Server names to drop, applied last over every source.                                  |
-| `--mcp-env <name>`     | `CODE_REVIEW_MCP_ENV`            | Repeatable / comma-separated. Environment variables a server definition may read through `${VAR}`. Empty by default. |
-| `--mcp-discovery`      | `CODE_REVIEW_MCP_DISCOVERY=true` | Turns **on** repo `.mcp.json` auto-discovery, which is off by default. Trusted repositories only.                    |
+| Flag                     | Environment variable        | Notes                                                                                                                |
+| ------------------------ | --------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `--mcp <spec>`           | `CODE_REVIEW_MCP`           | Repeatable / comma-separated. `file:<path>`, `<marketplace>:<plugin>`, or `<marketplace>:<plugin>/<server>`.         |
+| `--disable-mcp <name>`   | `CODE_REVIEW_DISABLE_MCP`   | Repeatable / comma-separated. Server names to drop, applied last over every source.                                  |
+| `--mcp-env <name>`       | `CODE_REVIEW_MCP_ENV`       | Repeatable / comma-separated. Environment variables a server definition may read through `${VAR}`. Empty by default. |
+| `--mcp-discovery <mode>` | `CODE_REVIEW_MCP_DISCOVERY` | `off` (default), `worktree`, or `target`. Reads repository MCP and settings files from one selected source.          |
 
 A spec that fails to resolve — a missing file, an unregistered marketplace, an unknown plugin or server — is skipped with a warning; one bad `--mcp` entry never aborts the review.
 
@@ -130,7 +135,7 @@ Anthropic publishes a plugin marketplace with ready-made servers. This repositor
 env:
   CODE_REVIEW_MARKETPLACES: 'anthropic=https://github.com/anthropics/claude-plugins-official.git#fbe07fb6ce7d51d8e86ca6efdf050059894cdb80'
   CODE_REVIEW_MCP: 'anthropic:github'
-  CODE_REVIEW_MCP_DISCOVERY: 'true'
+  CODE_REVIEW_MCP_DISCOVERY: target
   GITHUB_PERSONAL_ACCESS_TOKEN: ${{ github.token }}
   CODE_REVIEW_MCP_ENV: GITHUB_PERSONAL_ACCESS_TOKEN
 ```
@@ -169,7 +174,7 @@ MCP: [jira](https://gitlab.example.com/team/app/-/blob/a1b2c3d/.mcp.json) (2 cal
 
 `unused` is a server that connected but was never called; `unavailable` is one that failed to connect. The list of exposed read-only tools is no longer rendered here — it stays in the usage artifact (`review-usage.json`) under each server's `exposedTools`.
 
-A server name links to its source when reachable: a repo `.mcp.json` links to that file's blob at the reviewed commit (CI project coordinates required); a marketplace plugin links to the plugin's directory in the marketplace repository. A `file:` source, or a repo server on a run without CI project coordinates, stays an unlinked name — same rule as the [skills footer](./skills.md#skills-footer).
+A server name links to its source when reachable: a repository `.mcp.json` links to the commit from which that configuration was read. In `target` mode this is the target commit, not the reviewed head. A marketplace plugin links to its directory in the marketplace repository. A `file:` source, or a repository server on a run without project coordinates, stays unlinked.
 
 ## Limits and budget
 
@@ -181,7 +186,7 @@ A server name links to its source when reachable: a repo `.mcp.json` links to th
 
 ## Library usage
 
-`runReview` resolves MCP servers from the sources above. A library caller that already has its server configs — or that wants to drive a server over a transport of its own, as the eval suite does with an in-memory fake — replaces the connect step with the `connectMcp` option:
+`runReview` resolves MCP servers from the sources above. A library caller that selects `mcpDiscovery: 'target'` must pass the immutable target commit as `RunReviewOptions.targetSha`. A caller that already has its server configs, or that wants to drive a server over a transport of its own, replaces the connect step with the `connectMcp` option:
 
 ```ts
 import { connectMcpServers, runReview, type McpServerConfig } from '@weareikko/code-review';
@@ -198,6 +203,7 @@ const tracker: McpServerConfig = {
 
 await runReview(config, {
   diff,
+  targetSha: refs.base_sha,
   connectMcp: (_resolved, options) =>
     connectMcpServers([tracker], { ...options, createTransport: () => myTransport }),
 });

@@ -8,26 +8,26 @@ This library resolves MCP server **definitions** (`McpServerConfig`). It does no
 
 Merges the sources in this order. A server declared by a later source replaces an earlier one with the same name.
 
-1. **Repository `.mcp.json` files**, walked from `gitRoot` down to `cwd`, the closest file winning per name. Only when `config.mcpDiscovery` is `true`. `disabledMcpjsonServers` applies to these servers.
-2. **Each spec of `config.mcp`**, in order: `file:<path>` loads a standalone document (a relative path resolves from `cwd`); `<marketplace>:<plugin>` loads every server of a plugin; `<marketplace>:<plugin>/<server>` loads one.
-3. **Disable lists**, applied last over every source: `disabledMcpServers` from `.claude/settings.json` and `.claude/settings.local.json` (every level, both files, unioned), plus `config.disableMcp`.
+1. **Repository `.mcp.json` files**, walked from `gitRoot` down to `cwd`, the closest file winning per name. They are read only when `config.mcpDiscovery` is `worktree` or `target`.
+2. **Each spec of `config.mcp`**, in order: `file:<path>` loads a standalone document; `<marketplace>:<plugin>` loads every server of a plugin; `<marketplace>:<plugin>/<server>` loads one. These explicit sources override repository servers of the same name.
+3. **Disable lists**, applied last: `config.disableMcp` always applies. Repository `.claude/settings.json` and `.claude/settings.local.json` apply only in `worktree` and `target` modes.
 
 A spec that fails to resolve is skipped with a warning (`Skipping MCP spec "<spec>": …`).
 
-The optional `projectConfigReader` reads all repository-controlled MCP configuration: `.mcp.json`, `.claude/settings.json`, and `.claude/settings.local.json`. Use `GitRevisionProjectConfigReader.create(gitRoot, revision)` to bind these reads to one immutable commit. Absolute paths and `..` traversal are rejected, and missing files are ignored. Explicit `file:` specs and marketplace files stay operator-selected filesystem sources and do not use this reader.
+`mcpDiscovery` accepts `off`, `worktree`, or `target`. `off` reads no repository-controlled MCP configuration. `worktree` uses a `WorkingTreeProjectConfigReader` by default. `target` requires an injected `ProjectConfigReader` with `commitSha`, normally from `GitRevisionProjectConfigReader.create(gitRoot, targetSha)`. Explicit `file:` specs and marketplace files do not use this reader.
 
-| Option                | Notes                                                                              |
-| --------------------- | ---------------------------------------------------------------------------------- |
-| `cacheDir`            | Required. The marketplace clone cache, usually `resolveSkillCacheDir(product)`.    |
-| `vars`                | The variables `${VAR}` may read, usually `pickMcpEnvVars(process.env, allowlist)`. |
-| `refresh`             | Clone the marketplaces again.                                                      |
-| `envPrefix`           | The tool's variable prefix, named in hints and warnings.                           |
-| `projectConfigReader` | Reader for repository-controlled files. Defaults to the current working tree.      |
-| `warn`                | Receives the warnings.                                                             |
+| Option                | Notes                                                                                       |
+| --------------------- | ------------------------------------------------------------------------------------------- |
+| `cacheDir`            | Required. The marketplace clone cache, usually `resolveSkillCacheDir(product)`.             |
+| `vars`                | The variables `${VAR}` may read, usually `pickMcpEnvVars(process.env, allowlist)`.          |
+| `refresh`             | Clone the marketplaces again.                                                               |
+| `envPrefix`           | The tool's variable prefix, named in hints and warnings.                                    |
+| `projectConfigReader` | Reader for repository-controlled files. Required with `target`; worktree default otherwise. |
+| `warn`                | Receives the warnings.                                                                      |
 
-### Repository discovery is opt-in
+### Repository discovery modes
 
-`.mcp.json` is content of the repository the agent works on. In CI, the working tree is the branch of the merge request, so a server declared there runs a command or calls a URL that the author of the change chose. Turn discovery on only for repositories whose contributors you trust. Everywhere else, name the servers in `config.mcp`, which the operator controls.
+`off` is the default and reads neither `.mcp.json` nor `.claude/settings*.json`. `worktree` reads both kinds from the checkout and should be used only when that content is trusted. `target` reads both kinds from one immutable commit. Explicit `config.mcp` sources and `config.disableMcp` remain active in every mode.
 
 ## Document shapes
 

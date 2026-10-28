@@ -51,7 +51,7 @@ describe('GitRevisionProjectConfigReader', () => {
     await commitAll(root, 'version one');
 
     const reader = await GitRevisionProjectConfigReader.create(root, 'HEAD');
-    const frozenCommit = reader.commit;
+    const frozenCommit = reader.commitSha;
 
     await writeFile(join(root, '.mcp.json'), 'version two\n', 'utf8');
     await commitAll(root, 'version two');
@@ -65,7 +65,7 @@ describe('GitRevisionProjectConfigReader', () => {
     await expect(reader.read('.mcp.json')).resolves.toBe('version one\n');
     await expect(reader.read('missing.json')).resolves.toBeUndefined();
 
-    expect(reader.commit).toBe(frozenCommit);
+    expect(reader.commitSha).toBe(frozenCommit);
     expect(await git(['rev-parse', 'HEAD'], { cwd: root })).toBe(headBefore);
     expect(await git(['status', '--short'], { cwd: root })).toBe(statusBefore);
   });

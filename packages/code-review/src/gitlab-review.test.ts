@@ -3,10 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentEvent, AgentTool } from '@earendil-works/pi-agent-core';
 import type { AssistantMessage } from '@earendil-works/pi-ai';
-import type { Skill } from '@weareikko/agent-context';
+import { git, type Skill } from '@weareikko/agent-context';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { partialConfig } from '../tests/partial-config.js';
-import { ReviewerError } from './errors.js';
+import { ConfigError, ReviewerError } from './errors.js';
 import {
   blendedCost,
   buildEffectivePool,
@@ -828,6 +828,98 @@ describe('runReview pipeline', () => {
     ).rejects.toThrow();
 
     expect(closeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads project MCP configuration coherently from the immutable target commit', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    await git(['init'], { cwd });
+    await mkdir(join(cwd, '.claude'), { recursive: true });
+    await writeFile(
+      join(cwd, '.mcp.json'),
+      JSON.stringify({
+        mcpServers: {
+          target_docs: { url: 'https://docs.example.com/mcp' },
+          blocked: { command: 'blocked' },
+        },
+      }),
+      'utf8',
+    );
+    await writeFile(
+      join(cwd, '.claude', 'settings.json'),
+      JSON.stringify({ disabledMcpjsonServers: ['blocked'] }),
+      'utf8',
+    );
+    await git(['add', '.'], { cwd });
+    await git(
+      ['-c', 'user.name=Acme Bot', '-c', 'user.email=bot@acme.test', 'commit', '-m', 'base'],
+      { cwd },
+    );
+    const targetSha = (await git(['rev-parse', 'HEAD'], { cwd })).trim();
+
+    await writeFile(
+      join(cwd, '.mcp.json'),
+      JSON.stringify({ mcpServers: { head_docs: { url: 'https://head.example.com/mcp' } } }),
+      'utf8',
+    );
+    await writeFile(
+      join(cwd, '.claude', 'settings.json'),
+      JSON.stringify({ disabledMcpServers: ['target_docs'] }),
+      'utf8',
+    );
+
+    let resolvedConfigs: readonly unknown[] = [];
+    await runReview(
+      { ...minimalConfig, cwd, mcpDiscovery: 'target' },
+      {
+        cwd,
+        diff: sampleDiff,
+        targetSha,
+        createAgent: () => fakeAgent([makeAssistant('ok', { input: 1, output: 1 })]),
+        connectMcp: async (configs) => {
+          resolvedConfigs = configs;
+          return { tools: [], servers: [], close: async () => {} };
+        },
+      },
+    );
+
+    expect(resolvedConfigs).toMatchObject([
+      {
+        name: 'target_docs',
+        source: { kind: 'project', path: '.mcp.json', commitSha: targetSha },
+      },
+    ]);
+  });
+
+  it('fails closed when target discovery has no target SHA', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+
+    await expect(
+      runReview(
+        { ...minimalConfig, cwd, mcpDiscovery: 'target' },
+        {
+          cwd,
+          diff: sampleDiff,
+          createAgent: () => fakeAgent([makeAssistant('ok', { input: 1, output: 1 })]),
+        },
+      ),
+    ).rejects.toBeInstanceOf(ConfigError);
+  });
+
+  it('fails closed when the target commit is unavailable locally', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'code-review-'));
+    await git(['init'], { cwd });
+
+    await expect(
+      runReview(
+        { ...minimalConfig, cwd, mcpDiscovery: 'target' },
+        {
+          cwd,
+          diff: sampleDiff,
+          targetSha: '0123456789abcdef0123456789abcdef01234567',
+          createAgent: () => fakeAgent([makeAssistant('ok', { input: 1, output: 1 })]),
+        },
+      ),
+    ).rejects.toThrow('Unable to load MCP configuration from target commit');
   });
 
   it("reports usage.mcp with each server's status, exposed tools, and call count", async () => {

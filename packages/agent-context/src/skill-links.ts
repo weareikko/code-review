@@ -152,8 +152,9 @@ export function mcpSourceUrl(
 ): string | undefined {
   switch (source.kind) {
     case 'project': {
-      if (!context.projectWebUrl || !context.commitSha) return undefined;
-      return blobUrl(context.projectWebUrl, context.commitSha, source.path);
+      const commitSha = source.commitSha ?? context.commitSha;
+      if (!context.projectWebUrl || !commitSha) return undefined;
+      return blobUrl(context.projectWebUrl, commitSha, source.path);
     }
     case 'file':
       return undefined;
