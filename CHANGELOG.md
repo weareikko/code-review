@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file. Each pull r
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.11.2 - 2026-11-16
+
+### Changed
+
+- `@weareikko/code-review`: The reusable GitHub workflow skips pull requests opened by `renovate[bot]`, and the composite action example in the README does the same. ([#180])
+
+[#180]: https://github.com/weareikko/code-review/pull/180
+
 ## 0.11.1 - 2026-10-28
 
 ### Added
