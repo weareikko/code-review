@@ -45,8 +45,8 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "1.2.0",
-    "memfs": "^4.57.6"
+    "@earendil-works/pi-coding-agent": "1.5.2",
+    "memfs": "4.80.1"
   },
   "engines": {
     "node": ">=24"
