@@ -59,7 +59,13 @@ jobs:
       contents: read
       pull-requests: write
     # Same-repo PRs only: forks don't receive secrets on pull_request.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Renovate PRs are skipped: dependency updates need no agent review. The
+    # check is on the author, not on the `renovate` label, because Renovate adds
+    # its label after it opens the PR, so the `opened` event has no label.
+    if: >-
+      github.event_name != 'pull_request'
+      || (github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.user.login != 'renovate[bot]')
     env:
       GITHUB_TOKEN: ${{ github.token }}
     steps:
