@@ -107,6 +107,11 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
+    # Fork pull requests get no secrets. Renovate pull requests need no review:
+    # check the author, because Renovate adds its label after it opens the PR.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.user.login != 'renovate[bot]'
     steps:
       # Checkout (full history) is bundled — no separate checkout step needed.
       # Opt out with `checkout: false` if your job already checked out the code.
@@ -148,7 +153,7 @@ jobs:
     secrets: inherit
 ```
 
-It reads review settings from repo/org **variables** (`CODE_REVIEW_MODEL`, `CODE_REVIEW_DEPTH`, `CODE_REVIEW_THINKING_LEVEL`, `CODE_REVIEW_VERIFY_MODEL`) and provider credentials from **secrets** named with the `CODE_REVIEW_` prefix (e.g. `CODE_REVIEW_ANTHROPIC_API_KEY`), which the CLI's env shim de-prefixes for the provider. Optional `with:` inputs: `model` (overrides the `CODE_REVIEW_MODEL` variable), `version`, `node-version`, `working-directory`, `args`, and `runs-on`.
+It reads review settings from repo/org **variables** (`CODE_REVIEW_MODEL`, `CODE_REVIEW_DEPTH`, `CODE_REVIEW_THINKING_LEVEL`, `CODE_REVIEW_VERIFY_MODEL`) and provider credentials from **secrets** named with the `CODE_REVIEW_` prefix (e.g. `CODE_REVIEW_ANTHROPIC_API_KEY`), which the CLI's env shim de-prefixes for the provider. Optional `with:` inputs: `model` (overrides the `CODE_REVIEW_MODEL` variable), `version`, `node-version`, `working-directory`, `args`, and `runs-on`. It skips pull requests from forks and pull requests opened by `renovate[bot]`.
 
 > **Caveat — `secrets: inherit` is same-organization (or enterprise) only.** Organization secrets are **not** inherited across organizations, so this pattern only works when the caller repository lives in the same org (or enterprise) as `weareikko/code-review`. Cross-organization consumers must use the **composite action** above, which references their own secrets directly. (The reusable workflow relies on `secrets: inherit` and declares no `workflow_call.secrets`, so there is no explicit-secrets path for it.)
 
