@@ -29,16 +29,16 @@
     "prepare": "husky"
   },
   "devDependencies": {
-    "@types/node": "^24.12.4",
+    "@types/node": "24.13.6",
     "@typescript/native-preview": "7.0.0-dev.20260707.2",
-    "@vitest/coverage-v8": "^4.1.8",
+    "@vitest/coverage-v8": "4.1.11",
     "husky": "9.1.7",
-    "lint-staged": "17.5.1",
-    "oxfmt": "0.68.0",
-    "oxlint": "1.83.0",
-    "oxlint-tsgolint": "^7.0.2002",
-    "vite": "^8.0.16",
-    "vitest": "^4.1.8"
+    "lint-staged": "17.6.2",
+    "oxfmt": "0.80.0",
+    "oxlint": "1.95.0",
+    "oxlint-tsgolint": "7.0.2002",
+    "vite": "8.3.3",
+    "vitest": "4.1.11"
   },
   "lint-staged": {
     "*.{js,ts,json,md,yml,yaml}": "oxfmt --write --no-error-on-unmatched-pattern"
